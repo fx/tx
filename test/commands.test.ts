@@ -64,10 +64,10 @@ describe("command path normalization", () => {
   });
 
   test("preserves array segment boundaries while trimming", () => {
-    expect(normalizeCommandPath([" notes ", "daily open"])).toEqual([
-      "notes",
-      "daily open",
-    ]);
+    const normalized = normalizeCommandPath([" notes ", "daily open"]);
+
+    expect(normalized).toEqual(["notes", "daily open"]);
+    expect(Object.isFrozen(normalized)).toBe(true);
   });
 
   test.each([
@@ -91,9 +91,51 @@ describe("CommandRegistry", () => {
     const second = registerNoop(registry, ["marketplace", "add"]);
 
     expect(first.path).toEqual(["notes", "list"]);
-    expect(first.owner).toBe(coreOwner);
+    expect(first.owner).toEqual(coreOwner);
+    expect(first.owner).not.toBe(coreOwner);
     expect(registry.resolve(["notes", "list"])).toBe(first);
     expect(registry.resolve(["marketplace", "add"])).toBe(second);
+  });
+
+  test("snapshots and freezes command path and owner metadata", async () => {
+    const registry = new CommandRegistry();
+    const path = ["notes"];
+    const owner = { marketplace: "original", plugin: "journal" };
+    let received:
+      | { args: string[]; marketplace: string; plugin: string }
+      | undefined;
+    const command = registry.register(path, owner, (args, context) => {
+      received = {
+        args,
+        marketplace: context.marketplace,
+        plugin: context.plugin,
+      };
+    });
+
+    path[0] = "changed";
+    owner.marketplace = "changed";
+    owner.plugin = "changed";
+
+    expect(Object.isFrozen(command)).toBe(true);
+    expect(Object.isFrozen(command.path)).toBe(true);
+    expect(Object.isFrozen(command.owner)).toBe(true);
+    expect(() => ((command.path as string[])[0] = "changed")).toThrow();
+    expect(
+      () =>
+        ((command.owner as { marketplace: string }).marketplace = "changed"),
+    ).toThrow();
+
+    expect(
+      await dispatch(registry, ["notes", "today"], outputContext()),
+    ).toEqual({ exitCode: EXIT_SUCCESS, command });
+    expect(received).toEqual({
+      args: ["today"],
+      marketplace: "original",
+      plugin: "journal",
+    });
+    expect(() => registerNoop(registry, "notes", externalOwner)).toThrow(
+      'Command "notes" is already registered by original/journal; cannot register it for personal/journal',
+    );
   });
 
   test("allows command prefixes to coexist in either registration order", () => {
@@ -171,6 +213,11 @@ describe("dispatch", () => {
     for (const [argv, usage] of [
       [["--help"], "Usage: tx <command>"],
       [["notes", "--help"], "Usage: tx notes <command>"],
+      [["notes", "today", "--help"], "Usage: tx notes <command>"],
+      [
+        ["notes", "daily", "today", "--help"],
+        "Usage: tx notes daily <command>",
+      ],
       [["notes", "daily", "open", "--help"], "Usage: tx notes daily open"],
     ] as const) {
       const context = outputContext();

@@ -1,6 +1,6 @@
 export interface CommandOwner {
-  marketplace: string;
-  plugin: string;
+  readonly marketplace: string;
+  readonly plugin: string;
 }
 
 export interface CommandContext extends CommandOwner {

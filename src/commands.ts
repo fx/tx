@@ -12,9 +12,9 @@ export type CommandHandler = (
 ) => void | Promise<void>;
 
 export interface Command {
-  path: readonly string[];
-  owner: CommandOwner;
-  handler: CommandHandler;
+  readonly path: readonly string[];
+  readonly owner: CommandOwner;
+  readonly handler: CommandHandler;
 }
 
 interface CommandNode {
@@ -35,7 +35,7 @@ function ownerName(owner: CommandOwner): string {
   return `${owner.marketplace}/${owner.plugin}`;
 }
 
-export function normalizeCommandPath(path: CommandPath): string[] {
+export function normalizeCommandPath(path: CommandPath): readonly string[] {
   const segments =
     typeof path === "string" ? path.trim().split(/\s+/) : Array.from(path);
 
@@ -53,7 +53,7 @@ export function normalizeCommandPath(path: CommandPath): string[] {
     normalized.push(segment.trim());
   }
 
-  return normalized;
+  return Object.freeze(normalized);
 }
 
 export class CommandRegistry {
@@ -86,7 +86,11 @@ export class CommandRegistry {
       );
     }
 
-    const command = { path: normalizedPath, owner, handler };
+    const command = Object.freeze({
+      path: normalizedPath,
+      owner: Object.freeze({ ...owner }),
+      handler,
+    });
     node.command = command;
     return command;
   }
@@ -103,6 +107,20 @@ export class CommandRegistry {
     }
 
     return match;
+  }
+
+  resolveHelpPath(argv: readonly string[]): readonly string[] | undefined {
+    let node = this.#root;
+    const path: string[] = [];
+
+    for (const segment of argv) {
+      const child = node.children.get(segment);
+      if (!child) return path.length > 0 ? path : undefined;
+      node = child;
+      path.push(segment);
+    }
+
+    return path;
   }
 
   help(path: readonly string[] = []): string | undefined {
@@ -140,12 +158,13 @@ export async function dispatch(
 ): Promise<DispatchResult> {
   const helpIndex = argv.indexOf("--help");
   if (argv.length === 0 || helpIndex !== -1) {
-    const helpPath = helpIndex === -1 ? [] : argv.slice(0, helpIndex);
-    const help = registry.help(helpPath);
+    const requestedPath = helpIndex === -1 ? [] : argv.slice(0, helpIndex);
+    const helpPath = registry.resolveHelpPath(requestedPath);
+    const help = helpPath ? registry.help(helpPath) : undefined;
 
     if (!help) {
       processContext.stderr.write(
-        `Error: Unknown command "${helpPath.join(" ")}". Run "tx --help" for usage.\n`,
+        `Error: Unknown command "${requestedPath.join(" ")}". Run "tx --help" for usage.\n`,
       );
       return { exitCode: EXIT_USAGE };
     }
