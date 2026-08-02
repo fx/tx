@@ -19,4 +19,5 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun ci
-      - run: bun run check
+      - name: Temporary required-check failure validation
+        run: exit 1
