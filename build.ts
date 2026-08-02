@@ -14,7 +14,7 @@ const build = await Bun.build({
           { filter: /[/\\]ink[/\\]build[/\\]reconciler\.js$/ },
           async ({ path }) => {
             const source = await Bun.file(path).text();
-            const contents = source.replaceAll(inkDevExpression, '"false"');
+            const contents = source.replaceAll(inkDevExpression, '""');
             if (contents === source) {
               throw new Error("Ink DEV expression was not found during build");
             }

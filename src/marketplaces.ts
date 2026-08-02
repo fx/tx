@@ -192,14 +192,14 @@ export function parseRemoveMarketplaceArguments(
 }
 
 export async function runGit(args: readonly string[]): Promise<GitResult> {
-  const process = Bun.spawn(["git", ...args], {
+  const gitProcess = Bun.spawn(["git", ...args], {
     stdout: "pipe",
     stderr: "pipe",
   });
   const [exitCode, stdout, stderr] = await Promise.all([
-    process.exited,
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
+    gitProcess.exited,
+    new Response(gitProcess.stdout).text(),
+    new Response(gitProcess.stderr).text(),
   ]);
   if (exitCode !== 0) {
     const detail = stderr.trim();
