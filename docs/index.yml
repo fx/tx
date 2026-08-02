@@ -17,7 +17,7 @@ changes:
     path: changes/0001-bootstrap-core-cli.md
     description: Create the Bun and TypeScript core CLI with command dispatch, Biome, 100% coverage, and CI.
     spec: architecture
-    status: draft
+    status: complete
     depends_on: []
   - id: "0002"
     name: add-plugin-marketplaces

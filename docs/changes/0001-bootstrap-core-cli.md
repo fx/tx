@@ -5,7 +5,7 @@
 Create the initial Bun and TypeScript project, compiled entrypoint, command registry, dispatcher, help output, and test harness defined by the [Architecture spec](../specs/architecture/).
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** draft
+**Status:** complete
 **Depends On:** —
 
 ## Motivation
@@ -81,11 +81,11 @@ The root help renderer traverses the same registry rather than maintaining a sec
   - [x] Test registration, nested dispatch, remaining argv, collisions, help, and failures
   - [x] Reach and enforce 100% coverage in every required category
   - [x] Verify a local standalone executable starts successfully
-- [ ] Add merge-blocking GitHub Actions CI in `.github/workflows/ci.yml`
-  - [ ] Run on pull requests and pushes to the default branch
-  - [ ] Install dependencies from the frozen Bun lockfile
-  - [ ] Run Biome checks, TypeScript checking, tests with coverage, and the production build
-  - [ ] Ensure failures and coverage regressions fail the workflow without suppression
+- [x] Add merge-blocking GitHub Actions CI in `.github/workflows/ci.yml` (PR #5)
+  - [x] Run on pull requests and pushes to the default branch
+  - [x] Install dependencies from the frozen Bun lockfile
+  - [x] Run Biome checks, TypeScript checking, tests with coverage, and the production build
+  - [x] Ensure failures and coverage regressions fail the workflow without suppression
 
 ## Open Questions
 
