@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as ink from "ink";
 import * as react from "react";
+import packageMetadata from "../package.json" with { type: "json" };
 
 import { CommandRegistry, dispatch } from "../src/commands.ts";
 import type { CommandProcessContext } from "../src/context.ts";
@@ -40,14 +41,16 @@ describe("public plugin contract", () => {
     expect(Object.keys(await import("tx/plugin"))).toEqual([]);
   });
 
-  test("injects shared module identities and static exact versions", () => {
+  test("injects shared module identities and canonical package versions", () => {
     expect(coreDependencies.react).toBe(react);
     expect(coreDependencies.ink).toBe(ink);
-    expect(coreDependencies.tx.version).toBe("0.0.0");
+    expect(coreDependencies.tx.version).toBe(packageMetadata.version);
     expect(coreDependencies.versions).toEqual({
-      react: "19.2.8",
-      ink: "7.1.1",
+      react: packageMetadata.dependencies.react,
+      ink: packageMetadata.dependencies.ink,
     });
+    expect(packageMetadata.dependencies["@types/react"]).toBe("19.2.18");
+    expect(packageMetadata.dependencies["@types/node"]).toBe("26.1.2");
     expect(Object.isFrozen(coreDependencies)).toBe(true);
     expect(Object.isFrozen(coreDependencies.tx)).toBe(true);
     expect(Object.isFrozen(coreDependencies.versions)).toBe(true);
@@ -193,6 +196,21 @@ describe("initializePlugin", () => {
     expect(registry.resolve(["ghost", "current"])).toBeUndefined();
     expect(registry.help(["ghost"])).toBeUndefined();
     expect(registry.help()).toContain("  marketplace\n");
+  });
+
+  test("closes registration after initialization for retained API references", async () => {
+    const registry = new CommandRegistry();
+    let retainedAPI: PluginAPI | undefined;
+    await initializePlugin(registry, personalOwner, (api) => {
+      retainedAPI = api;
+      api.command("notes current", () => {});
+    });
+
+    expect(() => retainedAPI?.command("notes late", () => {})).toThrow(
+      "Plugin personal/notes cannot register commands after initialization",
+    );
+    expect(registry.resolve(["notes", "current"])).toBeDefined();
+    expect(registry.resolve(["notes", "late"])).toBeUndefined();
   });
 
   test("accepts a plugin that registers no commands", async () => {

@@ -1,5 +1,6 @@
 import * as ink from "ink";
 import * as react from "react";
+import packageMetadata from "../package.json" with { type: "json" };
 
 import type { CommandRegistration, CommandRegistry } from "./commands.ts";
 import type { CommandOwner } from "./context.ts";
@@ -10,23 +11,19 @@ import type {
   PluginAPI,
 } from "./plugin.ts";
 
-const TX_VERSION = "0.0.0";
-const REACT_VERSION = "19.2.8";
-const INK_VERSION = "7.1.1";
-
 export const coreDependencies: CoreDependencies = Object.freeze({
-  tx: Object.freeze({ version: TX_VERSION }),
+  tx: Object.freeze({ version: packageMetadata.version }),
   react,
   ink,
   versions: Object.freeze({
-    react: REACT_VERSION,
-    ink: INK_VERSION,
+    react: packageMetadata.dependencies.react,
+    ink: packageMetadata.dependencies.ink,
   }),
 });
 
-export type PluginModule = Readonly<Record<string, unknown>> & {
+export interface PluginModule {
   readonly default?: unknown;
-};
+}
 
 export type PluginSource = Plugin | PluginModule;
 
@@ -51,14 +48,23 @@ export async function initializePlugin(
 ): Promise<void> {
   const scopedOwner = Object.freeze({ ...owner });
   const plugin = resolvePlugin(source, scopedOwner);
-  const registrations: CommandRegistration[] = [];
+  let registrations: CommandRegistration[] | undefined = [];
   const api: PluginAPI = Object.freeze({
     command(path: string | readonly string[], handler: CommandHandler) {
+      if (!registrations) {
+        throw new Error(
+          `Plugin ${pluginName(scopedOwner)} cannot register commands after initialization`,
+        );
+      }
       registrations.push({ path, owner: scopedOwner, handler });
     },
     dependencies: coreDependencies,
   });
 
-  await plugin(api);
-  registry.registerBatch(registrations);
+  try {
+    await plugin(api);
+    registry.registerBatch(registrations);
+  } finally {
+    registrations = undefined;
+  }
 }
