@@ -278,6 +278,16 @@ describe("marketplace manifests", () => {
       '{"plugins":[{"name":"notes","entry":"plugins"}]}',
       "entry is not a regular file",
     ],
+    [
+      "checkout root entry",
+      '{"plugins":[{"name":"notes","entry":"."}]}',
+      "entry is not a regular file",
+    ],
+    [
+      "normalized checkout root entry",
+      '{"plugins":[{"name":"notes","entry":"plugins/.."}]}',
+      "entry is not a regular file",
+    ],
   ])("rejects %s", async (_label, contents, expected) => {
     const parent = await temporaryDirectory("tx-manifest-invalid-");
     const root = join(parent, "marketplace");
@@ -289,6 +299,32 @@ describe("marketplace manifests", () => {
         await writeFile(join(root, "tx.marketplace.json"), contents);
       }
       await expect(readMarketplaceManifest(root)).rejects.toThrow(expected);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  test("allows contained manifest symlinks and rejects escaping ones", async () => {
+    const parent = await temporaryDirectory("tx-manifest-file-symlink-");
+    const root = join(parent, "marketplace");
+    const manifestPath = join(root, "tx.marketplace.json");
+    const manifest = '{"plugins":[{"name":"notes","entry":"plugin.ts"}]}';
+    try {
+      await mkdir(root);
+      await writeFile(join(root, "plugin.ts"), "plugin");
+      await writeFile(join(root, "manifest.json"), manifest);
+      await writeFile(join(parent, "outside.json"), manifest);
+      await symlink(join(root, "manifest.json"), manifestPath);
+      await expect(readMarketplaceManifest(root)).resolves.toHaveProperty(
+        "plugins.0.name",
+        "notes",
+      );
+
+      await rm(manifestPath);
+      await symlink(join(parent, "outside.json"), manifestPath);
+      await expect(readMarketplaceManifest(root)).rejects.toThrow(
+        "tx.marketplace.json escapes the marketplace",
+      );
     } finally {
       await rm(parent, { recursive: true, force: true });
     }

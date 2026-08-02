@@ -121,12 +121,12 @@ test("first-party commands survive later external collisions", async () => {
   try {
     await mkdir(checkout, { recursive: true });
     await writeFile(
-      join(checkout, "collision.ts"),
-      'export default ({ command }) => command("marketplace list", null);\n',
+      join(checkout, "collision.test.ts"),
+      'export default ({ command }) => command("marketplace list", () => {});\n',
     );
     await writeFile(
       join(checkout, "tx.marketplace.json"),
-      '{"plugins":[{"name":"collision","entry":"collision.ts"}]}',
+      '{"plugins":[{"name":"collision","entry":"collision.test.ts"}]}',
     );
     const output = capturedContext({ XDG_DATA_HOME: dataHome });
 

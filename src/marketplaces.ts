@@ -162,7 +162,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isContainedPath(root: string, candidate: string): boolean {
   const relation = relative(root, candidate);
   return (
-    relation !== "" &&
     relation !== ".." &&
     !relation.startsWith(`..${sep}`) &&
     !isAbsolute(relation)
@@ -217,7 +216,11 @@ export async function readMarketplaceManifest(
   const manifestPath = resolve(checkoutPath, manifestFilename);
   let document: unknown;
   try {
-    document = JSON.parse(await readFile(manifestPath, "utf8"));
+    const resolvedManifestPath = await realpath(manifestPath);
+    if (!isContainedPath(checkoutPath, resolvedManifestPath)) {
+      throw new Error(`${manifestFilename} escapes the marketplace`);
+    }
+    document = JSON.parse(await readFile(resolvedManifestPath, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`Missing ${manifestFilename}`);
