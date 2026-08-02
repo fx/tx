@@ -74,11 +74,11 @@ The scoped API records marketplace and plugin ownership for every command. It in
   - [x] Initialize statically bundled and dynamically imported plugin functions through one path
   - [x] Scope command registrations to marketplace and plugin owners
   - [x] Inject the core's React, Ink, and version metadata
-- [ ] Implement marketplace management as a first-party plugin
-  - [ ] Resolve the platform user data directory
-  - [ ] Register `marketplace add`, `list`, and `remove` through `PluginAPI`
-  - [ ] Clone into temporary storage and finalize only after successful installation
-  - [ ] Ensure the dispatcher contains no marketplace-specific branch
+- [x] Implement marketplace management as a first-party plugin (PR #7)
+  - [x] Resolve the platform user data directory
+  - [x] Register `marketplace add`, `list`, and `remove` through `PluginAPI`
+  - [x] Clone into temporary storage and finalize only after successful installation
+  - [x] Ensure the dispatcher contains no marketplace-specific branch
 - [ ] Implement external marketplace manifests and dependencies
   - [ ] Define and validate `tx.marketplace.json`
   - [ ] Validate safe single-component marketplace names, unique plugin names, contained paths, and repository-relative entrypoints
