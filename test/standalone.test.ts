@@ -11,6 +11,7 @@ test("the production build is a standalone executable", async () => {
   try {
     const stagedProject = join(temporaryRoot, "project");
     const stagedSource = join(stagedProject, "src");
+    const stagedNodeModules = join(stagedProject, "node_modules");
     const binaryPath = join(stagedProject, "dist", "tx");
     const runtimeDirectory = join(temporaryRoot, "runtime");
     await mkdir(stagedProject);
@@ -25,11 +26,7 @@ test("the production build is a standalone executable", async () => {
         join(repositoryRoot, "build.ts"),
         join(stagedProject, "build.ts"),
       ),
-      symlink(
-        join(repositoryRoot, "node_modules"),
-        join(stagedProject, "node_modules"),
-        "dir",
-      ),
+      symlink(join(repositoryRoot, "node_modules"), stagedNodeModules, "dir"),
     ]);
 
     const build = Bun.spawnSync([process.execPath, "run", "build"], {
@@ -37,7 +34,10 @@ test("the production build is a standalone executable", async () => {
     });
 
     expect(build.exitCode).toBe(0);
-    await rm(stagedSource, { recursive: true });
+    await Promise.all([
+      rm(stagedSource, { recursive: true }),
+      rm(stagedNodeModules),
+    ]);
 
     const result = Bun.spawnSync([binaryPath], {
       cwd: runtimeDirectory,
