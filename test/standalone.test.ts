@@ -9,9 +9,9 @@ test("the production build is a standalone executable", async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "tx-standalone-"));
 
   try {
-    const binaryPath = join(temporaryRoot, "tx");
     const stagedProject = join(temporaryRoot, "project");
     const stagedSource = join(stagedProject, "src");
+    const binaryPath = join(stagedProject, "dist", "tx");
     const runtimeDirectory = join(temporaryRoot, "runtime");
     await mkdir(stagedProject);
     await Promise.all([
@@ -23,10 +23,9 @@ test("the production build is a standalone executable", async () => {
       ),
     ]);
 
-    const build = Bun.spawnSync(
-      [process.execPath, "run", "build", "--outfile", binaryPath],
-      { cwd: stagedProject },
-    );
+    const build = Bun.spawnSync([process.execPath, "run", "build"], {
+      cwd: stagedProject,
+    });
 
     expect(build.exitCode).toBe(0);
     await rm(stagedSource, { recursive: true });
