@@ -69,11 +69,11 @@ The scoped API records marketplace and plugin ownership for every command. It in
 
 ## Tasks
 
-- [ ] Implement the shared plugin API and loader
-  - [ ] Export plugin, command handler, context, and injected-dependency types
-  - [ ] Initialize statically bundled and dynamically imported plugin functions through one path
-  - [ ] Scope command registrations to marketplace and plugin owners
-  - [ ] Inject the core's React, Ink, and version metadata
+- [x] Implement the shared plugin API and loader (PR #6)
+  - [x] Export plugin, command handler, context, and injected-dependency types
+  - [x] Initialize statically bundled and dynamically imported plugin functions through one path
+  - [x] Scope command registrations to marketplace and plugin owners
+  - [x] Inject the core's React, Ink, and version metadata
 - [ ] Implement marketplace management as a first-party plugin
   - [ ] Resolve the platform user data directory
   - [ ] Register `marketplace add`, `list`, and `remove` through `PluginAPI`
@@ -94,7 +94,7 @@ The scoped API records marketplace and plugin ownership for every command. It in
 
 ## Open Questions
 
-- [ ] What initial core versions of React and Ink should be pinned during implementation?
+- [x] React 19.2.8 and Ink 7.1.1 are the initial pinned core versions (PR #6).
 
 ## References
 
