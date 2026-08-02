@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readdir, rm } from "node:fs/promises";
+import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createGitRepository, temporaryDirectory } from "./helpers.ts";
 
@@ -64,9 +64,9 @@ describe("source CLI marketplace installation failures", () => {
       expect(result.stdout).toBe("");
       expect(result.stderr).toContain('Invalid marketplace name "../escape"');
       await expectNoMarketplaceArtifacts(dataHome, "escape");
-      expect(await Bun.file(join(dataHome, "tx", "escape")).exists()).toBe(
-        false,
-      );
+      await expect(
+        lstat(join(dataHome, "tx", "escape")),
+      ).rejects.toHaveProperty("code", "ENOENT");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
