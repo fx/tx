@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext"],
+    "types": ["bun-types"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "useUnknownInCatchVariables": true
+  },
+  "include": ["src", "test"]
+}
