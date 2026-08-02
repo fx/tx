@@ -1,3 +1,5 @@
+export {};
+
 const inkDevExpression = "process.env['DEV']";
 
 const build = await Bun.build({
