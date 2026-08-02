@@ -17,7 +17,7 @@
     "lint": "biome check .",
     "typecheck": "tsc",
     "test": "bun test",
-    "build": "bun build --compile --minify --outfile dist/tx src/cli.ts",
+    "build": "bun build --compile --minify --define process.env.DEV='\"false\"' --outfile dist/tx src/cli.ts",
     "check": "bun run lint && bun run typecheck && bun run test && bun run build"
   },
   "devDependencies": {

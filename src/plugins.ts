@@ -4,6 +4,7 @@ import packageMetadata from "../package.json" with { type: "json" };
 
 import type { CommandRegistration, CommandRegistry } from "./commands.ts";
 import type { CommandOwner } from "./context.ts";
+import marketplacePlugin from "./first-party/marketplace.ts";
 import type {
   CommandHandler,
   CoreDependencies,
@@ -48,6 +49,16 @@ function resolvePlugin(source: PluginSource, owner: CommandOwner): Plugin {
     );
   }
   return candidate as Plugin;
+}
+
+export async function initializeFirstPartyPlugins(
+  registry: CommandRegistry,
+): Promise<void> {
+  await initializePlugin(
+    registry,
+    { marketplace: "core", plugin: "marketplace" },
+    marketplacePlugin,
+  );
 }
 
 export async function initializePlugin(
