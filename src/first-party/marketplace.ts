@@ -1,4 +1,5 @@
 import {
+  type MarketplaceListing,
   MarketplaceManager,
   parseAddMarketplaceArguments,
   parseListMarketplaceArguments,
@@ -8,8 +9,14 @@ import {
 } from "../marketplaces.ts";
 import type { Plugin } from "../plugin.ts";
 
+export interface MarketplaceOperations {
+  add(repository: string, requestedName?: string): Promise<string>;
+  list(): Promise<readonly MarketplaceListing[]>;
+  remove(name: string): Promise<void>;
+}
+
 export interface MarketplacePluginOptions {
-  readonly manager?: MarketplaceManager;
+  readonly manager?: MarketplaceOperations;
   readonly userData?: UserDataDirectoryOptions;
 }
 

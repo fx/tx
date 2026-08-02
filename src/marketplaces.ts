@@ -83,11 +83,12 @@ export function resolveUserDataDirectory(
     );
   }
 
-  return paths.join(
-    environmentValue(env, "XDG_DATA_HOME") ??
-      paths.join(requiredHome(home), ".local", "share"),
-    "tx",
-  );
+  const xdgDataHome = environmentValue(env, "XDG_DATA_HOME");
+  const base =
+    xdgDataHome && paths.isAbsolute(xdgDataHome)
+      ? xdgDataHome
+      : paths.join(requiredHome(home), ".local", "share");
+  return paths.join(base, "tx");
 }
 
 export function resolveMarketplaceDirectory(
@@ -264,35 +265,33 @@ export class MarketplaceManager {
       throw error;
     }
 
-    const listings: MarketplaceListing[] = [];
-    for (const entry of entries.sort((left, right) =>
-      left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-    )) {
-      if (!isSafeMarketplaceName(entry.name)) continue;
-      const checkout = containedMarketplacePath(this.#root, entry.name);
-      try {
-        const metadata = await lstat(checkout);
-        if (!metadata.isDirectory()) continue;
-      } catch {
-        continue;
-      }
+    const directories = entries
+      .filter(
+        (entry) => isSafeMarketplaceName(entry.name) && entry.isDirectory(),
+      )
+      .sort((left, right) =>
+        left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+      );
 
-      let source = "<unknown>";
-      try {
-        const result = await this.#runGit([
-          "-C",
-          checkout,
-          "config",
-          "--get",
-          "remote.origin.url",
-        ]);
-        source = result.stdout.trim() || "<unknown>";
-      } catch {
-        // A corrupt checkout remains visible and removable.
-      }
-      listings.push({ name: entry.name, source });
-    }
-    return listings;
+    return Promise.all(
+      directories.map(async (entry): Promise<MarketplaceListing> => {
+        const checkout = containedMarketplacePath(this.#root, entry.name);
+        let source = "<unknown>";
+        try {
+          const result = await this.#runGit([
+            "-C",
+            checkout,
+            "config",
+            "--get",
+            "remote.origin.url",
+          ]);
+          source = result.stdout.trim() || "<unknown>";
+        } catch {
+          // A corrupt checkout remains visible and removable.
+        }
+        return { name: entry.name, source };
+      }),
+    );
   }
 
   async remove(name: string): Promise<void> {

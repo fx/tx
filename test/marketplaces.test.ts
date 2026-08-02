@@ -71,6 +71,13 @@ describe("platform user data resolution", () => {
     ).toBe("/home/alice/.local/share/tx");
     expect(
       resolveUserDataDirectory({
+        platform: "linux",
+        env: { XDG_DATA_HOME: "relative/data" },
+        home: "/home/alice",
+      }),
+    ).toBe("/home/alice/.local/share/tx");
+    expect(
+      resolveUserDataDirectory({
         platform: "darwin",
         env: { XDG_DATA_HOME: "/ignored" },
         home: "/Users/alice",
@@ -302,10 +309,18 @@ describe("MarketplaceManager", () => {
       await writeFile(join(root, "plain-file"), "not a checkout");
       await symlink(join(root, "alpha"), join(root, "linked"));
       const calls: string[][] = [];
+      let releaseAlpha: (() => void) | undefined;
+      const zetaStarted = new Promise<void>((resolve) => {
+        releaseAlpha = resolve;
+      });
       const manager = new MarketplaceManager(root, {
         runGit: async (args) => {
           calls.push([...args]);
-          if (args[1]?.endsWith("zeta")) throw new Error("corrupt repository");
+          if (args[1]?.endsWith("zeta")) {
+            releaseAlpha?.();
+            throw new Error("corrupt repository");
+          }
+          await zetaStarted;
           return { stdout: "ssh://example/alpha.git\n" };
         },
       });

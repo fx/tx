@@ -1,32 +1,30 @@
 import { describe, expect, test } from "bun:test";
 import { CommandRegistry, dispatch } from "../src/commands.ts";
 import type { CommandProcessContext } from "../src/context.ts";
-import { createMarketplacePlugin } from "../src/first-party/marketplace.ts";
-import { MarketplaceManager } from "../src/marketplaces.ts";
+import {
+  createMarketplacePlugin,
+  type MarketplaceOperations,
+} from "../src/first-party/marketplace.ts";
 import { initializePlugin } from "../src/plugins.ts";
 
-class RecordingManager extends MarketplaceManager {
+class RecordingManager implements MarketplaceOperations {
   readonly calls: unknown[][] = [];
   listings = [
     { name: "alpha", source: "ssh://example/alpha.git" },
     { name: "broken", source: "<unknown>" },
   ];
 
-  constructor() {
-    super("/unused");
-  }
-
-  override async add(repository: string, name?: string): Promise<string> {
+  async add(repository: string, name?: string): Promise<string> {
     this.calls.push(["add", repository, name]);
     return name ?? "derived";
   }
 
-  override async list() {
+  async list() {
     this.calls.push(["list"]);
     return this.listings;
   }
 
-  override async remove(name: string): Promise<void> {
+  async remove(name: string): Promise<void> {
     this.calls.push(["remove", name]);
   }
 }
