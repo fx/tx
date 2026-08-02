@@ -14,8 +14,10 @@ import {
   type CallExpression,
   isCallExpression,
   isExportDeclaration,
+  isExternalModuleReference,
   isIdentifier,
   isImportDeclaration,
+  isImportEqualsDeclaration,
   isStringLiteral,
   type Node,
   type SourceFile,
@@ -60,6 +62,12 @@ function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
       isStringLiteral(node.moduleSpecifier)
     ) {
       specifiers.push(node.moduleSpecifier);
+    } else if (
+      isImportEqualsDeclaration(node) &&
+      isExternalModuleReference(node.moduleReference) &&
+      isStringLiteral(node.moduleReference.expression)
+    ) {
+      specifiers.push(node.moduleReference.expression);
     } else if (isCallExpression(node)) {
       const specifier = runtimeModuleSpecifier(node);
       if (specifier) specifiers.push(specifier);
@@ -91,6 +99,15 @@ function txPluginViolations(sourceFile: SourceFile): string[] {
       !node.isTypeOnly
     ) {
       violations.push("tx/plugin re-exports must use export type");
+    }
+    if (
+      isImportEqualsDeclaration(node) &&
+      isExternalModuleReference(node.moduleReference) &&
+      isStringLiteral(node.moduleReference.expression) &&
+      node.moduleReference.expression.text === "tx/plugin" &&
+      !node.isTypeOnly
+    ) {
+      violations.push("tx/plugin imports must use import type");
     }
     if (
       isCallExpression(node) &&
@@ -292,12 +309,14 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
     ["allowed-import.ts", 'import type { Plugin } from "tx/plugin";', 0],
     ["allowed-export.ts", 'export type { Plugin } from "tx/plugin";', 0],
     ["allowed-import-type.ts", 'type Plugin = import("tx/plugin").Plugin;', 0],
+    ["allowed-import-equals.ts", 'import type api = require("tx/plugin");', 0],
     ["mixed-import.ts", 'import { type Plugin } from "tx/plugin";', 1],
     ["side-effect.ts", 'import "tx/plugin";', 1],
     ["value-import.ts", 'import { Plugin } from "tx/plugin";', 1],
     ["value-export.ts", 'export { Plugin } from "tx/plugin";', 1],
     ["dynamic-import.ts", 'const plugin = import("tx/plugin");', 1],
     ["require.ts", 'const plugin = require("tx/plugin");', 1],
+    ["import-equals.ts", 'import api = require("tx/plugin");', 1],
   ] as const;
 
   try {
@@ -315,6 +334,7 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
           'export * from "../two/index.ts";',
           'void import("../../src/dynamic.ts");',
           'require("../../src/required.ts");',
+          'import core = require("../../src/core.ts");',
         ].join("\n"),
       ),
       writeFile(join(root, "plugins", "two", "index.ts"), "export {};"),
@@ -342,7 +362,12 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       const graphViolations = await bundledPluginViolations(program, [
         join(root, "plugins", "one", "index.ts"),
       ]);
-      expect(graphViolations).toHaveLength(4);
+      expect(graphViolations).toHaveLength(5);
+      expect(graphViolations).toContainEqual(
+        expect.stringContaining(
+          "import escapes bundled plugin: ../../src/core.ts",
+        ),
+      );
       expect(graphViolations).toContainEqual(
         expect.stringContaining(
           "import escapes bundled plugin: ../../src/dynamic.ts",
