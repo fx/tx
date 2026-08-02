@@ -65,10 +65,16 @@ test("the production build is a standalone executable", async () => {
     const dependency = join(marketplace, "dependency");
     const dataDirectory = join(temporaryRoot, "data");
     await mkdir(dependency, { recursive: true });
+    await mkdir(join(marketplace, "plugins"), { recursive: true });
     await Promise.all([
       writeFile(
         join(marketplace, "tx.marketplace.json"),
-        '{"plugins":[{"name":"fixture","entry":"plugin.ts"}]}',
+        JSON.stringify({
+          plugins: [
+            { name: "top", entry: "top.ts" },
+            { name: "nested", entry: "plugins/nested.ts" },
+          ],
+        }),
       ),
       writeFile(
         join(marketplace, "package.json"),
@@ -83,8 +89,44 @@ test("the production build is a standalone executable", async () => {
         'export const message = "loaded dependency";',
       ),
       writeFile(
-        join(marketplace, "plugin.ts"),
-        'import { message } from "fixture-dependency"; export default ({ command }) => command("fixture", (_args, context) => context.stdout.write(message + "\\n"));',
+        join(marketplace, "top.ts"),
+        `export default ({ command, dependencies }) => {
+          globalThis[Symbol.for("tx.standalone.injected")] = {
+            react: dependencies.react,
+            ink: dependencies.ink,
+          };
+          command("top", (args, context) => context.stdout.write(JSON.stringify({
+            args,
+            marketplace: context.marketplace,
+            plugin: context.plugin,
+          }) + "\\n"));
+        };`,
+      ),
+      writeFile(
+        join(marketplace, "plugins", "nested.ts"),
+        `import { message } from "fixture-dependency";
+        export default ({ command, dependencies }) => {
+          const injected = globalThis[Symbol.for("tx.standalone.injected")];
+          const sameInstances = injected?.react === dependencies.react &&
+            injected?.ink === dependencies.ink;
+          command(["nested", "run"], (args, context) => {
+            const element = dependencies.react.createElement(
+              dependencies.ink.Text,
+              null,
+              message,
+            );
+            context.stdout.write(JSON.stringify({
+              args,
+              marketplace: context.marketplace,
+              plugin: context.plugin,
+              cwd: context.cwd,
+              dependency: message,
+              sameInstances,
+              elementWorks: element.type === dependencies.ink.Text &&
+                element.props.children === message,
+            }) + "\\n");
+          });
+        };`,
       ),
     ]);
 
@@ -118,12 +160,67 @@ test("the production build is a standalone executable", async () => {
       { env },
     );
     expect(add.exitCode).toBe(0);
+    expect(add.stdout.toString()).toBe('Added marketplace "fixture".\n');
     expect(add.stderr.toString()).toBe("");
 
-    const run = Bun.spawnSync([binaryPath, "fixture"], { env });
-    expect(run.exitCode).toBe(0);
-    expect(run.stdout.toString()).toBe("loaded dependency\n");
-    expect(run.stderr.toString()).toBe("");
+    const list = Bun.spawnSync([binaryPath, "marketplace", "list"], { env });
+    expect(list.exitCode).toBe(0);
+    expect(list.stdout.toString()).toBe(`fixture\t${marketplace}\n`);
+    expect(list.stderr.toString()).toBe("");
+
+    const rootHelp = Bun.spawnSync([binaryPath, "--help"], { env });
+    expect(rootHelp.exitCode).toBe(0);
+    expect(rootHelp.stdout.toString()).toBe(
+      "Usage: tx <command>\n\nCommands:\n  marketplace\n  nested\n  top\n",
+    );
+    expect(rootHelp.stderr.toString()).toBe("");
+
+    const nestedHelp = Bun.spawnSync([binaryPath, "nested", "--help"], { env });
+    expect(nestedHelp.exitCode).toBe(0);
+    expect(nestedHelp.stdout.toString()).toBe(
+      "Usage: tx nested <command>\n\nCommands:\n  run\n",
+    );
+    expect(nestedHelp.stderr.toString()).toBe("");
+
+    const top = Bun.spawnSync([binaryPath, "top", "one", "two"], { env });
+    expect(top.exitCode).toBe(0);
+    expect(JSON.parse(top.stdout.toString())).toEqual({
+      args: ["one", "two"],
+      marketplace: "fixture",
+      plugin: "top",
+    });
+    expect(top.stderr.toString()).toBe("");
+
+    const nested = Bun.spawnSync(
+      [binaryPath, "nested", "run", "remaining", "argv"],
+      { cwd: runtimeDirectory, env },
+    );
+    expect(nested.exitCode).toBe(0);
+    expect(JSON.parse(nested.stdout.toString())).toEqual({
+      args: ["remaining", "argv"],
+      marketplace: "fixture",
+      plugin: "nested",
+      cwd: runtimeDirectory,
+      dependency: "loaded dependency",
+      sameInstances: true,
+      elementWorks: true,
+    });
+    expect(nested.stderr.toString()).toBe("");
+
+    const remove = Bun.spawnSync(
+      [binaryPath, "marketplace", "remove", "fixture"],
+      { env },
+    );
+    expect(remove.exitCode).toBe(0);
+    expect(remove.stdout.toString()).toBe('Removed marketplace "fixture".\n');
+    expect(remove.stderr.toString()).toBe("");
+
+    const unavailable = Bun.spawnSync([binaryPath, "nested", "run"], { env });
+    expect(unavailable.exitCode).toBe(2);
+    expect(unavailable.stdout.toString()).toBe("");
+    expect(unavailable.stderr.toString()).toBe(
+      'Error: Unknown command "nested run". Run "tx --help" for usage.\n',
+    );
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
