@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {
   dirname,
@@ -41,15 +49,19 @@ function isWithin(root: string, candidate: string): boolean {
   );
 }
 
+function isRuntimeModuleCall(node: CallExpression): boolean {
+  return (
+    node.expression.kind === SyntaxKind.ImportKeyword ||
+    (isIdentifier(node.expression) && node.expression.text === "require")
+  );
+}
+
 function runtimeModuleSpecifier(
   node: CallExpression,
 ): StringLiteral | undefined {
+  if (!isRuntimeModuleCall(node)) return undefined;
   const argument = node.arguments[0];
-  if (!argument || !isStringLiteral(argument)) return undefined;
-  const isDynamicImport = node.expression.kind === SyntaxKind.ImportKeyword;
-  const isRequire =
-    isIdentifier(node.expression) && node.expression.text === "require";
-  return isDynamicImport || isRequire ? argument : undefined;
+  return argument && isStringLiteral(argument) ? argument : undefined;
 }
 
 function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
@@ -152,7 +164,7 @@ async function resolveRelativeModule(
         ),
       ];
   for (const path of candidates) {
-    if (await Bun.file(path).exists()) return path;
+    if (await Bun.file(path).exists()) return await realpath(path);
   }
   return undefined;
 }
@@ -174,24 +186,36 @@ async function bundledPluginViolations(
   const visited = new Set<string>();
 
   async function visit(path: string, pluginRoot: string): Promise<void> {
-    if (visited.has(path)) return;
-    visited.add(path);
-    const sourceFile = await requiredSourceFile(program, path);
+    const canonicalPath = await realpath(path);
+    if (visited.has(canonicalPath)) return;
+    visited.add(canonicalPath);
+    const sourceFile = await requiredSourceFile(program, canonicalPath);
     violations.push(
       ...txPluginViolations(sourceFile).map(
-        (message) => `${relative(repositoryRoot, path)}: ${message}`,
+        (message) => `${relative(repositoryRoot, canonicalPath)}: ${message}`,
       ),
     );
+    sourceFile.forEachChild(function checkRuntimeModuleCall(node): void {
+      if (isCallExpression(node) && isRuntimeModuleCall(node)) {
+        const argument = node.arguments[0];
+        if (!argument || !isStringLiteral(argument)) {
+          violations.push(
+            `${relative(repositoryRoot, canonicalPath)}: runtime module specifiers must be string literals`,
+          );
+        }
+      }
+      node.forEachChild(checkRuntimeModuleCall);
+    });
     for (const literal of moduleSpecifiers(sourceFile)) {
       if (!literal.text.startsWith(".")) continue;
-      const imported = await resolveRelativeModule(path, literal.text);
+      const imported = await resolveRelativeModule(canonicalPath, literal.text);
       if (!imported) {
         violations.push(
-          `${relative(repositoryRoot, path)}: unresolved relative import ${literal.text}`,
+          `${relative(repositoryRoot, canonicalPath)}: unresolved relative import ${literal.text}`,
         );
       } else if (!isWithin(pluginRoot, imported)) {
         violations.push(
-          `${relative(repositoryRoot, path)}: import escapes bundled plugin: ${literal.text}`,
+          `${relative(repositoryRoot, canonicalPath)}: import escapes bundled plugin: ${literal.text}`,
         );
       } else {
         await visit(imported, pluginRoot);
@@ -199,7 +223,9 @@ async function bundledPluginViolations(
     }
   }
 
-  for (const entry of entries) await visit(entry, dirname(entry));
+  for (const entry of entries) {
+    await visit(entry, await realpath(dirname(entry)));
+  }
   return violations;
 }
 
@@ -208,15 +234,20 @@ async function corePluginImportViolations(
   entries: ReadonlySet<string>,
 ): Promise<string[]> {
   const violations: string[] = [];
-  for (const path of await sourceModules(sourceRoot)) {
+  const canonicalPluginsRoot = await realpath(pluginsRoot);
+  const canonicalEntries = new Set(
+    await Promise.all([...entries].map((entry) => realpath(entry))),
+  );
+  for (const discoveredPath of await sourceModules(sourceRoot)) {
+    const path = await realpath(discoveredPath);
     const sourceFile = await requiredSourceFile(program, path);
     for (const literal of moduleSpecifiers(sourceFile)) {
       if (!literal.text.startsWith(".")) continue;
       const imported = await resolveRelativeModule(path, literal.text);
       if (
         imported &&
-        isWithin(pluginsRoot, imported) &&
-        !entries.has(imported)
+        isWithin(canonicalPluginsRoot, imported) &&
+        !canonicalEntries.has(imported)
       ) {
         violations.push(
           `${relative(repositoryRoot, path)} imports bundled implementation ${relative(repositoryRoot, imported)}`,
@@ -381,6 +412,117 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       expect(
         graphViolations.every((message) => message.includes("escapes")),
       ).toBe(true);
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bundled plugin graphs reject non-literal runtime module specifiers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tx-plugin-nonliteral-"));
+
+  try {
+    const pluginRoot = join(root, "plugins", "one");
+    await mkdir(pluginRoot, { recursive: true });
+    await mkdir(join(root, "src"));
+    await writeFile(
+      join(pluginRoot, "index.ts"),
+      [
+        'const corePath = "../../src/core.ts";',
+        "void import(corePath);",
+        "require(corePath);",
+        'const pluginApi = "tx/plugin";',
+        "void import(pluginApi);",
+        "require(pluginApi);",
+      ].join("\n"),
+    );
+    await writeFile(join(root, "src", "core.ts"), "export {};");
+    await writeFile(
+      join(root, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { noEmit: true },
+        include: ["**/*.ts"],
+      }),
+    );
+
+    await withProgram(join(root, "tsconfig.json"), async (program) => {
+      const violations = await bundledPluginViolations(program, [
+        join(pluginRoot, "index.ts"),
+      ]);
+      expect(violations).toHaveLength(4);
+      expect(
+        violations.every((message) =>
+          message.includes("runtime module specifiers must be string literals"),
+        ),
+      ).toBe(true);
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bundled plugin graphs reject symlink escapes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tx-plugin-symlink-"));
+
+  try {
+    const pluginRoot = join(root, "plugins", "one");
+    const corePath = join(root, "src", "core.ts");
+    await mkdir(pluginRoot, { recursive: true });
+    await mkdir(join(root, "src"));
+    await writeFile(join(pluginRoot, "index.ts"), 'import "./core-link.ts";');
+    await writeFile(corePath, "export {};");
+    await symlink(corePath, join(pluginRoot, "core-link.ts"));
+    await writeFile(
+      join(root, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { noEmit: true },
+        include: ["**/*.ts"],
+      }),
+    );
+
+    await withProgram(join(root, "tsconfig.json"), async (program) => {
+      expect(
+        await bundledPluginViolations(program, [join(pluginRoot, "index.ts")]),
+      ).toEqual([
+        expect.stringContaining(
+          "import escapes bundled plugin: ./core-link.ts",
+        ),
+      ]);
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bundled plugin graphs allow literal local and static type-only imports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tx-plugin-allowed-"));
+
+  try {
+    const pluginRoot = join(root, "plugins", "one");
+    await mkdir(pluginRoot, { recursive: true });
+    await writeFile(
+      join(pluginRoot, "index.ts"),
+      [
+        'import type { Plugin } from "tx/plugin";',
+        'type PluginModule = import("tx/plugin");',
+        'import type api = require("tx/plugin");',
+        'void import("./local.ts");',
+        'require("./local.ts");',
+      ].join("\n"),
+    );
+    await writeFile(join(pluginRoot, "local.ts"), "export {};");
+    await writeFile(
+      join(root, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { noEmit: true },
+        include: ["**/*.ts"],
+      }),
+    );
+
+    await withProgram(join(root, "tsconfig.json"), async (program) => {
+      expect(
+        await bundledPluginViolations(program, [join(pluginRoot, "index.ts")]),
+      ).toEqual([]);
     });
   } finally {
     await rm(root, { recursive: true, force: true });
