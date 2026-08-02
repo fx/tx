@@ -68,11 +68,11 @@ The root help renderer traverses the same registry rather than maintaining a sec
 
 ## Tasks
 
-- [ ] Scaffold the Bun and TypeScript package with quality tooling
-  - [ ] Add package metadata, committed Bun lockfile, TypeScript configuration, and CLI entrypoint
-  - [ ] Configure Biome formatting and linting
-  - [ ] Configure Bun test coverage thresholds at 100% for statements, functions, and lines
-  - [ ] Add `format`, `lint`, `typecheck`, `test`, `build`, and `check` package scripts
+- [x] Scaffold the Bun and TypeScript package with quality tooling (PR #2)
+  - [x] Add package metadata, committed Bun lockfile, TypeScript configuration, and CLI entrypoint
+  - [x] Configure Biome formatting and linting
+  - [x] Configure Bun test coverage thresholds at 100% for statements, functions, and lines
+  - [x] Add `format`, `lint`, `typecheck`, `test`, `build`, and `check` package scripts
 - [ ] Implement the core command registry and dispatcher
   - [ ] Define command, owner, handler, and context types
   - [ ] Implement registration, collision errors, longest-prefix matching, and execution
