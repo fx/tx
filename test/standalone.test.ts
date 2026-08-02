@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,21 +10,30 @@ test("the production build is a standalone executable", async () => {
 
   try {
     const binaryPath = join(temporaryRoot, "tx");
-    const emptyCwd = join(temporaryRoot, "cwd");
-    const emptyPath = join(temporaryRoot, "path");
-    await Promise.all([mkdir(emptyCwd), mkdir(emptyPath)]);
+    const stagedProject = join(temporaryRoot, "project");
+    const stagedSource = join(stagedProject, "src");
+    const runtimeDirectory = join(temporaryRoot, "runtime");
+    await mkdir(stagedProject);
+    await Promise.all([
+      mkdir(runtimeDirectory),
+      cp(join(repositoryRoot, "src"), stagedSource, { recursive: true }),
+      copyFile(
+        join(repositoryRoot, "package.json"),
+        join(stagedProject, "package.json"),
+      ),
+    ]);
 
     const build = Bun.spawnSync(
       [process.execPath, "run", "build", "--outfile", binaryPath],
-      { cwd: repositoryRoot },
+      { cwd: stagedProject },
     );
 
     expect(build.exitCode).toBe(0);
-    expect(await readdir(emptyCwd)).toEqual([]);
+    await rm(stagedSource, { recursive: true });
 
     const result = Bun.spawnSync([binaryPath], {
-      cwd: emptyCwd,
-      env: { ...process.env, PATH: emptyPath },
+      cwd: runtimeDirectory,
+      env: { ...process.env, PATH: runtimeDirectory },
     });
 
     expect(result.exitCode).toBe(0);
