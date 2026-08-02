@@ -113,17 +113,31 @@ test("the production build is a standalone executable", async () => {
       ),
       writeFile(
         join(marketplace, "plugins", "nested.ts"),
-        `import { message } from "fixture-dependency";
+        `import { PassThrough } from "node:stream";
+        import { message } from "fixture-dependency";
         export default ({ command, dependencies }) => {
           const injected = globalThis[Symbol.for("tx.standalone.injected")];
           const sameInstances = injected?.react === dependencies.react &&
             injected?.ink === dependencies.ink;
-          command(["nested", "run"], (args, context) => {
+          command(["nested", "run"], async (args, context) => {
             const element = dependencies.react.createElement(
               dependencies.ink.Text,
               null,
               message,
             );
+            const output = new PassThrough();
+            let renderedOutput = "";
+            output.on("data", (chunk) => {
+              renderedOutput += chunk.toString();
+            });
+            const instance = dependencies.ink.render(element, {
+              stdout: output,
+              interactive: false,
+              patchConsole: false,
+            });
+            instance.unmount();
+            const exitResult = await instance.waitUntilExit();
+            output.destroy();
             context.stdout.write(JSON.stringify({
               args,
               marketplace: context.marketplace,
@@ -133,6 +147,8 @@ test("the production build is a standalone executable", async () => {
               sameInstances,
               elementWorks: element.type === dependencies.ink.Text &&
                 element.props.children === message,
+              renderedOutput,
+              instanceExited: exitResult === undefined,
             }) + "\\n");
           });
         };`,
@@ -216,6 +232,8 @@ test("the production build is a standalone executable", async () => {
       dependency: "loaded dependency",
       sameInstances: true,
       elementWorks: true,
+      renderedOutput: "loaded dependency\n",
+      instanceExited: true,
     });
     expect(nested.stderr).toBe("");
 
