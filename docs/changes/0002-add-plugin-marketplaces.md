@@ -94,7 +94,7 @@ The scoped API records marketplace and plugin ownership for every command. It in
 
 ## Open Questions
 
-- [ ] What initial core versions of React and Ink should be pinned during implementation?
+- [x] React 19.2.8 and Ink 7.1.1 are the initial pinned core versions (PR #6).
 
 ## References
 
