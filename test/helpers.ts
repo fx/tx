@@ -21,20 +21,32 @@ export async function writeFixtureFiles(
 }
 
 export function initializeGitRepository(checkout: string): void {
-  for (const args of [
-    ["init"],
-    ["add", "."],
-    [
-      "-c",
-      "user.name=TX Tests",
-      "-c",
-      "user.email=tx@example.invalid",
-      "commit",
-      "-m",
-      "fixture",
-    ],
-  ]) {
-    expect(Bun.spawnSync(["git", ...args], { cwd: checkout }).exitCode).toBe(0);
+  const configuration = [
+    "-c",
+    "user.name=TX Tests",
+    "-c",
+    "user.email=tx@example.invalid",
+    "-c",
+    "commit.gpgSign=false",
+    "-c",
+    `core.hooksPath=${join(checkout, ".git", "disabled-hooks")}`,
+  ];
+
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "TX Tests",
+    GIT_AUTHOR_EMAIL: "tx@example.invalid",
+    GIT_COMMITTER_NAME: "TX Tests",
+    GIT_COMMITTER_EMAIL: "tx@example.invalid",
+  };
+
+  for (const args of [["init"], ["add", "."], ["commit", "-m", "fixture"]]) {
+    expect(
+      Bun.spawnSync(["git", ...configuration, ...args], {
+        cwd: checkout,
+        env,
+      }).exitCode,
+    ).toBe(0);
   }
 }
 
