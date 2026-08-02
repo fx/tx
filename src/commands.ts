@@ -112,12 +112,14 @@ export class CommandRegistry {
   resolveHelpPath(argv: readonly string[]): readonly string[] | undefined {
     let node = this.#root;
     const path: string[] = [];
+    let commandPath: readonly string[] | undefined;
 
     for (const segment of argv) {
       const child = node.children.get(segment);
-      if (!child) return path.length > 0 ? path : undefined;
+      if (!child) return commandPath;
       node = child;
       path.push(segment);
+      if (node.command) commandPath = [...path];
     }
 
     return path;

@@ -209,15 +209,14 @@ describe("dispatch", () => {
   test("shows root, nested, and leaf help for --help", async () => {
     const registry = new CommandRegistry();
     registerNoop(registry, "notes daily open");
+    registerNoop(registry, "notes");
 
     for (const [argv, usage] of [
       [["--help"], "Usage: tx <command>"],
       [["notes", "--help"], "Usage: tx notes <command>"],
       [["notes", "today", "--help"], "Usage: tx notes <command>"],
-      [
-        ["notes", "daily", "today", "--help"],
-        "Usage: tx notes daily <command>",
-      ],
+      [["notes", "daily", "--help"], "Usage: tx notes daily <command>"],
+      [["notes", "daily", "today", "--help"], "Usage: tx notes <command>"],
       [["notes", "daily", "open", "--help"], "Usage: tx notes daily open"],
     ] as const) {
       const context = outputContext();
@@ -225,6 +224,31 @@ describe("dispatch", () => {
       expect(result.exitCode).toBe(EXIT_SUCCESS);
       expect(context.stdoutText()).toStartWith(usage);
       expect(context.stderrText()).toBe("");
+    }
+  });
+
+  test("does not treat a structural prefix as a fallback for an unknown help suffix", async () => {
+    const registry = new CommandRegistry();
+    registerNoop(registry, "notes daily open");
+
+    const exactContext = outputContext();
+    expect(await dispatch(registry, ["notes", "--help"], exactContext)).toEqual(
+      { exitCode: EXIT_SUCCESS },
+    );
+    expect(exactContext.stdoutText()).toStartWith("Usage: tx notes <command>");
+
+    for (const argv of [
+      ["notes", "typo", "--help"],
+      ["notes", "daily", "typo", "--help"],
+    ]) {
+      const context = outputContext();
+      expect(await dispatch(registry, argv, context)).toEqual({
+        exitCode: EXIT_USAGE,
+      });
+      expect(context.stdoutText()).toBe("");
+      expect(context.stderrText()).toBe(
+        `Error: Unknown command "${argv.slice(0, -1).join(" ")}". Run "tx --help" for usage.\n`,
+      );
     }
   });
 
