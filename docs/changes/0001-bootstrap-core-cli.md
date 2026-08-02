@@ -77,10 +77,10 @@ The root help renderer traverses the same registry rather than maintaining a sec
   - [x] Define command, owner, handler, and context types
   - [x] Implement registration, collision errors, longest-prefix matching, and execution
   - [x] Implement root and nested help plus unknown-command errors
-- [ ] Build the complete test suite
+- [x] Build the complete test suite (PR #4)
   - [x] Test registration, nested dispatch, remaining argv, collisions, help, and failures
   - [x] Reach and enforce 100% coverage in every required category
-  - [ ] Verify a local standalone executable starts successfully
+  - [x] Verify a local standalone executable starts successfully
 - [ ] Add merge-blocking GitHub Actions CI in `.github/workflows/ci.yml`
   - [ ] Run on pull requests and pushes to the default branch
   - [ ] Install dependencies from the frozen Bun lockfile
