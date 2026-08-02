@@ -1,18 +1,18 @@
-import type {
-  CommandContext,
-  CommandOwner,
-  CommandProcessContext,
-} from "./context.ts";
+import type { CommandOwner, CommandProcessContext } from "./context.ts";
+import type { CommandContext, CommandHandler } from "./plugin.ts";
+
+export type { CommandHandler } from "./plugin.ts";
 
 export type CommandPath = string | readonly string[];
 
-export type CommandHandler = (
-  args: string[],
-  context: CommandContext,
-) => void | Promise<void>;
-
 export interface Command {
   readonly path: readonly string[];
+  readonly owner: CommandOwner;
+  readonly handler: CommandHandler;
+}
+
+export interface CommandRegistration {
+  readonly path: CommandPath;
   readonly owner: CommandOwner;
   readonly handler: CommandHandler;
 }
@@ -68,31 +68,56 @@ export class CommandRegistry {
     owner: CommandOwner,
     handler: CommandHandler,
   ): Command {
-    const normalizedPath = normalizeCommandPath(path);
-    let node = this.#root;
+    return this.registerBatch([{ path, owner, handler }])[0] as Command;
+  }
 
-    for (const segment of normalizedPath) {
-      let child = node.children.get(segment);
-      if (!child) {
-        child = { children: new Map() };
-        node.children.set(segment, child);
+  registerBatch(
+    registrations: readonly CommandRegistration[],
+  ): readonly Command[] {
+    const commands = registrations.map(({ path, owner, handler }) =>
+      Object.freeze({
+        path: normalizeCommandPath(path),
+        owner: Object.freeze({ ...owner }),
+        handler,
+      }),
+    );
+    const pending = new Map<string, Command>();
+
+    for (const command of commands) {
+      const key = JSON.stringify(command.path);
+      const conflicting = this.#find(command.path) ?? pending.get(key);
+      if (conflicting) {
+        throw new Error(
+          `Command "${command.path.join(" ")}" is already registered by ${ownerName(conflicting.owner)}; cannot register it for ${ownerName(command.owner)}`,
+        );
       }
+      pending.set(key, command);
+    }
+
+    for (const command of commands) {
+      let node = this.#root;
+      for (const segment of command.path) {
+        let child = node.children.get(segment);
+        if (!child) {
+          child = { children: new Map() };
+          node.children.set(segment, child);
+        }
+        node = child;
+      }
+      node.command = command;
+    }
+
+    return Object.freeze(commands);
+  }
+
+  #find(path: readonly string[]): Command | undefined {
+    let node = this.#root;
+    for (const segment of path) {
+      const child = node.children.get(segment);
+      if (!child) return undefined;
       node = child;
     }
-
-    if (node.command) {
-      throw new Error(
-        `Command "${normalizedPath.join(" ")}" is already registered by ${ownerName(node.command.owner)}; cannot register it for ${ownerName(owner)}`,
-      );
-    }
-
-    const command = Object.freeze({
-      path: normalizedPath,
-      owner: Object.freeze({ ...owner }),
-      handler,
-    });
-    node.command = command;
-    return command;
+    return node.command;
   }
 
   resolve(argv: readonly string[]): Command | undefined {
