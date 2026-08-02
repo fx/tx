@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 
 const sourceRoot = new URL("../src/", import.meta.url);
+const sourceModuleExtensions = [".ts", ".tsx", ".mts", ".cts"];
+const declarationModulePattern = /\.d\.(?:ts|mts|cts)$/;
 
 async function findSourceModules(directory: URL): Promise<URL[]> {
   const modules: URL[] = [];
@@ -13,7 +15,11 @@ async function findSourceModules(directory: URL): Promise<URL[]> {
       modules.push(
         ...(await findSourceModules(new URL(`${entry.name}/`, directory))),
       );
-    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+    } else if (
+      entry.isFile() &&
+      !declarationModulePattern.test(entry.name) &&
+      sourceModuleExtensions.some((extension) => entry.name.endsWith(extension))
+    ) {
       modules.push(url);
     }
   }
