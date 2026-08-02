@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -27,7 +28,7 @@ import {
 } from "../src/marketplaces.ts";
 
 async function temporaryDirectory(prefix: string): Promise<string> {
-  return mkdtemp(join(tmpdir(), prefix));
+  return realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
 async function createGitRepository(root: string): Promise<string> {

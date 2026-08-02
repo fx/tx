@@ -366,7 +366,7 @@ export async function runBun(
   args: readonly string[],
   options: { readonly cwd: string },
 ): Promise<void> {
-  const bunProcess = Bun.spawn([process.execPath, ...args], {
+  const bunProcess = Bun.spawn(["bun", ...args], {
     cwd: options.cwd,
     stdout: "ignore",
     stderr: "pipe",

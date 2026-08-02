@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
-import { copyFile, cp, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import {
+  copyFile,
+  cp,
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const repositoryRoot = join(import.meta.dir, "..");
 
@@ -49,6 +57,70 @@ test("the production build is a standalone executable", async () => {
       "Usage: tx <command>\n\nCommands:\n  marketplace\n",
     );
     expect(result.stderr.toString()).toBe("");
+
+    const marketplace = join(temporaryRoot, "marketplace");
+    const dependency = join(marketplace, "dependency");
+    const dataDirectory = join(temporaryRoot, "data");
+    await mkdir(dependency, { recursive: true });
+    await Promise.all([
+      writeFile(
+        join(marketplace, "tx.marketplace.json"),
+        '{"plugins":[{"name":"fixture","entry":"plugin.ts"}]}',
+      ),
+      writeFile(
+        join(marketplace, "package.json"),
+        '{"type":"module","dependencies":{"fixture-dependency":"file:./dependency"}}',
+      ),
+      writeFile(
+        join(dependency, "package.json"),
+        '{"name":"fixture-dependency","version":"1.0.0","type":"module","exports":"./index.ts"}',
+      ),
+      writeFile(
+        join(dependency, "index.ts"),
+        'export const message = "loaded dependency";',
+      ),
+      writeFile(
+        join(marketplace, "plugin.ts"),
+        'import { message } from "fixture-dependency"; export default ({ command }) => command("fixture", (_args, context) => context.stdout.write(message + "\\n"));',
+      ),
+    ]);
+
+    for (const args of [
+      ["init"],
+      ["add", "."],
+      [
+        "-c",
+        "user.name=tx",
+        "-c",
+        "user.email=tx@example.com",
+        "commit",
+        "-m",
+        "fixture",
+      ],
+    ]) {
+      expect(
+        Bun.spawnSync(["git", ...args], { cwd: marketplace }).exitCode,
+      ).toBe(0);
+    }
+
+    const { PATH } = process.env;
+    const env = {
+      ...process.env,
+      DEV: "true",
+      PATH: `${dirname(process.execPath)}:${PATH ?? ""}`,
+      XDG_DATA_HOME: dataDirectory,
+    };
+    const add = Bun.spawnSync(
+      [binaryPath, "marketplace", "add", marketplace, "--name", "fixture"],
+      { env },
+    );
+    expect(add.exitCode).toBe(0);
+    expect(add.stderr.toString()).toBe("");
+
+    const run = Bun.spawnSync([binaryPath, "fixture"], { env });
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout.toString()).toBe("loaded dependency\n");
+    expect(run.stderr.toString()).toBe("");
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
