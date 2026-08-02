@@ -2,15 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   lstat,
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
-  realpath,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   deriveMarketplaceName,
@@ -29,6 +26,7 @@ import {
   runBun,
   validateMarketplaceName,
 } from "../src/marketplaces.ts";
+import { createGitRepository, temporaryDirectory } from "./helpers.ts";
 
 const marketplaceCapabilities = {
   resolveDirectory: resolveMarketplaceDirectory,
@@ -36,35 +34,6 @@ const marketplaceCapabilities = {
   discover: discoverInstalledMarketplaces,
   prepare: prepareMarketplace,
 };
-
-async function temporaryDirectory(prefix: string): Promise<string> {
-  return realpath(await mkdtemp(join(tmpdir(), prefix)));
-}
-
-async function createGitRepository(root: string): Promise<string> {
-  const repository = join(root, "source.git");
-  expect(Bun.spawnSync(["git", "init", repository]).exitCode).toBe(0);
-  await writeFile(join(repository, "README.txt"), "marketplace\n");
-  expect(
-    Bun.spawnSync(["git", "add", "README.txt"], { cwd: repository }).exitCode,
-  ).toBe(0);
-  expect(
-    Bun.spawnSync(
-      [
-        "git",
-        "-c",
-        "user.name=TX Tests",
-        "-c",
-        "user.email=tx@example.invalid",
-        "commit",
-        "-m",
-        "initial",
-      ],
-      { cwd: repository },
-    ).exitCode,
-  ).toBe(0);
-  return repository;
-}
 
 describe("platform user data resolution", () => {
   test("uses deterministic Unix, macOS, and Windows locations", () => {
@@ -470,7 +439,11 @@ describe("MarketplaceManager", () => {
   test("clones local Git repositories, awaits preparation, lists, and removes", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplaces-");
     try {
-      const repository = await createGitRepository(temporaryRoot);
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "source.git",
+        { "README.txt": "marketplace\n" },
+      );
       const root = join(temporaryRoot, "data", "marketplaces");
       let prepared = false;
       const manager = new MarketplaceManager(root, marketplaceCapabilities, {

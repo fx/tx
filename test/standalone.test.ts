@@ -10,8 +10,15 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { initializeGitRepository } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
+
+interface CommandResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
 
 test("the production build is a standalone executable", async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "tx-standalone-"));
@@ -64,8 +71,10 @@ test("the production build is a standalone executable", async () => {
     const marketplace = join(temporaryRoot, "marketplace");
     const dependency = join(marketplace, "dependency");
     const dataDirectory = join(temporaryRoot, "data");
-    await mkdir(dependency, { recursive: true });
-    await mkdir(join(marketplace, "plugins"), { recursive: true });
+    await Promise.all([
+      mkdir(dependency, { recursive: true }),
+      mkdir(join(marketplace, "plugins"), { recursive: true }),
+    ]);
     await Promise.all([
       writeFile(
         join(marketplace, "tx.marketplace.json"),
@@ -130,23 +139,7 @@ test("the production build is a standalone executable", async () => {
       ),
     ]);
 
-    for (const args of [
-      ["init"],
-      ["add", "."],
-      [
-        "-c",
-        "user.name=tx",
-        "-c",
-        "user.email=tx@example.com",
-        "commit",
-        "-m",
-        "fixture",
-      ],
-    ]) {
-      expect(
-        Bun.spawnSync(["git", ...args], { cwd: marketplace }).exitCode,
-      ).toBe(0);
-    }
+    initializeGitRepository(marketplace);
 
     const { PATH } = process.env;
     const env = {
@@ -155,48 +148,67 @@ test("the production build is a standalone executable", async () => {
       PATH: `${dirname(process.execPath)}:${PATH ?? ""}`,
       XDG_DATA_HOME: dataDirectory,
     };
-    const add = Bun.spawnSync(
-      [binaryPath, "marketplace", "add", marketplace, "--name", "fixture"],
-      { env },
-    );
-    expect(add.exitCode).toBe(0);
-    expect(add.stdout.toString()).toBe('Added marketplace "fixture".\n');
-    expect(add.stderr.toString()).toBe("");
+    const runStandalone = (args: string[], cwd?: string): CommandResult => {
+      const result = Bun.spawnSync([binaryPath, ...args], {
+        ...(cwd === undefined ? {} : { cwd }),
+        env,
+      });
+      return {
+        exitCode: result.exitCode,
+        stdout: result.stdout.toString(),
+        stderr: result.stderr.toString(),
+      };
+    };
+    const add = runStandalone([
+      "marketplace",
+      "add",
+      marketplace,
+      "--name",
+      "fixture",
+    ]);
+    expect(add).toEqual({
+      exitCode: 0,
+      stdout: 'Added marketplace "fixture".\n',
+      stderr: "",
+    });
 
-    const list = Bun.spawnSync([binaryPath, "marketplace", "list"], { env });
-    expect(list.exitCode).toBe(0);
-    expect(list.stdout.toString()).toBe(`fixture\t${marketplace}\n`);
-    expect(list.stderr.toString()).toBe("");
+    const list = runStandalone(["marketplace", "list"]);
+    expect(list).toEqual({
+      exitCode: 0,
+      stdout: `fixture\t${marketplace}\n`,
+      stderr: "",
+    });
 
-    const rootHelp = Bun.spawnSync([binaryPath, "--help"], { env });
-    expect(rootHelp.exitCode).toBe(0);
-    expect(rootHelp.stdout.toString()).toBe(
-      "Usage: tx <command>\n\nCommands:\n  marketplace\n  nested\n  top\n",
-    );
-    expect(rootHelp.stderr.toString()).toBe("");
+    const rootHelp = runStandalone(["--help"]);
+    expect(rootHelp).toEqual({
+      exitCode: 0,
+      stdout:
+        "Usage: tx <command>\n\nCommands:\n  marketplace\n  nested\n  top\n",
+      stderr: "",
+    });
 
-    const nestedHelp = Bun.spawnSync([binaryPath, "nested", "--help"], { env });
-    expect(nestedHelp.exitCode).toBe(0);
-    expect(nestedHelp.stdout.toString()).toBe(
-      "Usage: tx nested <command>\n\nCommands:\n  run\n",
-    );
-    expect(nestedHelp.stderr.toString()).toBe("");
+    const nestedHelp = runStandalone(["nested", "--help"]);
+    expect(nestedHelp).toEqual({
+      exitCode: 0,
+      stdout: "Usage: tx nested <command>\n\nCommands:\n  run\n",
+      stderr: "",
+    });
 
-    const top = Bun.spawnSync([binaryPath, "top", "one", "two"], { env });
+    const top = runStandalone(["top", "one", "two"]);
     expect(top.exitCode).toBe(0);
-    expect(JSON.parse(top.stdout.toString())).toEqual({
+    expect(JSON.parse(top.stdout)).toEqual({
       args: ["one", "two"],
       marketplace: "fixture",
       plugin: "top",
     });
-    expect(top.stderr.toString()).toBe("");
+    expect(top.stderr).toBe("");
 
-    const nested = Bun.spawnSync(
-      [binaryPath, "nested", "run", "remaining", "argv"],
-      { cwd: runtimeDirectory, env },
+    const nested = runStandalone(
+      ["nested", "run", "remaining", "argv"],
+      runtimeDirectory,
     );
     expect(nested.exitCode).toBe(0);
-    expect(JSON.parse(nested.stdout.toString())).toEqual({
+    expect(JSON.parse(nested.stdout)).toEqual({
       args: ["remaining", "argv"],
       marketplace: "fixture",
       plugin: "nested",
@@ -205,22 +217,22 @@ test("the production build is a standalone executable", async () => {
       sameInstances: true,
       elementWorks: true,
     });
-    expect(nested.stderr.toString()).toBe("");
+    expect(nested.stderr).toBe("");
 
-    const remove = Bun.spawnSync(
-      [binaryPath, "marketplace", "remove", "fixture"],
-      { env },
-    );
-    expect(remove.exitCode).toBe(0);
-    expect(remove.stdout.toString()).toBe('Removed marketplace "fixture".\n');
-    expect(remove.stderr.toString()).toBe("");
+    const remove = runStandalone(["marketplace", "remove", "fixture"]);
+    expect(remove).toEqual({
+      exitCode: 0,
+      stdout: 'Removed marketplace "fixture".\n',
+      stderr: "",
+    });
 
-    const unavailable = Bun.spawnSync([binaryPath, "nested", "run"], { env });
-    expect(unavailable.exitCode).toBe(2);
-    expect(unavailable.stdout.toString()).toBe("");
-    expect(unavailable.stderr.toString()).toBe(
-      'Error: Unknown command "nested run". Run "tx --help" for usage.\n',
-    );
+    const unavailable = runStandalone(["nested", "run"]);
+    expect(unavailable).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr:
+        'Error: Unknown command "nested run". Run "tx --help" for usage.\n',
+    });
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }

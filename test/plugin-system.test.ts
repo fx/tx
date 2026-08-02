@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { createGitRepository, temporaryDirectory } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
 const cliPath = join(repositoryRoot, "src", "cli.ts");
@@ -10,49 +10,6 @@ interface CliResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
-}
-
-async function temporaryRoot(prefix: string): Promise<string> {
-  return mkdtemp(join(tmpdir(), prefix));
-}
-
-async function writeFiles(
-  root: string,
-  files: Readonly<Record<string, string>>,
-): Promise<void> {
-  await Promise.all(
-    Object.entries(files).map(async ([path, contents]) => {
-      const target = join(root, path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, contents);
-    }),
-  );
-}
-
-async function createRepository(
-  root: string,
-  name: string,
-  files: Readonly<Record<string, string>>,
-): Promise<string> {
-  const checkout = join(root, name);
-  await mkdir(checkout, { recursive: true });
-  await writeFiles(checkout, files);
-  for (const args of [
-    ["init"],
-    ["add", "."],
-    [
-      "-c",
-      "user.name=TX Tests",
-      "-c",
-      "user.email=tx@example.invalid",
-      "commit",
-      "-m",
-      "fixture",
-    ],
-  ]) {
-    expect(Bun.spawnSync(["git", ...args], { cwd: checkout }).exitCode).toBe(0);
-  }
-  return checkout;
 }
 
 function runCli(dataHome: string, ...args: string[]): CliResult {
@@ -86,10 +43,10 @@ function manifest(plugin: string, entry = "plugin.ts"): string {
 
 describe("source CLI marketplace installation failures", () => {
   test("rejects an unsafe name without writing outside marketplace storage", async () => {
-    const root = await temporaryRoot("tx-plugin-system-unsafe-");
+    const root = await temporaryDirectory("tx-plugin-system-unsafe-");
     try {
       const dataHome = join(root, "data");
-      const source = await createRepository(root, "source", {
+      const source = await createGitRepository(root, "source", {
         "plugin.ts": "export default () => {};\n",
         "tx.marketplace.json": manifest("fixture"),
       });
@@ -150,10 +107,10 @@ describe("source CLI marketplace installation failures", () => {
   ])(
     "cleans staging and final paths after $label",
     async ({ name, files, error }) => {
-      const root = await temporaryRoot(`tx-plugin-system-${name}-`);
+      const root = await temporaryDirectory(`tx-plugin-system-${name}-`);
       try {
         const dataHome = join(root, "data");
-        const source = await createRepository(root, "source", files);
+        const source = await createGitRepository(root, "source", files);
         const result = runCli(
           dataHome,
           "marketplace",
@@ -174,7 +131,7 @@ describe("source CLI marketplace installation failures", () => {
   );
 
   test("cleans staging and final paths after a local clone failure", async () => {
-    const root = await temporaryRoot("tx-plugin-system-clone-");
+    const root = await temporaryDirectory("tx-plugin-system-clone-");
     try {
       const dataHome = join(root, "data");
       const missingRepository = join(root, "not-a-repository");
@@ -199,10 +156,10 @@ describe("source CLI marketplace installation failures", () => {
 
 describe("source CLI plugin registration", () => {
   test("rolls back every command when a plugin registers an empty segment", async () => {
-    const root = await temporaryRoot("tx-plugin-system-segment-");
+    const root = await temporaryDirectory("tx-plugin-system-segment-");
     try {
       const dataHome = join(root, "data");
-      const source = await createRepository(root, "source", {
+      const source = await createGitRepository(root, "source", {
         "plugin.ts": `export default ({ command }) => {
           command("ghost valid", (_args, context) => context.stdout.write("ghost\\n"));
           command(["ghost", "   "], () => {});
@@ -227,10 +184,10 @@ describe("source CLI plugin registration", () => {
   });
 
   test("keeps bundled commands and diagnoses an external collision", async () => {
-    const root = await temporaryRoot("tx-plugin-system-core-collision-");
+    const root = await temporaryDirectory("tx-plugin-system-core-collision-");
     try {
       const dataHome = join(root, "data");
-      const source = await createRepository(root, "source", {
+      const source = await createGitRepository(root, "source", {
         "plugin.ts": `export default ({ command }) => {
           command("ghost bundled-collision", () => {});
           command("marketplace list", () => {});
@@ -261,10 +218,12 @@ describe("source CLI plugin registration", () => {
   });
 
   test("keeps earlier external commands and diagnoses a later collision", async () => {
-    const root = await temporaryRoot("tx-plugin-system-external-collision-");
+    const root = await temporaryDirectory(
+      "tx-plugin-system-external-collision-",
+    );
     try {
       const dataHome = join(root, "data");
-      const source = await createRepository(root, "source", {
+      const source = await createGitRepository(root, "source", {
         "alpha.ts": `export default ({ command }) => {
           command("shared", (_args, context) => context.stdout.write("alpha\\n"));
           command("alpha only", (_args, context) => context.stdout.write("kept\\n"));
@@ -307,18 +266,20 @@ describe("source CLI plugin registration", () => {
 });
 
 test("broken marketplaces remain removable without blocking healthy plugins", async () => {
-  const root = await temporaryRoot("tx-plugin-system-isolation-");
+  const root = await temporaryDirectory("tx-plugin-system-isolation-");
   try {
     const dataHome = join(root, "data");
-    const healthy = await createRepository(root, "healthy-source", {
-      "plugin.ts":
-        'export default ({ command }) => command("healthy run", (_args, context) => context.stdout.write("healthy\\n"));\n',
-      "tx.marketplace.json": manifest("healthy"),
-    });
-    const broken = await createRepository(root, "broken-source", {
-      "plugin.ts": "export default 42;\n",
-      "tx.marketplace.json": manifest("broken"),
-    });
+    const [healthy, broken] = await Promise.all([
+      createGitRepository(root, "healthy-source", {
+        "plugin.ts":
+          'export default ({ command }) => command("healthy run", (_args, context) => context.stdout.write("healthy\\n"));\n',
+        "tx.marketplace.json": manifest("healthy"),
+      }),
+      createGitRepository(root, "broken-source", {
+        "plugin.ts": "export default 42;\n",
+        "tx.marketplace.json": manifest("broken"),
+      }),
+    ]);
 
     expect(
       runCli(dataHome, "marketplace", "add", healthy, "--name", "healthy")
