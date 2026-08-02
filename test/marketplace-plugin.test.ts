@@ -140,11 +140,30 @@ describe("first-party marketplace plugin", () => {
     expect(context.stderrText()).toStartWith("Error: Usage:");
   });
 
-  test("constructs its production manager when no manager is injected", () => {
-    expect(
+  test("defers unavailable user-data resolution until command execution", async () => {
+    const registry = new CommandRegistry();
+    await initializePlugin(
+      registry,
+      { marketplace: "core", plugin: "marketplace" },
       createMarketplacePlugin({
-        userData: { platform: "linux", env: {}, home: "/home/test" },
+        userData: { platform: "linux", env: {}, home: "" },
       }),
-    ).toBeFunction();
+    );
+
+    const helpContext = outputContext();
+    expect(await dispatch(registry, [], helpContext)).toMatchObject({
+      exitCode: 0,
+    });
+    expect(helpContext.stdoutText()).toContain("  marketplace\n");
+    expect(helpContext.stderrText()).toBe("");
+
+    const operationContext = outputContext();
+    expect(
+      await dispatch(registry, ["marketplace", "list"], operationContext),
+    ).toMatchObject({ exitCode: 1 });
+    expect(operationContext.stdoutText()).toBe("");
+    expect(operationContext.stderrText()).toContain(
+      "Cannot resolve the user data directory without a home directory",
+    );
   });
 });

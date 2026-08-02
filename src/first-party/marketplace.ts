@@ -23,27 +23,34 @@ export interface MarketplacePluginOptions {
 export function createMarketplacePlugin(
   options: MarketplacePluginOptions = {},
 ): Plugin {
-  const manager =
-    options.manager ??
-    new MarketplaceManager(resolveMarketplaceDirectory(options.userData));
+  let manager = options.manager;
+  const managerForOperation = (): MarketplaceOperations => {
+    manager ??= new MarketplaceManager(
+      resolveMarketplaceDirectory(options.userData),
+    );
+    return manager;
+  };
 
   return ({ command }) => {
     command("marketplace add", async (args, context) => {
       const parsed = parseAddMarketplaceArguments(args);
-      const name = await manager.add(parsed.repository, parsed.name);
+      const name = await managerForOperation().add(
+        parsed.repository,
+        parsed.name,
+      );
       context.stdout.write(`Added marketplace "${name}".\n`);
     });
 
     command("marketplace list", async (args, context) => {
       parseListMarketplaceArguments(args);
-      for (const marketplace of await manager.list()) {
+      for (const marketplace of await managerForOperation().list()) {
         context.stdout.write(`${marketplace.name}\t${marketplace.source}\n`);
       }
     });
 
     command("marketplace remove", async (args, context) => {
       const name = parseRemoveMarketplaceArguments(args);
-      await manager.remove(name);
+      await managerForOperation().remove(name);
       context.stdout.write(`Removed marketplace "${name}".\n`);
     });
   };
