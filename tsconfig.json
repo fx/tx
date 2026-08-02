@@ -15,5 +15,5 @@
     "noFallthroughCasesInSwitch": true,
     "noPropertyAccessFromIndexSignature": true
   },
-  "include": ["src", "test"]
+  "include": ["build.ts", "src", "test"]
 }

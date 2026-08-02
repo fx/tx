@@ -25,6 +25,28 @@ test("main returns the dispatcher exit code with injected process wiring", async
   expect(await main(["fail"], registry, quietContext())).toBe(1);
 });
 
+test("main bootstraps bundled plugins only for its default registry", async () => {
+  let stdout = "";
+  const context = {
+    ...quietContext(),
+    stdout: {
+      write(value: string) {
+        stdout += value;
+        return true;
+      },
+    } as NodeJS.WriteStream,
+  };
+
+  expect(await main(["marketplace", "--help"], undefined, context)).toBe(0);
+  expect(stdout).toBe(
+    "Usage: tx marketplace <command>\n\nCommands:\n  add\n  list\n  remove\n",
+  );
+
+  stdout = "";
+  expect(await main([], new CommandRegistry(), context)).toBe(0);
+  expect(stdout).toBe("Usage: tx <command>\n");
+});
+
 test("the default process context reflects the current process", () => {
   const context = createProcessContext();
 
@@ -61,7 +83,9 @@ test("the CLI entrypoint retains import.meta.main wiring", () => {
   );
 
   expect(result.exitCode).toBe(0);
-  expect(result.stdout.toString()).toBe("Usage: tx <command>\n");
+  expect(result.stdout.toString()).toBe(
+    "Usage: tx <command>\n\nCommands:\n  marketplace\n",
+  );
   expect(result.stderr.toString()).toBe("");
 });
 
