@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add the shared plugin runtime, a bundled first-party marketplace plugin, Git-backed external marketplaces, TypeScript plugin loading, dependency installation, and injected core dependencies as defined by the [Plugin System spec](../specs/plugin-system/).
+Add the shared plugin runtime, a standalone bundled first-party marketplace plugin, Git-backed external marketplaces, TypeScript plugin loading, dependency installation, and injected core dependencies as defined by the [Plugin System spec](../specs/plugin-system/).
 
 **Spec:** [Plugin System](../specs/plugin-system/)
 **Status:** draft
@@ -10,7 +10,7 @@ Add the shared plugin runtime, a bundled first-party marketplace plugin, Git-bac
 
 ## Motivation
 
-The public core becomes useful when private repositories can add personal commands without modifying or rebuilding it. One repository must be able to expose multiple single-file or multi-file plugins. Marketplace management itself dogfoods that system as a bundled first-party plugin.
+The public core becomes useful when private repositories can add personal commands without modifying or rebuilding it. One repository must be able to expose multiple single-file or multi-file plugins. Marketplace management itself dogfoods that system as a bundled first-party plugin whose implementation remains independent of core implementation modules.
 
 ## Requirements
 
@@ -29,8 +29,9 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ### Functional Requirements
 
-The [Plugin System requirements](../specs/plugin-system/index.md#requirements) own marketplace commands, manifest validation, plugin contracts, command registration, injected dependencies, installation, loading, and their scenarios. The [Architecture local-state scenario](../specs/architecture/index.md#local-state) is also an acceptance criterion for this change. This change additionally owns:
+The [Plugin System requirements](../specs/plugin-system/index.md#requirements) own marketplace commands, manifest validation, plugin contracts, the standalone bundled-plugin boundary, command registration, injected dependencies, installation, loading, and their scenarios. The [Architecture local-state scenario](../specs/architecture/index.md#local-state) is also an acceptance criterion for this change. This change additionally owns:
 
+- Relocating the bundled marketplace implementation from `src/` to `plugins/marketplace/` while preserving its statically bundled entry registration.
 - Loading the bundled marketplace module through the same scoped plugin initializer used for external plugins.
 - Exporting the public plugin TypeScript types from a stable `tx/plugin` package path.
 - Keeping incomplete marketplace clones outside the installed marketplace directory until validation and dependency installation succeed.
@@ -39,17 +40,22 @@ The [Plugin System requirements](../specs/plugin-system/index.md#requirements) o
 
 ### Approach
 
-Implement one plugin initializer that accepts a plugin function plus owner metadata and invokes it with a scoped registration API. Use it first for the statically bundled marketplace plugin, then for dynamically imported marketplace entries. The marketplace plugin implements `marketplace add`, `list`, and `remove` through normal command registration rather than dispatcher branches.
+Implement one plugin initializer that accepts a plugin function plus owner metadata and invokes it with a scoped registration API. Use it first for the statically bundled `plugins/marketplace/` entry, then for dynamically imported marketplace entries. The marketplace plugin implements `marketplace add`, `list`, and `remove` through normal command registration rather than dispatcher branches.
+
+Keep the bundled marketplace plugin's complete module graph outside `src/`. Expose the core capabilities it needs through `PluginAPI` dependencies, and keep only generic plugin runtime and loading infrastructure in `src/`. Core registration statically imports the bundled plugin entry and no feature-owned implementation module behind it.
 
 Store each external marketplace as one checkout below the user data directory. At startup, enumerate marketplace directories, validate each root manifest, and load each declared TypeScript entrypoint through the shared initializer.
 
-The scoped API records marketplace and plugin ownership for every command. It injects the core's React and Ink module instances through the dependency object. Marketplace-local package dependencies are installed with Bun from the repository root when `package.json` exists.
+The scoped API records marketplace and plugin ownership for every command. It injects the core's React and Ink module instances and marketplace capabilities through the dependency object. Marketplace-local package dependencies are installed with Bun from the repository root when `package.json` exists.
 
 ### Decisions
 
-- **Decision:** Implement marketplace management as a bundled first-party plugin.
-  - **Why:** The core proves its own plugin API and avoids privileged feature-command paths.
-  - **Alternatives considered:** Dispatcher-owned marketplace commands.
+- **Decision:** Implement marketplace management as a standalone bundled first-party plugin under `plugins/marketplace/`.
+  - **Why:** The core proves its public plugin API without making the feature's implementation part of the core runtime.
+  - **Alternatives considered:** Dispatcher-owned marketplace commands or a bundled plugin implemented inside `src/`.
+- **Decision:** Inject required core capabilities through `PluginAPI` and prohibit the bundled plugin's module graph from importing `src/`.
+  - **Why:** The same public boundary remains usable by bundled and external plugins while `src/` stays generic.
+  - **Alternatives considered:** Allowing first-party plugins privileged imports of core implementation modules.
 - **Decision:** Use one required `tx.marketplace.json` file per repository.
   - **Why:** Explicit plugin entries are simpler than filesystem conventions or recursive discovery.
   - **Alternatives considered:** One repository per plugin and implicit file scanning.
@@ -84,6 +90,12 @@ The scoped API records marketplace and plugin ownership for every command. It in
   - [x] Validate safe single-component marketplace names, unique plugin names, contained paths, and repository-relative entrypoints
   - [x] Run Bun dependency installation only when `package.json` exists
   - [x] Dynamically import TypeScript plugin entries in deterministic order
+- [x] Enforce the standalone bundled marketplace plugin boundary (PR #9)
+  - [x] Move the bundled marketplace entry and all feature-owned command and management modules from `src/` into `plugins/marketplace/`, leaving only generic plugin runtime and loading infrastructure in `src/`
+  - [x] Replace imports of core implementation modules with injected `PluginAPI` capabilities; keep any `tx/plugin` imports type-only and use standard Node.js or Bun APIs directly where needed
+  - [x] Update core bundling and first-party registration to statically import only `plugins/marketplace/`'s entry module
+  - [x] Add an automated module-graph boundary test covering every bundled plugin entry and rejecting plugin-to-`src/` imports, runtime `tx/plugin` imports, and core imports of bundled implementation modules beyond each entry
+  - [x] Update affected unit and integration tests while preserving all standing type, coverage, and build gates
 - [ ] Add end-to-end plugin-system verification
   - [ ] Verify the bundled marketplace plugin uses the same registration and collision behavior as external plugins
   - [ ] Test a local Git marketplace containing multiple plugins

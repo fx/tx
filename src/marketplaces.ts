@@ -1,49 +1,14 @@
 import type { Dirent, Stats } from "node:fs";
-import {
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-} from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 
-export interface UserDataDirectoryOptions {
-  readonly platform?: NodeJS.Platform;
-  readonly env?: Readonly<Record<string, string | undefined>>;
-  readonly home?: string;
-}
+import type {
+  MarketplaceCheckout,
+  UserDataDirectoryOptions,
+} from "./plugin.ts";
 
-export interface AddMarketplaceArguments {
-  readonly repository: string;
-  readonly name?: string;
-}
-
-export interface MarketplaceListing {
-  readonly name: string;
-  readonly source: string;
-}
-
-export interface GitResult {
-  readonly stdout: string;
-}
-
-export type RunGit = (args: readonly string[]) => Promise<GitResult>;
-export type RunBun = (
-  args: readonly string[],
-  options: { readonly cwd: string },
-) => Promise<void>;
-export type PrepareMarketplace = (checkout: string) => void | Promise<void>;
-
-export interface MarketplaceManagerOptions {
-  readonly runGit?: RunGit;
-  readonly prepareMarketplace?: PrepareMarketplace;
-}
+export type { UserDataDirectoryOptions } from "./plugin.ts";
 
 export interface MarketplacePluginEntry {
   readonly name: string;
@@ -54,6 +19,11 @@ export interface MarketplacePluginEntry {
 export interface MarketplaceManifest {
   readonly plugins: readonly MarketplacePluginEntry[];
 }
+
+export type RunBun = (
+  args: readonly string[],
+  options: { readonly cwd: string },
+) => Promise<void>;
 
 export interface PrepareMarketplaceOptions {
   readonly runBun?: RunBun;
@@ -96,11 +66,8 @@ export function resolveUserDataDirectory(
   if (platform === "win32") {
     const base =
       environmentValue(env, "LOCALAPPDATA") ?? environmentValue(env, "APPDATA");
-    return paths.join(
-      base ?? requiredHome(home),
-      base ? "tx" : "AppData",
-      ...(base ? [] : ["Local", "tx"]),
-    );
+    if (base) return paths.join(base, "tx");
+    return paths.join(requiredHome(home), "AppData", "Local", "tx");
   }
 
   if (platform === "darwin") {
@@ -138,21 +105,7 @@ export function validateMarketplaceName(name: string): string {
 
 function containedMarketplacePath(root: string, name: string): string {
   validateMarketplaceName(name);
-  const paths = pathImplementation(process.platform);
-  const resolvedRoot = paths.resolve(root);
-  const target = paths.resolve(resolvedRoot, name);
-  const relation = paths.relative(resolvedRoot, target);
-  if (
-    !relation ||
-    relation.startsWith(`..${paths.sep}`) ||
-    relation === ".." ||
-    paths.isAbsolute(relation)
-  ) {
-    throw new Error(
-      `Marketplace path for "${name}" escapes marketplace storage`,
-    );
-  }
-  return target;
+  return pathImplementation(process.platform).resolve(root, name);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -283,88 +236,6 @@ export async function readMarketplaceManifest(
   return Object.freeze({ plugins: Object.freeze(plugins) });
 }
 
-export function deriveMarketplaceName(repository: string): string {
-  if (!repository) throw new Error("Repository must not be empty");
-
-  let candidate = repository.replace(/[\\/]+$/, "");
-  try {
-    const url = new URL(candidate);
-    candidate = url.pathname;
-  } catch {
-    const scpSeparator = candidate.indexOf(":");
-    if (scpSeparator >= 0 && !/^[A-Za-z]:[\\/]/.test(candidate)) {
-      candidate = candidate.slice(scpSeparator + 1);
-    }
-  }
-
-  const components = candidate.split(/[\\/]/).filter(Boolean);
-  const finalComponent = components.at(-1) ?? "";
-  const name = finalComponent.endsWith(".git")
-    ? finalComponent.slice(0, -4)
-    : finalComponent;
-  return validateMarketplaceName(name);
-}
-
-export function parseAddMarketplaceArguments(
-  args: readonly string[],
-): AddMarketplaceArguments {
-  let repository: string | undefined;
-  let name: string | undefined;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index] as string;
-    if (argument === "--name") {
-      if (name !== undefined)
-        throw new Error("--name may only be specified once");
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("--")) {
-        throw new Error("--name requires a value");
-      }
-      name = validateMarketplaceName(value);
-      index += 1;
-    } else if (argument.startsWith("-")) {
-      throw new Error(`Unknown option "${argument}"`);
-    } else if (repository === undefined) {
-      repository = argument;
-    } else {
-      throw new Error("marketplace add accepts exactly one repository");
-    }
-  }
-
-  if (repository === undefined) {
-    throw new Error("Usage: tx marketplace add <repository> [--name <name>]");
-  }
-  return name === undefined ? { repository } : { repository, name };
-}
-
-export function parseListMarketplaceArguments(args: readonly string[]): void {
-  if (args.length !== 0) throw new Error("Usage: tx marketplace list");
-}
-
-export function parseRemoveMarketplaceArguments(
-  args: readonly string[],
-): string {
-  if (args.length !== 1) throw new Error("Usage: tx marketplace remove <name>");
-  return validateMarketplaceName(args[0] as string);
-}
-
-export async function runGit(args: readonly string[]): Promise<GitResult> {
-  const gitProcess = Bun.spawn(["git", ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [exitCode, stdout, stderr] = await Promise.all([
-    gitProcess.exited,
-    new Response(gitProcess.stdout).text(),
-    new Response(gitProcess.stderr).text(),
-  ]);
-  if (exitCode !== 0) {
-    const detail = stderr.trim();
-    throw new Error(`Git command failed${detail ? `: ${detail}` : ""}`);
-  }
-  return { stdout };
-}
-
 export async function runBun(
   args: readonly string[],
   options: { readonly cwd: string },
@@ -408,7 +279,7 @@ async function pathExists(path: string): Promise<boolean> {
 
 export async function discoverInstalledMarketplaces(
   root: string,
-): Promise<readonly { readonly name: string; readonly checkout: string }[]> {
+): Promise<readonly MarketplaceCheckout[]> {
   let entries: Dirent<string>[];
   try {
     entries = await readdir(root, { withFileTypes: true });
@@ -426,79 +297,4 @@ export async function discoverInstalledMarketplaces(
       name: entry.name,
       checkout: containedMarketplacePath(root, entry.name),
     }));
-}
-
-export class MarketplaceManager {
-  readonly #root: string;
-  readonly #runGit: RunGit;
-  readonly #prepareMarketplace: PrepareMarketplace;
-
-  constructor(root: string, options: MarketplaceManagerOptions = {}) {
-    this.#root = root;
-    this.#runGit = options.runGit ?? runGit;
-    this.#prepareMarketplace = options.prepareMarketplace ?? prepareMarketplace;
-  }
-
-  async add(repository: string, requestedName?: string): Promise<string> {
-    const name = requestedName ?? deriveMarketplaceName(repository);
-    const target = containedMarketplacePath(this.#root, name);
-    await mkdir(this.#root, { recursive: true });
-    if (await pathExists(target)) {
-      throw new Error(`Marketplace "${name}" is already installed`);
-    }
-
-    const paths = pathImplementation(process.platform);
-    const staging = await mkdtemp(
-      paths.join(paths.dirname(target), `.${name}-staging-`),
-    );
-    try {
-      await this.#runGit(["clone", "--", repository, staging]);
-      await this.#prepareMarketplace(staging);
-      if (await pathExists(target)) {
-        throw new Error(`Marketplace "${name}" is already installed`);
-      }
-      await rename(staging, target);
-      return name;
-    } finally {
-      await rm(staging, { recursive: true, force: true });
-    }
-  }
-
-  async list(): Promise<readonly MarketplaceListing[]> {
-    const marketplaces = await discoverInstalledMarketplaces(this.#root);
-    return Promise.all(
-      marketplaces.map(
-        async ({ name, checkout }): Promise<MarketplaceListing> => {
-          let source = "<unknown>";
-          try {
-            const result = await this.#runGit([
-              "-C",
-              checkout,
-              "config",
-              "--get",
-              "remote.origin.url",
-            ]);
-            source = result.stdout.trim() || "<unknown>";
-          } catch {
-            // A corrupt checkout remains visible and removable.
-          }
-          return { name, source };
-        },
-      ),
-    );
-  }
-
-  async remove(name: string): Promise<void> {
-    const target = containedMarketplacePath(this.#root, name);
-    let metadata: Stats;
-    try {
-      metadata = await lstat(target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(`Marketplace "${name}" is not installed`);
-      }
-      throw error;
-    }
-    await rm(target, { recursive: metadata.isDirectory(), force: false });
-  }
 }

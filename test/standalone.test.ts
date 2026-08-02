@@ -19,6 +19,7 @@ test("the production build is a standalone executable", async () => {
   try {
     const stagedProject = join(temporaryRoot, "project");
     const stagedSource = join(stagedProject, "src");
+    const stagedPlugins = join(stagedProject, "plugins");
     const stagedNodeModules = join(stagedProject, "node_modules");
     const binaryPath = join(stagedProject, "dist", "tx");
     const runtimeDirectory = join(temporaryRoot, "runtime");
@@ -26,6 +27,7 @@ test("the production build is a standalone executable", async () => {
     await Promise.all([
       mkdir(runtimeDirectory),
       cp(join(repositoryRoot, "src"), stagedSource, { recursive: true }),
+      cp(join(repositoryRoot, "plugins"), stagedPlugins, { recursive: true }),
       copyFile(
         join(repositoryRoot, "package.json"),
         join(stagedProject, "package.json"),
@@ -44,6 +46,7 @@ test("the production build is a standalone executable", async () => {
     expect(build.exitCode).toBe(0);
     await Promise.all([
       rm(stagedSource, { recursive: true }),
+      rm(stagedPlugins, { recursive: true }),
       rm(stagedNodeModules),
     ]);
 

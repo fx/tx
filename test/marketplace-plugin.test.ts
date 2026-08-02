@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { CommandRegistry, dispatch } from "../src/commands.ts";
-import type { CommandProcessContext } from "../src/context.ts";
 import {
   createMarketplacePlugin,
   type MarketplaceOperations,
-} from "../src/first-party/marketplace.ts";
+} from "../plugins/marketplace/index.ts";
+import { CommandRegistry, dispatch } from "../src/commands.ts";
+import type { CommandProcessContext } from "../src/context.ts";
 import { initializePlugin } from "../src/plugins.ts";
 
 class RecordingManager implements MarketplaceOperations {
@@ -88,13 +88,13 @@ describe("first-party marketplace plugin", () => {
     const { manager, registry } = await setup();
     const context = outputContext();
 
-    expect(
-      await dispatch(
-        registry,
-        ["marketplace", "add", "repository", "--name", "personal"],
-        context,
-      ),
-    ).toMatchObject({ exitCode: 0 });
+    const result = await dispatch(
+      registry,
+      ["marketplace", "add", "repository", "--name", "personal"],
+      context,
+    );
+    expect(context.stderrText()).toBe("");
+    expect(result).toMatchObject({ exitCode: 0 });
     expect(manager.calls).toEqual([["add", "repository", "personal"]]);
     expect(context.stdoutText()).toBe('Added marketplace "personal".\n');
     expect(context.stderrText()).toBe("");
@@ -140,14 +140,12 @@ describe("first-party marketplace plugin", () => {
     expect(context.stderrText()).toStartWith("Error: Usage:");
   });
 
-  test("defers unavailable user-data resolution until command execution", async () => {
+  test("resolves marketplace storage from each command context", async () => {
     const registry = new CommandRegistry();
     await initializePlugin(
       registry,
       { marketplace: "core", plugin: "marketplace" },
-      createMarketplacePlugin({
-        userData: { platform: "linux", env: {}, home: "" },
-      }),
+      createMarketplacePlugin(),
     );
 
     const helpContext = outputContext();
@@ -157,13 +155,14 @@ describe("first-party marketplace plugin", () => {
     expect(helpContext.stdoutText()).toContain("  marketplace\n");
     expect(helpContext.stderrText()).toBe("");
 
-    const operationContext = outputContext();
+    const operationContext = {
+      ...outputContext(),
+      env: { XDG_DATA_HOME: "/definitely/missing/tx-test-data" },
+    };
     expect(
       await dispatch(registry, ["marketplace", "list"], operationContext),
-    ).toMatchObject({ exitCode: 1 });
+    ).toMatchObject({ exitCode: 0 });
     expect(operationContext.stdoutText()).toBe("");
-    expect(operationContext.stderrText()).toContain(
-      "Cannot resolve the user data directory without a home directory",
-    );
+    expect(operationContext.stderrText()).toBe("");
   });
 });

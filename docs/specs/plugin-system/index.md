@@ -11,11 +11,14 @@ The system is not yet implemented. This document defines the initial desired beh
 ### First-Party Plugins
 
 - User-facing features shipped with the core repository MUST use the same `Plugin` function contract and command-registration API as marketplace plugins.
+- Bundled first-party plugin source MUST live under `plugins/<name>/` at the repository root.
+- The entire module graph rooted at a bundled first-party plugin entry MUST NOT import implementation modules from `src/`.
+- Bundled first-party plugins MUST consume core capabilities only through the public `PluginAPI` and its injected dependencies. They MAY import standard Node.js or Bun APIs, and they MAY import types from `tx/plugin`.
+- Core modules MAY statically import only a bundled plugin's entry module for bundling and registration; they MUST NOT statically import any other module in that plugin's module graph.
 - First-party plugins MUST pass through the same registration, ownership, collision, help, and dispatch logic as marketplace plugins.
 - First-party plugins MUST be bundled with the core executable and MUST load before installed marketplace plugins.
 - The `marketplace` command tree MUST be registered by a first-party plugin named `marketplace`.
 - The command dispatcher MUST NOT contain marketplace-specific command branches.
-- First-party plugins MAY import implementation modules from the public core repository, but command registration MUST occur only through `PluginAPI`.
 
 #### Scenario: Marketplace dogfooding
 
@@ -28,6 +31,12 @@ The system is not yet implemented. This document defines the initial desired beh
 - **GIVEN** an external plugin attempts to register `marketplace add`
 - **WHEN** plugins are loaded
 - **THEN** normal command-collision handling rejects it and identifies both plugin owners
+
+#### Scenario: Standalone bundled plugin boundary
+
+- **GIVEN** the repository's bundled first-party plugin entries and every module reachable from each entry
+- **WHEN** their static imports are inspected
+- **THEN** every bundled plugin is rooted under `plugins/<name>/`, no module in its graph imports a `src/` implementation module, any `tx/plugin` import is type-only, and core imports only each plugin entry module for bundling and registration
 
 ### Marketplace Management
 
@@ -284,7 +293,7 @@ A separate generated registry or database is not required initially; installed m
 
 ### Package API
 
-The public core package SHOULD expose plugin types through `tx/plugin`. Runtime plugins SHOULD receive capabilities through the `PluginAPI` argument rather than importing core internals. A shared loader accepts either a statically imported first-party plugin function or a dynamically imported marketplace plugin function, assigns its owner, and invokes the same `PluginAPI` contract.
+The public core package SHOULD expose plugin types through `tx/plugin`. Runtime plugins MUST receive core capabilities through the `PluginAPI` argument rather than importing core implementation modules. A shared loader accepts either a statically imported bundled-plugin entry function or a dynamically imported marketplace plugin function, assigns its owner, and invokes the same `PluginAPI` contract.
 
 ## Constraints
 
@@ -312,3 +321,4 @@ The public core package SHOULD expose plugin types through `tx/plugin`. Runtime 
 | 2026-08-02 | Initial desired plugin system | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-02 | Made marketplace management a first-party plugin | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-02 | Added broken-plugin recovery and stricter name and command validation | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
+| 2026-08-02 | Required bundled first-party plugins to remain standalone from core implementation modules | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |

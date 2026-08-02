@@ -13,7 +13,7 @@ The system is not yet implemented. This document defines the initial desired arc
 - Running `tx` without a command MUST show help.
 - Running an unknown command MUST fail with a non-zero exit code and show a useful error.
 - Core and plugin commands MUST share one command tree.
-- User-facing feature commands supplied by the core repository SHOULD be implemented as first-party plugins rather than privileged dispatcher branches.
+- User-facing feature commands supplied by the core repository SHOULD be implemented as bundled first-party plugins under `plugins/` rather than privileged dispatcher branches or feature implementations in `src/`.
 - Command paths MUST support one or more segments, such as `marketplace add` and `notes daily open`.
 - `--help` MUST work at the root and at every command node.
 
@@ -98,14 +98,14 @@ The system is not yet implemented. This document defines the initial desired arc
 
 ### Components
 
-The initial core has four small responsibilities:
+The generic core runtime in `src/` has four small responsibilities:
 
 1. Parse the command path and select the longest registered match.
 2. Load bundled first-party and installed marketplace plugins through the same plugin contract.
 3. Let those plugins register commands in one command tree.
 4. Execute the selected command with a shared context.
 
-Marketplace management is a bundled first-party plugin. The dispatcher has no marketplace-specific branch.
+Bundled feature implementations live under the repository-root `plugins/` directory, outside `src/`. Marketplace management is one such bundled first-party plugin. The core may know its entry module for bundling and registration, but the dispatcher and generic runtime contain no marketplace-specific implementation.
 
 No general hook framework, daemon, registry service, sandbox, signing system, or database is part of the initial architecture.
 
@@ -116,10 +116,11 @@ src/
   cli.ts
   commands.ts
   context.ts
+  plugin.ts
   plugins.ts
-  first-party/
-    marketplace.ts
-  index.ts
+plugins/
+  marketplace/
+    index.ts
 test/
 ```
 
@@ -177,3 +178,4 @@ The handler receives `today --json`.
 | 2026-08-02 | Initial desired architecture | [0001-bootstrap-core-cli](../../changes/0001-bootstrap-core-cli.md) |
 | 2026-08-02 | Made user-facing core features first-party plugins | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-02 | Required Biome, Bun tests, 100% coverage, and complete CI | [0001-bootstrap-core-cli](../../changes/0001-bootstrap-core-cli.md) |
+| 2026-08-02 | Separated bundled feature implementations from generic core runtime infrastructure | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
