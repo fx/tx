@@ -39,27 +39,36 @@ function isWithin(root: string, candidate: string): boolean {
   );
 }
 
-function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
-  const specifiers: StringLiteral[] = [];
-  for (const statement of sourceFile.statements) {
-    if (
-      (isImportDeclaration(statement) || isExportDeclaration(statement)) &&
-      statement.moduleSpecifier &&
-      isStringLiteral(statement.moduleSpecifier)
-    ) {
-      specifiers.push(statement.moduleSpecifier);
-    }
-  }
-  return specifiers;
-}
-
-function runtimeModuleSpecifier(node: CallExpression): string | undefined {
+function runtimeModuleSpecifier(
+  node: CallExpression,
+): StringLiteral | undefined {
   const argument = node.arguments[0];
   if (!argument || !isStringLiteral(argument)) return undefined;
   const isDynamicImport = node.expression.kind === SyntaxKind.ImportKeyword;
   const isRequire =
     isIdentifier(node.expression) && node.expression.text === "require";
-  return isDynamicImport || isRequire ? argument.text : undefined;
+  return isDynamicImport || isRequire ? argument : undefined;
+}
+
+function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
+  const specifiers: StringLiteral[] = [];
+
+  function visit(node: Node): void {
+    if (
+      (isImportDeclaration(node) || isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      isStringLiteral(node.moduleSpecifier)
+    ) {
+      specifiers.push(node.moduleSpecifier);
+    } else if (isCallExpression(node)) {
+      const specifier = runtimeModuleSpecifier(node);
+      if (specifier) specifiers.push(specifier);
+    }
+    node.forEachChild(visit);
+  }
+
+  visit(sourceFile);
+  return specifiers;
 }
 
 function txPluginViolations(sourceFile: SourceFile): string[] {
@@ -85,7 +94,7 @@ function txPluginViolations(sourceFile: SourceFile): string[] {
     }
     if (
       isCallExpression(node) &&
-      runtimeModuleSpecifier(node) === "tx/plugin"
+      runtimeModuleSpecifier(node)?.text === "tx/plugin"
     ) {
       violations.push("tx/plugin cannot be loaded at runtime");
     }
@@ -201,12 +210,17 @@ async function corePluginImportViolations(
   return violations;
 }
 
-async function bundledPluginEntries(): Promise<string[]> {
+async function bundledPluginEntries(root = pluginsRoot): Promise<string[]> {
   const entries: string[] = [];
-  for (const entry of await readdir(pluginsRoot, { withFileTypes: true })) {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const candidate = join(pluginsRoot, entry.name, "index.ts");
-    if (await Bun.file(candidate).exists()) entries.push(candidate);
+    for (const extension of moduleExtensions) {
+      const candidate = join(root, entry.name, `index${extension}`);
+      if (await Bun.file(candidate).exists()) {
+        entries.push(candidate);
+        break;
+      }
+    }
   }
   return entries.sort();
 }
@@ -238,6 +252,40 @@ test("bundled plugin module graphs stay behind the public boundary", async () =>
   });
 });
 
+test("bundled plugin entry discovery supports every TypeScript module extension", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tx-plugin-entries-"));
+  const fixtures = [
+    ["a-ts", ".ts"],
+    ["b-tsx", ".tsx"],
+    ["c-mts", ".mts"],
+    ["d-cts", ".cts"],
+  ] as const;
+
+  try {
+    await Promise.all(
+      [...fixtures.map(([name]) => name), "e-precedence"].map((name) =>
+        mkdir(join(root, name), { recursive: true }),
+      ),
+    );
+    await Promise.all([
+      ...fixtures.map(([name, extension]) =>
+        writeFile(join(root, name, `index${extension}`), "export {};"),
+      ),
+      writeFile(join(root, "e-precedence", "index.cts"), "export {};"),
+      writeFile(join(root, "e-precedence", "index.tsx"), "export {};"),
+    ]);
+
+    expect(await bundledPluginEntries(root)).toEqual([
+      ...fixtures.map(([name, extension]) =>
+        join(root, name, `index${extension}`),
+      ),
+      join(root, "e-precedence", "index.tsx"),
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () => {
   const root = await mkdtemp(join(tmpdir(), "tx-plugin-boundary-"));
   const fixtureSources = [
@@ -262,10 +310,17 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       ),
       writeFile(
         join(root, "plugins", "one", "index.ts"),
-        'import "../../src/core.ts"; export * from "../two/index.ts";',
+        [
+          'import "../../src/core.ts";',
+          'export * from "../two/index.ts";',
+          'void import("../../src/dynamic.ts");',
+          'require("../../src/required.ts");',
+        ].join("\n"),
       ),
       writeFile(join(root, "plugins", "two", "index.ts"), "export {};"),
       writeFile(join(root, "src", "core.ts"), "export {};"),
+      writeFile(join(root, "src", "dynamic.ts"), "export {};"),
+      writeFile(join(root, "src", "required.ts"), "export {};"),
       writeFile(
         join(root, "tsconfig.json"),
         JSON.stringify({
@@ -287,7 +342,17 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       const graphViolations = await bundledPluginViolations(program, [
         join(root, "plugins", "one", "index.ts"),
       ]);
-      expect(graphViolations).toHaveLength(2);
+      expect(graphViolations).toHaveLength(4);
+      expect(graphViolations).toContainEqual(
+        expect.stringContaining(
+          "import escapes bundled plugin: ../../src/dynamic.ts",
+        ),
+      );
+      expect(graphViolations).toContainEqual(
+        expect.stringContaining(
+          "import escapes bundled plugin: ../../src/required.ts",
+        ),
+      );
       expect(
         graphViolations.every((message) => message.includes("escapes")),
       ).toBe(true);
