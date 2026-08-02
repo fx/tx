@@ -241,15 +241,15 @@ test("bundled plugin module graphs stay behind the public boundary", async () =>
 test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () => {
   const root = await mkdtemp(join(tmpdir(), "tx-plugin-boundary-"));
   const fixtureSources = [
-    ["allowed-import.ts", 'import type { Plugin } from "tx/plugin";'],
-    ["allowed-export.ts", 'export type { Plugin } from "tx/plugin";'],
-    ["allowed-import-type.ts", 'type Plugin = import("tx/plugin").Plugin;'],
-    ["mixed-import.ts", 'import { type Plugin } from "tx/plugin";'],
-    ["side-effect.ts", 'import "tx/plugin";'],
-    ["value-import.ts", 'import { Plugin } from "tx/plugin";'],
-    ["value-export.ts", 'export { Plugin } from "tx/plugin";'],
-    ["dynamic-import.ts", 'const plugin = import("tx/plugin");'],
-    ["require.ts", 'const plugin = require("tx/plugin");'],
+    ["allowed-import.ts", 'import type { Plugin } from "tx/plugin";', 0],
+    ["allowed-export.ts", 'export type { Plugin } from "tx/plugin";', 0],
+    ["allowed-import-type.ts", 'type Plugin = import("tx/plugin").Plugin;', 0],
+    ["mixed-import.ts", 'import { type Plugin } from "tx/plugin";', 1],
+    ["side-effect.ts", 'import "tx/plugin";', 1],
+    ["value-import.ts", 'import { Plugin } from "tx/plugin";', 1],
+    ["value-export.ts", 'export { Plugin } from "tx/plugin";', 1],
+    ["dynamic-import.ts", 'const plugin = import("tx/plugin");', 1],
+    ["require.ts", 'const plugin = require("tx/plugin");', 1],
   ] as const;
 
   try {
@@ -276,11 +276,7 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
     ]);
 
     await withProgram(join(root, "tsconfig.json"), async (program) => {
-      const expectedViolationCounts = [0, 0, 0, 1, 1, 1, 1, 1, 1];
-      for (const [[name], expectedCount] of fixtureSources.map(
-        (source, index) =>
-          [source, expectedViolationCounts[index] as number] as const,
-      )) {
+      for (const [name, , expectedCount] of fixtureSources) {
         expect(
           txPluginViolations(
             await requiredSourceFile(program, join(root, name)),

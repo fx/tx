@@ -19,14 +19,22 @@ export function createMarketplacePlugin(
 ): Plugin {
   return ({ command, dependencies }) => {
     const capabilities: MarketplaceCapabilities = dependencies.marketplace;
+    let cachedManager:
+      | { readonly root: string; readonly manager: MarketplaceOperations }
+      | undefined;
     const managerForOperation = (
       env: Readonly<Record<string, string | undefined>>,
-    ): MarketplaceOperations =>
-      options.manager ??
-      new MarketplaceManager(
-        capabilities.resolveDirectory({ env }),
-        capabilities,
-      );
+    ): MarketplaceOperations => {
+      if (options.manager) return options.manager;
+      const root = capabilities.resolveDirectory({ env });
+      if (cachedManager?.root !== root) {
+        cachedManager = {
+          root,
+          manager: new MarketplaceManager(root, capabilities),
+        };
+      }
+      return cachedManager.manager;
+    };
 
     command("marketplace add", async (args, context) => {
       const parsed = parseAddMarketplaceArguments(
