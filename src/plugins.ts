@@ -31,6 +31,15 @@ function pluginName(owner: CommandOwner): string {
   return `${owner.marketplace}/${owner.plugin}`;
 }
 
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  const valueType = typeof value;
+  return (
+    value !== null &&
+    (valueType === "object" || valueType === "function") &&
+    typeof (value as PromiseLike<unknown>).then === "function"
+  );
+}
+
 function resolvePlugin(source: PluginSource, owner: CommandOwner): Plugin {
   const candidate = typeof source === "function" ? source : source.default;
   if (typeof candidate !== "function") {
@@ -61,10 +70,14 @@ export async function initializePlugin(
     dependencies: coreDependencies,
   });
 
+  let batch: CommandRegistration[] = [];
   try {
-    await plugin(api);
-    registry.registerBatch(registrations);
+    const result = plugin(api);
+    if (isPromiseLike(result)) await result;
   } finally {
+    batch = registrations ?? [];
     registrations = undefined;
   }
+
+  registry.registerBatch(batch);
 }

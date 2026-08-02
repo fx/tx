@@ -198,6 +198,53 @@ describe("initializePlugin", () => {
     expect(registry.help()).toContain("  marketplace\n");
   });
 
+  test("closes synchronous registration before queued microtasks", async () => {
+    const registry = new CommandRegistry();
+    let lateError: unknown;
+    await initializePlugin(registry, personalOwner, (api) => {
+      api.command("notes current", () => {});
+      queueMicrotask(() => {
+        try {
+          api.command("notes microtask", () => {});
+        } catch (error) {
+          lateError = error;
+        }
+      });
+    });
+
+    expect(lateError).toEqual(
+      new Error(
+        "Plugin personal/notes cannot register commands after initialization",
+      ),
+    );
+    expect(registry.resolve(["notes", "current"])).toBeDefined();
+    expect(registry.resolve(["notes", "microtask"])).toBeUndefined();
+  });
+
+  test("closes registration before commit-phase path normalization", async () => {
+    const registry = new CommandRegistry();
+    const reentrantPath = ["placeholder"];
+    let retainedAPI: PluginAPI | undefined;
+    Object.defineProperty(reentrantPath, 0, {
+      get() {
+        retainedAPI?.command("notes reentrant", () => {});
+        return "notes";
+      },
+    });
+
+    await expect(
+      initializePlugin(registry, personalOwner, (api) => {
+        retainedAPI = api;
+        api.command(reentrantPath, () => {});
+      }),
+    ).rejects.toThrow(
+      "Plugin personal/notes cannot register commands after initialization",
+    );
+    expect(registry.resolve(["notes"])).toBeUndefined();
+    expect(registry.resolve(["notes", "reentrant"])).toBeUndefined();
+    expect(registry.help(["notes"])).toBeUndefined();
+  });
+
   test("closes registration after initialization for retained API references", async () => {
     const registry = new CommandRegistry();
     let retainedAPI: PluginAPI | undefined;
