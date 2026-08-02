@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import type { CommandContext } from "./context.ts";
 
 export type { CommandContext } from "./context.ts";
