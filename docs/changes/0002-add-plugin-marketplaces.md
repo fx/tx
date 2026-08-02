@@ -90,12 +90,12 @@ The scoped API records marketplace and plugin ownership for every command. It in
   - [x] Validate safe single-component marketplace names, unique plugin names, contained paths, and repository-relative entrypoints
   - [x] Run Bun dependency installation only when `package.json` exists
   - [x] Dynamically import TypeScript plugin entries in deterministic order
-- [ ] Enforce the standalone bundled marketplace plugin boundary
-  - [ ] Move the bundled marketplace entry and all feature-owned command and management modules from `src/` into `plugins/marketplace/`, leaving only generic plugin runtime and loading infrastructure in `src/`
-  - [ ] Replace imports of core implementation modules with injected `PluginAPI` capabilities; keep any `tx/plugin` imports type-only and use standard Node.js or Bun APIs directly where needed
-  - [ ] Update core bundling and first-party registration to statically import only `plugins/marketplace/`'s entry module
-  - [ ] Add an automated module-graph boundary test covering every bundled plugin entry and rejecting plugin-to-`src/` imports, runtime `tx/plugin` imports, and core imports of bundled implementation modules beyond each entry
-  - [ ] Update affected unit and integration tests while preserving all standing type, coverage, and build gates
+- [x] Enforce the standalone bundled marketplace plugin boundary (PR #9)
+  - [x] Move the bundled marketplace entry and all feature-owned command and management modules from `src/` into `plugins/marketplace/`, leaving only generic plugin runtime and loading infrastructure in `src/`
+  - [x] Replace imports of core implementation modules with injected `PluginAPI` capabilities; keep any `tx/plugin` imports type-only and use standard Node.js or Bun APIs directly where needed
+  - [x] Update core bundling and first-party registration to statically import only `plugins/marketplace/`'s entry module
+  - [x] Add an automated module-graph boundary test covering every bundled plugin entry and rejecting plugin-to-`src/` imports, runtime `tx/plugin` imports, and core imports of bundled implementation modules beyond each entry
+  - [x] Update affected unit and integration tests while preserving all standing type, coverage, and build gates
 - [ ] Add end-to-end plugin-system verification
   - [ ] Verify the bundled marketplace plugin uses the same registration and collision behavior as external plugins
   - [ ] Test a local Git marketplace containing multiple plugins
