@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -8,6 +11,7 @@ import type { CommandProcessContext } from "../src/context.ts";
 import type { Plugin, PluginAPI } from "../src/plugin.ts";
 import {
   coreDependencies,
+  initializeMarketplacePlugins,
   initializePlugin,
   type PluginSource,
 } from "../src/plugins.ts";
@@ -54,6 +58,139 @@ describe("public plugin contract", () => {
     expect(Object.isFrozen(coreDependencies)).toBe(true);
     expect(Object.isFrozen(coreDependencies.tx)).toBe(true);
     expect(Object.isFrozen(coreDependencies.versions)).toBe(true);
+  });
+});
+
+async function writeMarketplace(
+  root: string,
+  name: string,
+  plugins: readonly { readonly name: string; readonly entry: string }[],
+): Promise<string> {
+  const checkout = join(root, name);
+  await mkdir(checkout, { recursive: true });
+  for (const plugin of plugins) {
+    const entry = join(checkout, plugin.entry);
+    await mkdir(join(entry, ".."), { recursive: true });
+    await writeFile(entry, "export default () => {};\n");
+  }
+  await writeFile(
+    join(checkout, "tx.marketplace.json"),
+    JSON.stringify({ plugins }),
+  );
+  return checkout;
+}
+
+describe("installed marketplace plugin loading", () => {
+  test("imports TypeScript entries and initializes them through the shared path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tx-plugin-import-"));
+    try {
+      const checkout = await writeMarketplace(root, "personal", [
+        { name: "notes", entry: "notes.ts" },
+      ]);
+      await writeFile(
+        join(checkout, "notes.ts"),
+        'export default ({ command }) => command("notes open", () => {});\n',
+      );
+      const registry = new CommandRegistry();
+
+      expect(await initializeMarketplacePlugins(registry, root)).toEqual([]);
+      expect(registry.resolve(["notes", "open"])?.owner).toEqual({
+        marketplace: "personal",
+        plugin: "notes",
+      });
+      expect(
+        (await dispatch(registry, ["notes", "open"], outputContext())).exitCode,
+      ).toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("loads by marketplace name and manifest order while isolating failures", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tx-plugin-order-"));
+    try {
+      await writeMarketplace(root, "zeta", [
+        { name: "collision", entry: "collision.ts" },
+      ]);
+      await writeMarketplace(root, "alpha", [
+        { name: "good", entry: "good.ts" },
+        { name: "broken", entry: "broken.ts" },
+        { name: "after", entry: "after.ts" },
+      ]);
+      await mkdir(join(root, "beta"));
+      await writeFile(join(root, "beta", "tx.marketplace.json"), "{}");
+      await mkdir(join(root, ".staging"));
+      await writeFile(join(root, "plain"), "ignored");
+
+      const imported: string[] = [];
+      const registry = new CommandRegistry();
+      const failures = await initializeMarketplacePlugins(registry, root, {
+        importPlugin: async (entryPath) => {
+          imported.push(entryPath);
+          if (entryPath.endsWith("broken.ts")) throw "broken import";
+          return {
+            default: ({ command }: PluginAPI) => {
+              command(
+                entryPath.endsWith("after.ts") ? "after" : "shared",
+                () => {},
+              );
+            },
+          };
+        },
+      });
+
+      expect(imported.map((entry) => entry.slice(root.length + 1))).toEqual([
+        "alpha/good.ts",
+        "alpha/broken.ts",
+        "alpha/after.ts",
+        "zeta/collision.ts",
+      ]);
+      expect(failures).toEqual([
+        {
+          kind: "plugin",
+          marketplace: "alpha",
+          plugin: "broken",
+          message: "broken import",
+        },
+        {
+          kind: "marketplace",
+          marketplace: "beta",
+          message: "tx.marketplace.json must contain a plugins array",
+        },
+        {
+          kind: "plugin",
+          marketplace: "zeta",
+          plugin: "collision",
+          message:
+            'Command "shared" is already registered by alpha/good; cannot register it for zeta/collision',
+        },
+      ]);
+      expect(Object.isFrozen(failures)).toBe(true);
+      expect(registry.resolve(["shared"])?.owner).toEqual({
+        marketplace: "alpha",
+        plugin: "good",
+      });
+      expect(registry.resolve(["after"])?.owner).toEqual({
+        marketplace: "alpha",
+        plugin: "after",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("returns no failures for missing marketplace storage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tx-plugin-missing-"));
+    try {
+      expect(
+        await initializeMarketplacePlugins(
+          new CommandRegistry(),
+          join(root, "missing"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
