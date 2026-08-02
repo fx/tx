@@ -21,6 +21,10 @@ test("the production build is a standalone executable", async () => {
         join(repositoryRoot, "package.json"),
         join(stagedProject, "package.json"),
       ),
+      copyFile(
+        join(repositoryRoot, "build.ts"),
+        join(stagedProject, "build.ts"),
+      ),
       symlink(
         join(repositoryRoot, "node_modules"),
         join(stagedProject, "node_modules"),
@@ -37,7 +41,7 @@ test("the production build is a standalone executable", async () => {
 
     const result = Bun.spawnSync([binaryPath], {
       cwd: runtimeDirectory,
-      env: { ...process.env, PATH: runtimeDirectory },
+      env: { ...process.env, DEV: "true", PATH: runtimeDirectory },
     });
 
     expect(result.exitCode).toBe(0);
