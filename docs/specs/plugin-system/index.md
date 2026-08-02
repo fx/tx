@@ -179,7 +179,7 @@ export interface CommandContext {
 }
 ```
 
-The context MAY gain additional backward-compatible fields later. First-party plugins use marketplace owner `core`; the bundled marketplace plugin uses plugin owner `marketplace`.
+The context MAY gain additional backward-compatible fields later. First-party plugins receive `context.marketplace` as `core`; the bundled marketplace plugin receives `context.plugin` as `marketplace`.
 
 ### Injected Core Dependencies
 
