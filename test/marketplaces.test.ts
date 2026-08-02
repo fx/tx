@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -18,14 +19,16 @@ import {
   parseListMarketplaceArguments,
   parseRemoveMarketplaceArguments,
   prepareMarketplace,
+  readMarketplaceManifest,
   resolveMarketplaceDirectory,
   resolveUserDataDirectory,
+  runBun,
   runGit,
   validateMarketplaceName,
 } from "../src/marketplaces.ts";
 
 async function temporaryDirectory(prefix: string): Promise<string> {
-  return mkdtemp(join(tmpdir(), prefix));
+  return realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
 async function createGitRepository(root: string): Promise<string> {
@@ -186,8 +189,201 @@ describe("marketplace names and arguments", () => {
   });
 });
 
-describe("Git execution", () => {
-  test("returns stdout and reports stderr without invoking a shell", async () => {
+describe("marketplace manifests", () => {
+  test("accepts unknown fields and preserves manifest order", async () => {
+    const root = await temporaryDirectory("tx-manifest-valid-");
+    try {
+      await mkdir(join(root, "plugins", "work"), { recursive: true });
+      await writeFile(
+        join(root, "plugins", "notes.ts"),
+        "export default () => {};",
+      );
+      await writeFile(
+        join(root, "plugins", "work", "index.ts"),
+        "export default () => {};",
+      );
+      await writeFile(
+        join(root, "tx.marketplace.json"),
+        JSON.stringify({
+          future: { enabled: true },
+          plugins: [
+            { name: "notes", entry: "plugins/notes.ts", future: 1 },
+            { name: "work", entry: "plugins/work/index.ts" },
+          ],
+        }),
+      );
+
+      const manifest = await readMarketplaceManifest(root);
+      expect(
+        manifest.plugins.map(({ name, entry }) => ({ name, entry })),
+      ).toEqual([
+        { name: "notes", entry: "plugins/notes.ts" },
+        { name: "work", entry: "plugins/work/index.ts" },
+      ]);
+      expect(
+        manifest.plugins.every(({ entryPath }) => entryPath.startsWith(root)),
+      ).toBe(true);
+      expect(Object.isFrozen(manifest)).toBe(true);
+      expect(Object.isFrozen(manifest.plugins)).toBe(true);
+      expect(Object.isFrozen(manifest.plugins[0])).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["missing", undefined, "Missing tx.marketplace.json"],
+    ["malformed JSON", "{", "Invalid tx.marketplace.json"],
+    ["non-object", "[]", "must contain a plugins array"],
+    ["missing plugins", "{}", "must contain a plugins array"],
+    ["empty plugins", '{"plugins":[]}', "plugins must not be empty"],
+    ["non-object plugin", '{"plugins":[null]}', "plugin 1 must be an object"],
+    [
+      "unsafe plugin name",
+      '{"plugins":[{"name":"../bad","entry":"plugin.ts"}]}',
+      "must have a safe non-empty name",
+    ],
+    [
+      "non-string entry",
+      '{"plugins":[{"name":"notes","entry":1}]}',
+      'Plugin "notes" entry must be a string',
+    ],
+    [
+      "duplicate plugin name",
+      '{"plugins":[{"name":"notes","entry":"plugin.ts"},{"name":"notes","entry":"plugin.ts"}]}',
+      'Duplicate plugin name "notes"',
+    ],
+    [
+      "empty entry",
+      '{"plugins":[{"name":"notes","entry":""}]}',
+      "must be a repository-relative path",
+    ],
+    [
+      "absolute entry",
+      '{"plugins":[{"name":"notes","entry":"/outside.ts"}]}',
+      "must be a repository-relative path",
+    ],
+    [
+      "escaping entry",
+      '{"plugins":[{"name":"notes","entry":"../outside.ts"}]}',
+      "entry escapes the marketplace",
+    ],
+    [
+      "missing entry",
+      '{"plugins":[{"name":"notes","entry":"missing.ts"}]}',
+      "entry does not exist",
+    ],
+    [
+      "directory entry",
+      '{"plugins":[{"name":"notes","entry":"plugins"}]}',
+      "entry is not a regular file",
+    ],
+    [
+      "checkout root entry",
+      '{"plugins":[{"name":"notes","entry":"."}]}',
+      "entry is not a regular file",
+    ],
+    [
+      "normalized checkout root entry",
+      '{"plugins":[{"name":"notes","entry":"plugins/.."}]}',
+      "entry is not a regular file",
+    ],
+  ])("rejects %s", async (_label, contents, expected) => {
+    const parent = await temporaryDirectory("tx-manifest-invalid-");
+    const root = join(parent, "marketplace");
+    try {
+      await mkdir(join(root, "plugins"), { recursive: true });
+      await writeFile(join(parent, "outside.ts"), "outside");
+      await writeFile(join(root, "plugin.ts"), "plugin");
+      if (contents !== undefined) {
+        await writeFile(join(root, "tx.marketplace.json"), contents);
+      }
+      await expect(readMarketplaceManifest(root)).rejects.toThrow(expected);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  test("allows contained manifest symlinks and rejects escaping ones", async () => {
+    const parent = await temporaryDirectory("tx-manifest-file-symlink-");
+    const root = join(parent, "marketplace");
+    const manifestPath = join(root, "tx.marketplace.json");
+    const manifest = '{"plugins":[{"name":"notes","entry":"plugin.ts"}]}';
+    try {
+      await mkdir(root);
+      await writeFile(join(root, "plugin.ts"), "plugin");
+      await writeFile(join(root, "manifest.json"), manifest);
+      await writeFile(join(parent, "outside.json"), manifest);
+      await symlink(join(root, "manifest.json"), manifestPath);
+      await expect(readMarketplaceManifest(root)).resolves.toHaveProperty(
+        "plugins.0.name",
+        "notes",
+      );
+
+      await rm(manifestPath);
+      await symlink(join(parent, "outside.json"), manifestPath);
+      await expect(readMarketplaceManifest(root)).rejects.toThrow(
+        "tx.marketplace.json escapes the marketplace",
+      );
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  test("allows contained symlinks and rejects symlinks escaping the checkout", async () => {
+    const parent = await temporaryDirectory("tx-manifest-symlink-");
+    const root = join(parent, "marketplace");
+    try {
+      await mkdir(root);
+      await writeFile(join(root, "inside.ts"), "inside");
+      await writeFile(join(parent, "outside.ts"), "outside");
+      await symlink(join(root, "inside.ts"), join(root, "linked.ts"));
+      await writeFile(
+        join(root, "tx.marketplace.json"),
+        '{"plugins":[{"name":"notes","entry":"linked.ts"}]}',
+      );
+      expect((await readMarketplaceManifest(root)).plugins[0]?.entryPath).toBe(
+        join(root, "inside.ts"),
+      );
+
+      await rm(join(root, "linked.ts"));
+      await symlink(join(parent, "outside.ts"), join(root, "linked.ts"));
+      await expect(readMarketplaceManifest(root)).rejects.toThrow(
+        "entry escapes the marketplace",
+      );
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("marketplace preparation", () => {
+  test("validates first and installs dependencies only with package.json", async () => {
+    const root = await temporaryDirectory("tx-marketplace-prepare-");
+    try {
+      await writeFile(join(root, "plugin.ts"), "export default () => {};");
+      await writeFile(
+        join(root, "tx.marketplace.json"),
+        '{"plugins":[{"name":"plugin","entry":"plugin.ts"}]}',
+      );
+      const calls: unknown[][] = [];
+      const run = async (...args: unknown[]) => {
+        calls.push(args);
+      };
+
+      await prepareMarketplace(root, { runBun: run });
+      expect(calls).toEqual([]);
+      await writeFile(join(root, "package.json"), "{}");
+      await prepareMarketplace(root, { runBun: run });
+      expect(calls).toEqual([[["install"], { cwd: root }]]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("shell-free process execution", () => {
+  test("returns Git stdout and reports Git stderr", async () => {
     expect((await runGit(["--version"])).stdout).toStartWith("git version");
     await expect(runGit(["not-a-real-command"])).rejects.toThrow(
       "Git command failed:",
@@ -195,7 +391,26 @@ describe("Git execution", () => {
     await expect(
       runGit(["config", "--get", "tx.tests.missing-value"]),
     ).rejects.toThrow("Git command failed");
-    await expect(prepareMarketplace("/unused")).resolves.toBeUndefined();
+  });
+
+  test("runs Bun arguments directly and reports failures", async () => {
+    const root = await temporaryDirectory("tx-bun-runner-");
+    try {
+      await expect(
+        runBun(["--version"], { cwd: root }),
+      ).resolves.toBeUndefined();
+      await expect(
+        runBun(
+          ["--eval", "process.stderr.write('runner failed'); process.exit(9)"],
+          { cwd: root },
+        ),
+      ).rejects.toThrow("Bun dependency installation failed: runner failed");
+      await expect(
+        runBun(["--eval", "process.exit(9)"], { cwd: root }),
+      ).rejects.toThrow("Bun dependency installation failed");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -236,6 +451,53 @@ describe("MarketplaceManager", () => {
       await expect(manager.remove("source")).rejects.toThrow(
         "is not installed",
       );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("runs production preparation in staging before atomic installation", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-marketplace-production-",
+    );
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const target = join(root, "prepared");
+      const manager = new MarketplaceManager(root, {
+        runGit: async (args) => {
+          const staging = args.at(-1) as string;
+          await writeFile(
+            join(staging, "tx.marketplace.json"),
+            '{"plugins":[{"name":"plugin","entry":"plugin.ts"}]}',
+          );
+          await writeFile(
+            join(staging, "plugin.ts"),
+            "export default () => {};",
+          );
+          await writeFile(join(staging, "package.json"), "{}");
+          return { stdout: "" };
+        },
+        prepareMarketplace: (checkout) =>
+          prepareMarketplace(checkout, {
+            runBun: async (args, options) => {
+              expect(args).toEqual(["install"]);
+              expect(options.cwd).toBe(checkout);
+              await expect(lstat(target)).rejects.toHaveProperty(
+                "code",
+                "ENOENT",
+              );
+              await writeFile(join(checkout, "installed.txt"), "ready");
+            },
+          }),
+      });
+
+      expect(await manager.add("repository", "prepared")).toBe("prepared");
+      expect(await readFile(join(target, "installed.txt"), "utf8")).toBe(
+        "ready",
+      );
+      expect(
+        (await readdir(root)).filter((name) => name.includes("staging")),
+      ).toEqual([]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

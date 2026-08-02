@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -5,6 +6,11 @@ import packageMetadata from "../package.json" with { type: "json" };
 import type { CommandRegistration, CommandRegistry } from "./commands.ts";
 import type { CommandOwner } from "./context.ts";
 import marketplacePlugin from "./first-party/marketplace.ts";
+import {
+  discoverInstalledMarketplaces,
+  type MarketplaceManifest,
+  readMarketplaceManifest,
+} from "./marketplaces.ts";
 import type {
   CommandHandler,
   CoreDependencies,
@@ -27,6 +33,24 @@ export interface PluginModule {
 }
 
 export type PluginSource = Plugin | PluginModule;
+export type ImportPlugin = (entryPath: string) => Promise<PluginModule>;
+
+export type PluginLoadFailure =
+  | {
+      readonly kind: "marketplace";
+      readonly marketplace: string;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "plugin";
+      readonly marketplace: string;
+      readonly plugin: string;
+      readonly message: string;
+    };
+
+export interface InitializeMarketplacePluginsOptions {
+  readonly importPlugin?: ImportPlugin;
+}
 
 function pluginName(owner: CommandOwner): string {
   return `${owner.marketplace}/${owner.plugin}`;
@@ -59,6 +83,59 @@ export async function initializeFirstPartyPlugins(
     { marketplace: "core", plugin: "marketplace" },
     marketplacePlugin,
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function importPlugin(entryPath: string): Promise<PluginModule> {
+  return import(pathToFileURL(entryPath).href);
+}
+
+export async function initializeMarketplacePlugins(
+  registry: CommandRegistry,
+  root: string,
+  options: InitializeMarketplacePluginsOptions = {},
+): Promise<readonly PluginLoadFailure[]> {
+  const failures: PluginLoadFailure[] = [];
+  const marketplaces = await discoverInstalledMarketplaces(root);
+
+  for (const { name: marketplace, checkout } of marketplaces) {
+    let manifest: MarketplaceManifest;
+    try {
+      manifest = await readMarketplaceManifest(checkout);
+    } catch (error) {
+      failures.push({
+        kind: "marketplace",
+        marketplace,
+        message: errorMessage(error),
+      });
+      continue;
+    }
+
+    for (const plugin of manifest.plugins) {
+      try {
+        const source = await (options.importPlugin ?? importPlugin)(
+          plugin.entryPath,
+        );
+        await initializePlugin(
+          registry,
+          { marketplace, plugin: plugin.name },
+          source,
+        );
+      } catch (error) {
+        failures.push({
+          kind: "plugin",
+          marketplace,
+          plugin: plugin.name,
+          message: errorMessage(error),
+        });
+      }
+    }
+  }
+
+  return Object.freeze(failures);
 }
 
 export async function initializePlugin(

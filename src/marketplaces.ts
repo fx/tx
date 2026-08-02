@@ -1,7 +1,17 @@
 import type { Dirent, Stats } from "node:fs";
-import { lstat, mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { posix, win32 } from "node:path";
+import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
 
 export interface UserDataDirectoryOptions {
   readonly platform?: NodeJS.Platform;
@@ -24,6 +34,10 @@ export interface GitResult {
 }
 
 export type RunGit = (args: readonly string[]) => Promise<GitResult>;
+export type RunBun = (
+  args: readonly string[],
+  options: { readonly cwd: string },
+) => Promise<void>;
 export type PrepareMarketplace = (checkout: string) => void | Promise<void>;
 
 export interface MarketplaceManagerOptions {
@@ -31,7 +45,22 @@ export interface MarketplaceManagerOptions {
   readonly prepareMarketplace?: PrepareMarketplace;
 }
 
+export interface MarketplacePluginEntry {
+  readonly name: string;
+  readonly entry: string;
+  readonly entryPath: string;
+}
+
+export interface MarketplaceManifest {
+  readonly plugins: readonly MarketplacePluginEntry[];
+}
+
+export interface PrepareMarketplaceOptions {
+  readonly runBun?: RunBun;
+}
+
 const marketplaceNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const manifestFilename = "tx.marketplace.json";
 
 function pathImplementation(platform: NodeJS.Platform): typeof posix {
   return platform === "win32" ? win32 : posix;
@@ -126,6 +155,134 @@ function containedMarketplacePath(root: string, name: string): string {
   return target;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isContainedPath(root: string, candidate: string): boolean {
+  const relation = relative(root, candidate);
+  return (
+    relation !== ".." &&
+    !relation.startsWith(`..${sep}`) &&
+    !isAbsolute(relation)
+  );
+}
+
+async function resolvePluginEntry(
+  checkoutPath: string,
+  pluginName: string,
+  entry: string,
+): Promise<string> {
+  if (!entry || isAbsolute(entry)) {
+    throw new Error(
+      `Plugin "${pluginName}" entry must be a repository-relative path`,
+    );
+  }
+
+  const entryPath = resolve(checkoutPath, entry);
+  if (!isContainedPath(checkoutPath, entryPath)) {
+    throw new Error(`Plugin "${pluginName}" entry escapes the marketplace`);
+  }
+
+  let metadata: Stats;
+  let resolvedEntry: string;
+  try {
+    [metadata, resolvedEntry] = await Promise.all([
+      stat(entryPath),
+      realpath(entryPath),
+    ]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Plugin "${pluginName}" entry does not exist: ${entry}`);
+    }
+    throw error;
+  }
+
+  if (!metadata.isFile()) {
+    throw new Error(
+      `Plugin "${pluginName}" entry is not a regular file: ${entry}`,
+    );
+  }
+  if (!isContainedPath(checkoutPath, resolvedEntry)) {
+    throw new Error(`Plugin "${pluginName}" entry escapes the marketplace`);
+  }
+  return resolvedEntry;
+}
+
+export async function readMarketplaceManifest(
+  checkout: string,
+): Promise<MarketplaceManifest> {
+  const checkoutPath = await realpath(checkout);
+  const manifestPath = resolve(checkoutPath, manifestFilename);
+  let document: unknown;
+  try {
+    const resolvedManifestPath = await realpath(manifestPath);
+    if (!isContainedPath(checkoutPath, resolvedManifestPath)) {
+      throw new Error(`${manifestFilename} escapes the marketplace`);
+    }
+    document = JSON.parse(await readFile(resolvedManifestPath, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Missing ${manifestFilename}`);
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error(`Invalid ${manifestFilename}: ${error.message}`);
+    }
+    throw error;
+  }
+
+  if (!isRecord(document)) {
+    throw new Error(`${manifestFilename} must contain a plugins array`);
+  }
+  const pluginValues = (document as { plugins?: unknown }).plugins;
+  if (!Array.isArray(pluginValues)) {
+    throw new Error(`${manifestFilename} must contain a plugins array`);
+  }
+  if (pluginValues.length === 0) {
+    throw new Error(`${manifestFilename} plugins must not be empty`);
+  }
+
+  const names = new Set<string>();
+  const plugins: MarketplacePluginEntry[] = [];
+  for (const [index, value] of pluginValues.entries()) {
+    if (!isRecord(value)) {
+      throw new Error(
+        `${manifestFilename} plugin ${index + 1} must be an object`,
+      );
+    }
+    const candidate = value as { name?: unknown; entry?: unknown };
+    if (
+      typeof candidate.name !== "string" ||
+      !isSafeMarketplaceName(candidate.name)
+    ) {
+      throw new Error(
+        `${manifestFilename} plugin ${index + 1} must have a safe non-empty name`,
+      );
+    }
+    if (names.has(candidate.name)) {
+      throw new Error(`Duplicate plugin name "${candidate.name}"`);
+    }
+    if (typeof candidate.entry !== "string") {
+      throw new Error(`Plugin "${candidate.name}" entry must be a string`);
+    }
+
+    names.add(candidate.name);
+    plugins.push(
+      Object.freeze({
+        name: candidate.name,
+        entry: candidate.entry,
+        entryPath: await resolvePluginEntry(
+          checkoutPath,
+          candidate.name,
+          candidate.entry,
+        ),
+      }),
+    );
+  }
+
+  return Object.freeze({ plugins: Object.freeze(plugins) });
+}
+
 export function deriveMarketplaceName(repository: string): string {
   if (!repository) throw new Error("Repository must not be empty");
 
@@ -208,7 +365,36 @@ export async function runGit(args: readonly string[]): Promise<GitResult> {
   return { stdout };
 }
 
-export const prepareMarketplace: PrepareMarketplace = async () => {};
+export async function runBun(
+  args: readonly string[],
+  options: { readonly cwd: string },
+): Promise<void> {
+  const bunProcess = Bun.spawn(["bun", ...args], {
+    cwd: options.cwd,
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  const [exitCode, stderr] = await Promise.all([
+    bunProcess.exited,
+    new Response(bunProcess.stderr).text(),
+  ]);
+  if (exitCode !== 0) {
+    const detail = stderr.trim();
+    throw new Error(
+      `Bun dependency installation failed${detail ? `: ${detail}` : ""}`,
+    );
+  }
+}
+
+export async function prepareMarketplace(
+  checkout: string,
+  options: PrepareMarketplaceOptions = {},
+): Promise<void> {
+  await readMarketplaceManifest(checkout);
+  if (await pathExists(resolve(checkout, "package.json"))) {
+    await (options.runBun ?? runBun)(["install"], { cwd: checkout });
+  }
+}
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -218,6 +404,28 @@ async function pathExists(path: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
+}
+
+export async function discoverInstalledMarketplaces(
+  root: string,
+): Promise<readonly { readonly name: string; readonly checkout: string }[]> {
+  let entries: Dirent<string>[];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+
+  return entries
+    .filter((entry) => isSafeMarketplaceName(entry.name) && entry.isDirectory())
+    .sort((left, right) =>
+      left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+    )
+    .map((entry) => ({
+      name: entry.name,
+      checkout: containedMarketplacePath(root, entry.name),
+    }));
 }
 
 export class MarketplaceManager {
@@ -257,40 +465,26 @@ export class MarketplaceManager {
   }
 
   async list(): Promise<readonly MarketplaceListing[]> {
-    let entries: Dirent<string>[];
-    try {
-      entries = await readdir(this.#root, { withFileTypes: true });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
-
-    const directories = entries
-      .filter(
-        (entry) => isSafeMarketplaceName(entry.name) && entry.isDirectory(),
-      )
-      .sort((left, right) =>
-        left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-      );
-
+    const marketplaces = await discoverInstalledMarketplaces(this.#root);
     return Promise.all(
-      directories.map(async (entry): Promise<MarketplaceListing> => {
-        const checkout = containedMarketplacePath(this.#root, entry.name);
-        let source = "<unknown>";
-        try {
-          const result = await this.#runGit([
-            "-C",
-            checkout,
-            "config",
-            "--get",
-            "remote.origin.url",
-          ]);
-          source = result.stdout.trim() || "<unknown>";
-        } catch {
-          // A corrupt checkout remains visible and removable.
-        }
-        return { name: entry.name, source };
-      }),
+      marketplaces.map(
+        async ({ name, checkout }): Promise<MarketplaceListing> => {
+          let source = "<unknown>";
+          try {
+            const result = await this.#runGit([
+              "-C",
+              checkout,
+              "config",
+              "--get",
+              "remote.origin.url",
+            ]);
+            source = result.stdout.trim() || "<unknown>";
+          } catch {
+            // A corrupt checkout remains visible and removable.
+          }
+          return { name, source };
+        },
+      ),
     );
   }
 

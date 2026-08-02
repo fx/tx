@@ -79,11 +79,11 @@ The scoped API records marketplace and plugin ownership for every command. It in
   - [x] Register `marketplace add`, `list`, and `remove` through `PluginAPI`
   - [x] Clone into temporary storage and finalize only after successful installation
   - [x] Ensure the dispatcher contains no marketplace-specific branch
-- [ ] Implement external marketplace manifests and dependencies
-  - [ ] Define and validate `tx.marketplace.json`
-  - [ ] Validate safe single-component marketplace names, unique plugin names, contained paths, and repository-relative entrypoints
-  - [ ] Run Bun dependency installation only when `package.json` exists
-  - [ ] Dynamically import TypeScript plugin entries in deterministic order
+- [x] Implement external marketplace manifests and dependencies (PR #8)
+  - [x] Define and validate `tx.marketplace.json`
+  - [x] Validate safe single-component marketplace names, unique plugin names, contained paths, and repository-relative entrypoints
+  - [x] Run Bun dependency installation only when `package.json` exists
+  - [x] Dynamically import TypeScript plugin entries in deterministic order
 - [ ] Add end-to-end plugin-system verification
   - [ ] Verify the bundled marketplace plugin uses the same registration and collision behavior as external plugins
   - [ ] Test a local Git marketplace containing multiple plugins
