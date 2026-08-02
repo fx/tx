@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 
-const sourceRoot = new URL("../src/", import.meta.url);
+const productionRoots = [
+  new URL("../src/", import.meta.url),
+  new URL("../plugins/", import.meta.url),
+];
 const sourceModuleExtensions = [".ts", ".tsx", ".mts", ".cts"];
 const declarationModulePattern = /\.d\.(?:ts|mts|cts)$/;
 
@@ -28,7 +31,9 @@ async function findSourceModules(directory: URL): Promise<URL[]> {
 }
 
 test("every production module is loaded for coverage", async () => {
-  const modules = await findSourceModules(sourceRoot);
+  const modules = (
+    await Promise.all(productionRoots.map(findSourceModules))
+  ).flat();
 
   expect(modules.length).toBeGreaterThan(0);
   await Promise.all(modules.map((module) => import(module.href)));

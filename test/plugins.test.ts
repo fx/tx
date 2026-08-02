@@ -58,6 +58,13 @@ describe("public plugin contract", () => {
     expect(Object.isFrozen(coreDependencies)).toBe(true);
     expect(Object.isFrozen(coreDependencies.tx)).toBe(true);
     expect(Object.isFrozen(coreDependencies.versions)).toBe(true);
+    expect(Object.isFrozen(coreDependencies.marketplace)).toBe(true);
+    expect(typeof coreDependencies.marketplace.resolveDirectory).toBe(
+      "function",
+    );
+    expect(typeof coreDependencies.marketplace.validateName).toBe("function");
+    expect(typeof coreDependencies.marketplace.discover).toBe("function");
+    expect(typeof coreDependencies.marketplace.prepare).toBe("function");
   });
 });
 

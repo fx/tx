@@ -18,14 +18,24 @@ import {
   parseAddMarketplaceArguments,
   parseListMarketplaceArguments,
   parseRemoveMarketplaceArguments,
+  runGit,
+} from "../plugins/marketplace/manager.ts";
+import {
+  discoverInstalledMarketplaces,
   prepareMarketplace,
   readMarketplaceManifest,
   resolveMarketplaceDirectory,
   resolveUserDataDirectory,
   runBun,
-  runGit,
   validateMarketplaceName,
 } from "../src/marketplaces.ts";
+
+const marketplaceCapabilities = {
+  resolveDirectory: resolveMarketplaceDirectory,
+  validateName: validateMarketplaceName,
+  discover: discoverInstalledMarketplaces,
+  prepare: prepareMarketplace,
+};
 
 async function temporaryDirectory(prefix: string): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), prefix)));
@@ -141,23 +151,40 @@ describe("marketplace names and arguments", () => {
     ["../local/repository", "repository"],
     ["C:\\repos\\windows.git", "windows"],
   ])("derives %s as %s", (repository, name) => {
-    expect(deriveMarketplaceName(repository)).toBe(name);
+    expect(deriveMarketplaceName(repository, validateMarketplaceName)).toBe(
+      name,
+    );
   });
 
   test.each(["", "https://example.com/..", "git@example.com:me/-bad.git"])(
     "rejects repository without a safe derived name: %s",
-    (repository) => expect(() => deriveMarketplaceName(repository)).toThrow(),
+    (repository) =>
+      expect(() =>
+        deriveMarketplaceName(repository, validateMarketplaceName),
+      ).toThrow(),
   );
 
   test("strictly parses add arguments with the name in either position", () => {
-    expect(parseAddMarketplaceArguments(["repo"])).toEqual({
+    expect(
+      parseAddMarketplaceArguments(["repo"], validateMarketplaceName),
+    ).toEqual({
       repository: "repo",
     });
-    expect(parseAddMarketplaceArguments(["--name", "mine", "repo"])).toEqual({
+    expect(
+      parseAddMarketplaceArguments(
+        ["--name", "mine", "repo"],
+        validateMarketplaceName,
+      ),
+    ).toEqual({
       repository: "repo",
       name: "mine",
     });
-    expect(parseAddMarketplaceArguments(["repo", "--name", "mine"])).toEqual({
+    expect(
+      parseAddMarketplaceArguments(
+        ["repo", "--name", "mine"],
+        validateMarketplaceName,
+      ),
+    ).toEqual({
       repository: "repo",
       name: "mine",
     });
@@ -172,7 +199,9 @@ describe("marketplace names and arguments", () => {
     [["--name", "one", "--name", "two", "repo"]],
     [["repo", "--name", "../bad"]],
   ] as const)("rejects invalid add arguments %#", (args) => {
-    expect(() => parseAddMarketplaceArguments(args)).toThrow();
+    expect(() =>
+      parseAddMarketplaceArguments(args, validateMarketplaceName),
+    ).toThrow();
   });
 
   test("strictly parses list and remove arguments", () => {
@@ -180,12 +209,18 @@ describe("marketplace names and arguments", () => {
     expect(() => parseListMarketplaceArguments(["extra"])).toThrow(
       "Usage: tx marketplace list",
     );
-    expect(parseRemoveMarketplaceArguments(["mine"])).toBe("mine");
-    expect(() => parseRemoveMarketplaceArguments([])).toThrow(
-      "Usage: tx marketplace remove <name>",
-    );
-    expect(() => parseRemoveMarketplaceArguments(["one", "two"])).toThrow();
-    expect(() => parseRemoveMarketplaceArguments(["../bad"])).toThrow();
+    expect(
+      parseRemoveMarketplaceArguments(["mine"], validateMarketplaceName),
+    ).toBe("mine");
+    expect(() =>
+      parseRemoveMarketplaceArguments([], validateMarketplaceName),
+    ).toThrow("Usage: tx marketplace remove <name>");
+    expect(() =>
+      parseRemoveMarketplaceArguments(["one", "two"], validateMarketplaceName),
+    ).toThrow();
+    expect(() =>
+      parseRemoveMarketplaceArguments(["../bad"], validateMarketplaceName),
+    ).toThrow();
   });
 });
 
@@ -330,6 +365,23 @@ describe("marketplace manifests", () => {
     }
   });
 
+  test("preserves non-missing filesystem errors for plugin entries", async () => {
+    const root = await temporaryDirectory("tx-manifest-entry-error-");
+    try {
+      await symlink("loop.ts", join(root, "loop.ts"));
+      await writeFile(
+        join(root, "tx.marketplace.json"),
+        '{"plugins":[{"name":"notes","entry":"loop.ts"}]}',
+      );
+      await expect(readMarketplaceManifest(root)).rejects.toHaveProperty(
+        "code",
+        "ELOOP",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("allows contained symlinks and rejects symlinks escaping the checkout", async () => {
     const parent = await temporaryDirectory("tx-manifest-symlink-");
     const root = join(parent, "marketplace");
@@ -421,7 +473,7 @@ describe("MarketplaceManager", () => {
       const repository = await createGitRepository(temporaryRoot);
       const root = join(temporaryRoot, "data", "marketplaces");
       let prepared = false;
-      const manager = new MarketplaceManager(root, {
+      const manager = new MarketplaceManager(root, marketplaceCapabilities, {
         prepareMarketplace: async (checkout) => {
           expect(checkout).toContain(".source-staging-");
           expect(await readFile(join(checkout, "README.txt"), "utf8")).toBe(
@@ -463,7 +515,7 @@ describe("MarketplaceManager", () => {
     try {
       const root = join(temporaryRoot, "marketplaces");
       const target = join(root, "prepared");
-      const manager = new MarketplaceManager(root, {
+      const manager = new MarketplaceManager(root, marketplaceCapabilities, {
         runGit: async (args) => {
           const staging = args.at(-1) as string;
           await writeFile(
@@ -508,7 +560,7 @@ describe("MarketplaceManager", () => {
     try {
       const root = join(temporaryRoot, "marketplaces");
       const target = join(root, "race");
-      const manager = new MarketplaceManager(root, {
+      const manager = new MarketplaceManager(root, marketplaceCapabilities, {
         runGit: async (args) => {
           const staging = args.at(-1) as string;
           await writeFile(join(staging, "clone.txt"), "clone");
@@ -540,7 +592,7 @@ describe("MarketplaceManager", () => {
       const temporaryRoot = await temporaryDirectory("tx-marketplace-failure-");
       try {
         const root = join(temporaryRoot, "marketplaces");
-        const manager = new MarketplaceManager(root, {
+        const manager = new MarketplaceManager(root, marketplaceCapabilities, {
           runGit: async (args) => {
             if (failure === "clone") throw new Error("clone failed");
             await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
@@ -575,7 +627,7 @@ describe("MarketplaceManager", () => {
       const zetaStarted = new Promise<void>((resolve) => {
         releaseAlpha = resolve;
       });
-      const manager = new MarketplaceManager(root, {
+      const manager = new MarketplaceManager(root, marketplaceCapabilities, {
         runGit: async (args) => {
           calls.push([...args]);
           if (args[1]?.endsWith("zeta")) {
@@ -604,7 +656,7 @@ describe("MarketplaceManager", () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplace-empty-");
     try {
       const root = join(temporaryRoot, "missing");
-      const manager = new MarketplaceManager(root, {
+      const manager = new MarketplaceManager(root, marketplaceCapabilities, {
         runGit: async () => ({ stdout: "  \n" }),
       });
       expect(await manager.list()).toEqual([]);
@@ -627,7 +679,9 @@ describe("MarketplaceManager", () => {
       await writeFile(join(external, "keep.txt"), "keep");
       await symlink(external, join(root, "linked"));
 
-      await new MarketplaceManager(root).remove("linked");
+      await new MarketplaceManager(root, marketplaceCapabilities).remove(
+        "linked",
+      );
 
       expect(await readFile(join(external, "keep.txt"), "utf8")).toBe("keep");
       await expect(lstat(join(root, "linked"))).rejects.toHaveProperty(

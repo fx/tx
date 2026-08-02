@@ -2,14 +2,16 @@ import { pathToFileURL } from "node:url";
 import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
-
+import marketplacePlugin from "../plugins/marketplace/index.ts";
 import type { CommandRegistration, CommandRegistry } from "./commands.ts";
 import type { CommandOwner } from "./context.ts";
-import marketplacePlugin from "./first-party/marketplace.ts";
 import {
   discoverInstalledMarketplaces,
   type MarketplaceManifest,
+  prepareMarketplace,
   readMarketplaceManifest,
+  resolveMarketplaceDirectory,
+  validateMarketplaceName,
 } from "./marketplaces.ts";
 import type {
   CommandHandler,
@@ -25,6 +27,12 @@ export const coreDependencies: CoreDependencies = Object.freeze({
   versions: Object.freeze({
     react: packageMetadata.dependencies.react,
     ink: packageMetadata.dependencies.ink,
+  }),
+  marketplace: Object.freeze({
+    resolveDirectory: resolveMarketplaceDirectory,
+    validateName: validateMarketplaceName,
+    discover: discoverInstalledMarketplaces,
+    prepare: prepareMarketplace,
   }),
 });
 
