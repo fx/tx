@@ -278,13 +278,16 @@ async function withProgram<T>(
   operation: (program: Program) => Promise<T>,
 ): Promise<T> {
   const api = new API();
-  const snapshot = await api.updateSnapshot({ openProjects: [configPath] });
   try {
-    const project = snapshot.getProject(configPath);
-    if (!project) throw new Error(`TypeScript did not load ${configPath}`);
-    return await operation(project.program);
+    const snapshot = await api.updateSnapshot({ openProjects: [configPath] });
+    try {
+      const project = snapshot.getProject(configPath);
+      if (!project) throw new Error(`TypeScript did not load ${configPath}`);
+      return await operation(project.program);
+    } finally {
+      await snapshot.dispose();
+    }
   } finally {
-    await snapshot.dispose();
     await api.close();
   }
 }
@@ -385,7 +388,7 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       for (const [name, , expectedCount] of fixtureSources) {
         expect(
           txPluginViolations(
-            await requiredSourceFile(program, join(root, name)),
+            await requiredSourceFile(program, await realpath(join(root, name))),
           ),
         ).toHaveLength(expectedCount);
       }
