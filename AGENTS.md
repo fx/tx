@@ -8,4 +8,4 @@ Read `REVIEW.md` at the repository root and apply it in full as the review rules
 
 ## Plugins
 
-Follow the [plugin guide](docs/manual/plugins.md) when authoring or changing plugins.
+Follow the [plugin guide](docs/manual/plugins.md). Place bundled plugins under `plugins/<name>/` and compose ordered defaults only in root `cli.ts`; keep `src/` feature-neutral and keep plugin module graphs out of private `src/` implementation. Import `tx/plugin` types type-only, add Bun tests for observable behavior, preserve required coverage, and run `bun run check`.
