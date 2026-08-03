@@ -74,11 +74,12 @@ test("the production build is a standalone executable", async () => {
     const dataDirectory = join(temporaryRoot, "data");
     await Promise.all([
       mkdir(dependency, { recursive: true }),
+      mkdir(join(marketplace, ".tx"), { recursive: true }),
       mkdir(join(marketplace, "plugins"), { recursive: true }),
     ]);
     await Promise.all([
       writeFile(
-        join(marketplace, "tx.marketplace.json"),
+        join(marketplace, ".tx/config.json"),
         JSON.stringify({
           plugins: [
             { name: "top", entry: "top.ts" },

@@ -92,14 +92,14 @@ test("default startup dispatches healthy plugins but returns failure for ordered
   const marketplaceRoot = join(dataHome, "tx", "marketplaces");
   try {
     for (const name of ["alpha", "beta", "gamma", "delta"]) {
-      await mkdir(join(marketplaceRoot, name), { recursive: true });
+      await mkdir(join(marketplaceRoot, name, ".tx"), { recursive: true });
     }
     await writeFile(
       join(marketplaceRoot, "alpha", "command.ts"),
       'export default ({ command }) => command("healthy", (_args, context) => context.stdout.write("dispatched\\n"));\n',
     );
     await writeFile(
-      join(marketplaceRoot, "alpha", "tx.marketplace.json"),
+      join(marketplaceRoot, "alpha", ".tx/config.json"),
       '{"plugins":[{"name":"command","entry":"command.ts"}]}',
     );
     await writeFile(
@@ -107,7 +107,7 @@ test("default startup dispatches healthy plugins but returns failure for ordered
       "export default 42;\n",
     );
     await writeFile(
-      join(marketplaceRoot, "beta", "tx.marketplace.json"),
+      join(marketplaceRoot, "beta", ".tx/config.json"),
       '{"plugins":[{"name":"broken","entry":"broken.ts"}]}',
     );
     await writeFile(
@@ -115,13 +115,10 @@ test("default startup dispatches healthy plugins but returns failure for ordered
       'export default () => { throw "plain failure"; };\n',
     );
     await writeFile(
-      join(marketplaceRoot, "gamma", "tx.marketplace.json"),
+      join(marketplaceRoot, "gamma", ".tx/config.json"),
       '{"plugins":[{"name":"throwing","entry":"throwing.ts"}]}',
     );
-    await writeFile(
-      join(marketplaceRoot, "delta", "tx.marketplace.json"),
-      "{}",
-    );
+    await writeFile(join(marketplaceRoot, "delta", ".tx/config.json"), "{}");
 
     const output = capturedContext({ XDG_DATA_HOME: dataHome });
 
@@ -136,7 +133,7 @@ test("default startup dispatches healthy plugins but returns failure for ordered
     expect(output.stdoutText()).toBe("dispatched\n");
     expect(output.stderrText()).toBe(
       [
-        'Error loading plugin marketplace/installed/delta: Marketplace "delta" failed: tx.marketplace.json must contain a plugins array. Run "tx marketplace remove delta" to remove it.',
+        'Error loading plugin marketplace/installed/delta: Marketplace "delta" failed: .tx/config.json must contain a plugins array. Run "tx marketplace remove delta" to remove it.',
         'Error loading plugin marketplace/installed/beta/broken: Marketplace "beta" plugin "broken" failed: Plugin broken must default-export a function. Run "tx marketplace remove beta" to remove it.',
         'Error loading plugin marketplace/installed/gamma/throwing: Marketplace "gamma" plugin "throwing" failed: plain failure. Run "tx marketplace remove gamma" to remove it.',
         "",
@@ -151,13 +148,13 @@ test("first-party commands survive later external collisions", async () => {
   const dataHome = await mkdtemp(join(tmpdir(), "tx-cli-collision-"));
   const checkout = join(dataHome, "tx", "marketplaces", "personal");
   try {
-    await mkdir(checkout, { recursive: true });
+    await mkdir(join(checkout, ".tx"), { recursive: true });
     await writeFile(
       join(checkout, "collision.test.ts"),
       'export default ({ command }) => command("marketplace list", () => {});\n',
     );
     await writeFile(
-      join(checkout, "tx.marketplace.json"),
+      join(checkout, ".tx/config.json"),
       '{"plugins":[{"name":"collision","entry":"collision.test.ts"}]}',
     );
     const output = capturedContext({ XDG_DATA_HOME: dataHome });

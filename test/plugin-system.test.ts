@@ -48,7 +48,7 @@ describe("source CLI marketplace installation failures", () => {
       const dataHome = join(root, "data");
       const source = await createGitRepository(root, "source", {
         "plugin.ts": "export default () => {};\n",
-        "tx.marketplace.json": manifest("fixture"),
+        ".tx/config.json": manifest("fixture"),
       });
 
       const result = runCli(
@@ -76,19 +76,19 @@ describe("source CLI marketplace installation failures", () => {
     {
       label: "a malformed manifest",
       name: "malformed",
-      files: { "tx.marketplace.json": "{" },
-      error: "Invalid tx.marketplace.json",
+      files: { ".tx/config.json": "{" },
+      error: "Invalid .tx/config.json",
     },
     {
       label: "an invalid manifest",
       name: "invalid",
-      files: { "tx.marketplace.json": "{}" },
-      error: "tx.marketplace.json must contain a plugins array",
+      files: { ".tx/config.json": "{}" },
+      error: ".tx/config.json must contain a plugins array",
     },
     {
       label: "a missing plugin entry",
       name: "missing-entry",
-      files: { "tx.marketplace.json": manifest("missing", "missing.ts") },
+      files: { ".tx/config.json": manifest("missing", "missing.ts") },
       error: 'Plugin "missing" entry does not exist: missing.ts',
     },
     {
@@ -100,7 +100,7 @@ describe("source CLI marketplace installation failures", () => {
           dependencies: { missing: "file:./does-not-exist" },
         }),
         "plugin.ts": "export default () => {};\n",
-        "tx.marketplace.json": manifest("fixture"),
+        ".tx/config.json": manifest("fixture"),
       },
       error: "Bun dependency installation failed",
     },
@@ -164,7 +164,7 @@ describe("source CLI plugin registration", () => {
           command("ghost valid", (_args, context) => context.stdout.write("ghost\\n"));
           command(["ghost", "   "], () => {});
         };\n`,
-        "tx.marketplace.json": manifest("invalid-path"),
+        ".tx/config.json": manifest("invalid-path"),
       });
       expect(
         runCli(dataHome, "marketplace", "add", source, "--name", "invalid-path")
@@ -192,7 +192,7 @@ describe("source CLI plugin registration", () => {
           command("ghost bundled-collision", () => {});
           command("marketplace list", () => {});
         };\n`,
-        "tx.marketplace.json": manifest("collision"),
+        ".tx/config.json": manifest("collision"),
       });
       expect(
         runCli(dataHome, "marketplace", "add", source, "--name", "external")
@@ -232,7 +232,7 @@ describe("source CLI plugin registration", () => {
           command("beta only", () => {});
           command("shared", () => {});
         };\n`,
-        "tx.marketplace.json": JSON.stringify({
+        ".tx/config.json": JSON.stringify({
           plugins: [
             { name: "alpha", entry: "alpha.ts" },
             { name: "beta", entry: "beta.ts" },
@@ -273,11 +273,11 @@ test("broken marketplaces remain removable without blocking healthy plugins", as
       createGitRepository(root, "healthy-source", {
         "plugin.ts":
           'export default ({ command }) => command("healthy run", (_args, context) => context.stdout.write("healthy\\n"));\n',
-        "tx.marketplace.json": manifest("healthy"),
+        ".tx/config.json": manifest("healthy"),
       }),
       createGitRepository(root, "broken-source", {
         "plugin.ts": "export default 42;\n",
-        "tx.marketplace.json": manifest("broken"),
+        ".tx/config.json": manifest("broken"),
       }),
     ]);
 

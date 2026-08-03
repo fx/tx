@@ -42,7 +42,8 @@ export interface PrepareMarketplaceOptions {
 }
 
 const marketplaceNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const manifestFilename = "tx.marketplace.json";
+const manifestFilename = ".tx/config.json";
+const legacyManifestFilename = "tx.marketplace.json";
 
 function pathImplementation(platform: NodeJS.Platform): typeof posix {
   return platform === "win32" ? win32 : posix;
@@ -173,13 +174,23 @@ export async function readMarketplaceManifest(
   checkout: string,
 ): Promise<MarketplaceManifest> {
   let checkoutPath: string;
+  let selectedManifestFilename = manifestFilename;
   let document: unknown;
   try {
     checkoutPath = await realpath(checkout);
-    const manifestPath = resolve(checkoutPath, manifestFilename);
-    const resolvedManifestPath = await realpath(manifestPath);
+    const preferredManifestPath = resolve(checkoutPath, manifestFilename);
+    if (!(await pathExists(preferredManifestPath))) {
+      const legacyManifestPath = resolve(checkoutPath, legacyManifestFilename);
+      if (!(await pathExists(legacyManifestPath))) {
+        throw new Error(`Missing ${manifestFilename}`);
+      }
+      selectedManifestFilename = legacyManifestFilename;
+    }
+    const resolvedManifestPath = await realpath(
+      resolve(checkoutPath, selectedManifestFilename),
+    );
     if (!isContainedPath(checkoutPath, resolvedManifestPath)) {
-      throw new Error(`${manifestFilename} escapes the marketplace`);
+      throw new Error(`${selectedManifestFilename} escapes the marketplace`);
     }
     document = JSON.parse(await readFile(resolvedManifestPath, "utf8"));
   } catch (error) {
@@ -187,25 +198,25 @@ export async function readMarketplaceManifest(
       throw new Error(`Missing ${manifestFilename}`);
     }
     if (error instanceof SyntaxError) {
-      throw new Error(`Invalid ${manifestFilename}: ${error.message}`);
+      throw new Error(`Invalid ${selectedManifestFilename}: ${error.message}`);
     }
     if (typeof (error as NodeJS.ErrnoException).code === "string") {
       throw new Error(
-        `Unable to read ${manifestFilename}: ${(error as Error).message}`,
+        `Unable to read ${selectedManifestFilename}: ${(error as Error).message}`,
       );
     }
     throw error;
   }
 
   if (!isRecord(document)) {
-    throw new Error(`${manifestFilename} must contain a plugins array`);
+    throw new Error(`${selectedManifestFilename} must contain a plugins array`);
   }
   const pluginValues = (document as { plugins?: unknown }).plugins;
   if (!Array.isArray(pluginValues)) {
-    throw new Error(`${manifestFilename} must contain a plugins array`);
+    throw new Error(`${selectedManifestFilename} must contain a plugins array`);
   }
   if (pluginValues.length === 0) {
-    throw new Error(`${manifestFilename} plugins must not be empty`);
+    throw new Error(`${selectedManifestFilename} plugins must not be empty`);
   }
 
   const names = new Set<string>();
@@ -213,7 +224,7 @@ export async function readMarketplaceManifest(
   for (const [index, value] of pluginValues.entries()) {
     if (!isRecord(value)) {
       throw new Error(
-        `${manifestFilename} plugin ${index + 1} must be an object`,
+        `${selectedManifestFilename} plugin ${index + 1} must be an object`,
       );
     }
     const candidate = value as { name?: unknown; entry?: unknown };
@@ -222,7 +233,7 @@ export async function readMarketplaceManifest(
       !isSafeMarketplaceName(candidate.name)
     ) {
       throw new Error(
-        `${manifestFilename} plugin ${index + 1} must have a safe non-empty name`,
+        `${selectedManifestFilename} plugin ${index + 1} must have a safe non-empty name`,
       );
     }
     if (names.has(candidate.name)) {
