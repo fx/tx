@@ -52,7 +52,7 @@ export default plugin;
 
 The initialization API provides an immutable `identity`, read-only `env`, shared `dependencies`, `command(path, handler)`, and `plugin(childDefinition)`. A command path may be a whitespace-separated string or an array of segments. Handlers receive remaining arguments plus process streams, environment, working directory, and the owning plugin identity. Loading, initialization, and command handlers may be asynchronous.
 
-Use `api.dependencies.react` and `api.dependencies.ink` instead of importing separate runtime copies; the injected values share the host's React and Ink instances and include tx and dependency version metadata.
+Use the initialization API's `dependencies.react` and `dependencies.ink` instead of importing separate runtime copies; the injected values share the host's React and Ink instances and include tx and dependency version metadata.
 
 Commands and child definitions registered during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed, and the invocation exits nonzero if any plugin failed.
 
