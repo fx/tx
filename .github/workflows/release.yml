@@ -93,11 +93,18 @@ jobs:
           if [[ "$RELEASE_CREATED" == "true" ]]; then
             [[ "$RELEASE_SHA" == "$TRIGGER_SHA" ]]
           elif [[ "$RUN_ATTEMPT" -gt 1 ]]; then
-            RELEASE_SHA="$TRIGGER_SHA"
-            [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
-            RELEASE_VERSION=$(gh api "/repos/${GH_REPO}/contents/package.json?ref=${RELEASE_SHA}" --jq .content |
-              base64 --decode | jq -er '.version | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+([+-][0-9A-Za-z.-]+)?$"))')
+            [[ "$TRIGGER_SHA" =~ ^[0-9a-f]{40}$ ]]
+            RELEASE_VERSION=$(gh api "/repos/${GH_REPO}/contents/package.json?ref=${TRIGGER_SHA}" --jq .content |
+              base64 --decode | jq -er '.version | select(type == "string")')
             RELEASE_TAG="v${RELEASE_VERSION}"
+            release=$(gh api "/repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" \
+              --jq 'select(.draft == false) | [.id, .tag_name] | @tsv' 2>/dev/null || true)
+            [[ -n "$release" ]] || exit 0
+            read -r release_id release_tag <<<"$release"
+            [[ "$release_id" =~ ^[0-9]+$ && "$release_tag" == "$RELEASE_TAG" ]] || exit 0
+            tag_sha=$(gh api "/repos/${GH_REPO}/commits/${RELEASE_TAG}" --jq .sha 2>/dev/null || true)
+            [[ "$tag_sha" == "$TRIGGER_SHA" ]] || exit 0
+            RELEASE_SHA="$TRIGGER_SHA"
           else
             exit 0
           fi
