@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultPlugins } from "../cli.ts";
+import packageMetadata from "../package.json" with { type: "json" };
 import { main } from "../src/cli.ts";
 import { CommandRegistry } from "../src/commands.ts";
 import {
@@ -48,6 +49,31 @@ function capturedContext(env: Record<string, string | undefined> = {}): {
     stderrText: () => stderr,
   };
 }
+
+test("main reports the package version before plugin initialization", async () => {
+  const output = capturedContext();
+  let loaded = false;
+
+  expect(
+    await main(
+      ["--version"],
+      [
+        {
+          identity: { name: "must-not-load" },
+          load() {
+            loaded = true;
+            throw new Error("unexpected plugin load");
+          },
+        },
+      ],
+      new CommandRegistry(),
+      output.context,
+    ),
+  ).toBe(0);
+  expect(loaded).toBe(false);
+  expect(output.stdoutText()).toBe(`${packageMetadata.version}\n`);
+  expect(output.stderrText()).toBe("");
+});
 
 test("main returns the dispatcher exit code with injected process wiring", async () => {
   const registry = new CommandRegistry();

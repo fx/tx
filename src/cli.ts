@@ -1,3 +1,4 @@
+import packageMetadata from "../package.json" with { type: "json" };
 import {
   CommandRegistry,
   dispatch,
@@ -15,6 +16,11 @@ export async function main(
   registry = new CommandRegistry(),
   context: CommandProcessContext = createProcessContext(),
 ): Promise<number> {
+  if (argv.length === 1 && argv[0] === "--version") {
+    context.stdout.write(`${packageMetadata.version}\n`);
+    return EXIT_SUCCESS;
+  }
+
   const failures = await initializePlugins(registry, definitions, {
     env: context.env,
   });
