@@ -45,18 +45,21 @@ jobs:
           set -euo pipefail
           count=$(jq 'length' <<<"$RELEASE_PRS")
           for ((index = 0; index < count; index++)); do
-            branch=$(jq -r ".[${index}].headBranchName" <<<"$RELEASE_PRS")
-            sha=$(jq -r ".[${index}].sha" <<<"$RELEASE_PRS")
-            [[ -n "$branch" && "$branch" != null && "$sha" =~ ^[0-9a-f]{40}$ ]]
+            pr_number=$(jq -er ".[${index}].number | select(type == \"number\" and . > 0 and floor == .)" <<<"$RELEASE_PRS")
+            read -r branch sha head_repository < <(gh api \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/${GH_REPO}/pulls/${pr_number}" \
+              --jq '[.head.ref, .head.sha, .head.repo.full_name] | @tsv')
+            [[ -n "$branch" && "$sha" =~ ^[0-9a-f]{40}$ && "$head_repository" == "$GH_REPO" ]]
 
             dispatched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             encoded_branch=$(jq -rn --arg value "$branch" '$value | @uri')
-            gh workflow run ci.yml --ref "$branch"
+            gh workflow run ci.yml --repo "$GH_REPO" --ref "$branch"
             run_id=""
             for attempt in {1..30}; do
               run_id=$(gh api \
                 -H "X-GitHub-Api-Version: 2022-11-28" \
-                "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${encoded_branch}&per_page=20" \
+                "/repos/${GH_REPO}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${encoded_branch}&per_page=20" \
                 --jq "[.workflow_runs[] | select(.head_sha == \"${sha}\" and .created_at >= \"${dispatched_at}\")][0].id // empty")
               [[ -n "$run_id" ]] && break
               sleep 10
@@ -66,8 +69,8 @@ jobs:
               exit 1
             }
 
-            gh run watch "$run_id" --exit-status
-            actual_sha=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq .head_sha)
+            gh run watch "$run_id" --repo "$GH_REPO" --exit-status
+            actual_sha=$(gh api "/repos/${GH_REPO}/actions/runs/${run_id}" --jq .head_sha)
             [[ "$actual_sha" == "$sha" ]] || {
               echo "CI run ${run_id} used ${actual_sha}, expected ${sha}" >&2
               exit 1
