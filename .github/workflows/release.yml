@@ -1,0 +1,145 @@
+name: Release
+
+"on":
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: write
+  packages: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Dispatch and verify release PR CI
+        if: steps.release.outputs.prs != '' && steps.release.outputs.prs != '[]'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          set -euo pipefail
+          count=$(jq 'length' <<<"$RELEASE_PRS")
+          for ((index = 0; index < count; index++)); do
+            branch=$(jq -r ".[${index}].headBranchName" <<<"$RELEASE_PRS")
+            sha=$(jq -r ".[${index}].sha" <<<"$RELEASE_PRS")
+            [[ -n "$branch" && "$branch" != null && "$sha" =~ ^[0-9a-f]{40}$ ]]
+
+            dispatched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            encoded_branch=$(jq -rn --arg value "$branch" '$value | @uri')
+            gh workflow run ci.yml --ref "$branch"
+            run_id=""
+            for attempt in {1..30}; do
+              run_id=$(gh api \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${encoded_branch}&per_page=20" \
+                --jq "[.workflow_runs[] | select(.head_sha == \"${sha}\" and .created_at >= \"${dispatched_at}\")][0].id // empty")
+              [[ -n "$run_id" ]] && break
+              sleep 10
+            done
+            [[ -n "$run_id" ]] || {
+              echo "No workflow_dispatch CI run found for ${branch} at ${sha}" >&2
+              exit 1
+            }
+
+            gh run watch "$run_id" --exit-status
+            actual_sha=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq .head_sha)
+            [[ "$actual_sha" == "$sha" ]] || {
+              echo "CI run ${run_id} used ${actual_sha}, expected ${sha}" >&2
+              exit 1
+            }
+          done
+
+      - name: Check out released commit
+        if: steps.release.outputs.release_created == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Set up Bun
+        if: steps.release.outputs.release_created == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Set up Node
+        if: steps.release.outputs.release_created == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@fx"
+
+      - name: Validate, package, and publish
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_VERSION: ${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          [[ "$RELEASE_TAG" == "v${RELEASE_VERSION}" ]]
+          [[ "$(git rev-list -n 1 "$RELEASE_TAG")" == "$RELEASE_SHA" ]]
+
+          bun install --frozen-lockfile
+          bun run check
+          package_version=$(node -p "require('./package.json').version")
+          [[ "$package_version" == "$RELEASE_VERSION" ]]
+          [[ "$(./dist/tx --version)" == "$RELEASE_VERSION" ]]
+
+          mkdir -p release package
+          npm pack --ignore-scripts --json --pack-destination package > package/pack.json
+          archive=$(jq -r '.[0].filename' package/pack.json)
+          [[ "$archive" == "fx-tx-${RELEASE_VERSION}.tgz" ]]
+          [[ "$(tar -xOf "package/${archive}" package/package.json | jq -r .version)" == "$RELEASE_VERSION" ]]
+
+          published=$(npm view "@fx/tx@${RELEASE_VERSION}" version --registry https://npm.pkg.github.com 2>/dev/null || true)
+          if [[ -z "$published" ]]; then
+            npm publish "package/${archive}" --registry https://npm.pkg.github.com
+          else
+            [[ "$published" == "$RELEASE_VERSION" ]]
+            echo "@fx/tx@${RELEASE_VERSION} is already published; refusing to overwrite it."
+          fi
+          [[ "$(npm view "@fx/tx@${RELEASE_VERSION}" version --registry https://npm.pkg.github.com)" == "$RELEASE_VERSION" ]]
+          mkdir published
+          npm pack "@fx/tx@${RELEASE_VERSION}" --ignore-scripts --pack-destination published --registry https://npm.pkg.github.com
+          cmp "package/${archive}" "published/${archive}"
+
+          cp dist/tx release/tx-linux-x64
+          chmod 755 release/tx-linux-x64
+          (cd release && sha256sum tx-linux-x64 > SHA256SUMS && sha256sum --check SHA256SUMS)
+          gh release upload "$RELEASE_TAG" release/tx-linux-x64 release/SHA256SUMS --clobber
+
+          expected_size=$(stat -c %s release/tx-linux-x64)
+          actual_size=$(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq '.assets[] | select(.name == "tx-linux-x64") | .size')
+          checksum_size=$(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq '.assets[] | select(.name == "SHA256SUMS") | .size')
+          [[ "$actual_size" == "$expected_size" && "$checksum_size" -gt 0 ]]
