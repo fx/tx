@@ -97,12 +97,22 @@ jobs:
             RELEASE_VERSION=$(gh api "/repos/${GH_REPO}/contents/package.json?ref=${TRIGGER_SHA}" --jq .content |
               base64 --decode | jq -er '.version | select(type == "string")')
             RELEASE_TAG="v${RELEASE_VERSION}"
-            release=$(gh api "/repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" \
-              --jq 'select(.draft == false) | [.id, .tag_name] | @tsv' 2>/dev/null || true)
+            api_error=$(mktemp)
+            trap 'rm -f "$api_error"' EXIT
+            if ! release=$(gh api "/repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" \
+              --jq 'select(.draft == false) | [.id, .tag_name] | @tsv' 2>"$api_error"); then
+              grep -q 'HTTP 404' "$api_error" && exit 0
+              cat "$api_error" >&2
+              exit 1
+            fi
             [[ -n "$release" ]] || exit 0
             read -r release_id release_tag <<<"$release"
             [[ "$release_id" =~ ^[0-9]+$ && "$release_tag" == "$RELEASE_TAG" ]] || exit 0
-            tag_sha=$(gh api "/repos/${GH_REPO}/commits/${RELEASE_TAG}" --jq .sha 2>/dev/null || true)
+            if ! tag_sha=$(gh api "/repos/${GH_REPO}/commits/${RELEASE_TAG}" --jq .sha 2>"$api_error"); then
+              grep -q 'HTTP 404' "$api_error" && exit 0
+              cat "$api_error" >&2
+              exit 1
+            fi
             [[ "$tag_sha" == "$TRIGGER_SHA" ]] || exit 0
             RELEASE_SHA="$TRIGGER_SHA"
           else
