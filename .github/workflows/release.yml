@@ -56,7 +56,7 @@ jobs:
             encoded_branch=$(jq -rn --arg value "$branch" '$value | @uri')
             gh workflow run ci.yml --repo "$GH_REPO" --ref "$branch"
             run_id=""
-            for attempt in {1..30}; do
+            for _ in {1..30}; do
               run_id=$(gh api \
                 -H "X-GitHub-Api-Version: 2022-11-28" \
                 "/repos/${GH_REPO}/actions/workflows/ci.yml/runs?event=workflow_dispatch&branch=${encoded_branch}&per_page=20" \
@@ -77,21 +77,61 @@ jobs:
             }
           done
 
+      - name: Resolve release publication
+        id: publication
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_CREATED" == "true" ]]; then
+            [[ "$RELEASE_SHA" == "$TRIGGER_SHA" ]]
+          elif [[ "$RUN_ATTEMPT" -gt 1 ]]; then
+            RELEASE_SHA="$TRIGGER_SHA"
+            [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            RELEASE_VERSION=$(gh api "/repos/${GH_REPO}/contents/package.json?ref=${RELEASE_SHA}" --jq .content |
+              base64 --decode | jq -er '.version | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+([+-][0-9A-Za-z.-]+)?$"))')
+            RELEASE_TAG="v${RELEASE_VERSION}"
+          else
+            exit 0
+          fi
+
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" == "v${RELEASE_VERSION}" ]]
+          read -r release_id release_tag draft < <(gh api "/repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" \
+            --jq '[.id, .tag_name, .draft] | @tsv')
+          [[ "$release_id" =~ ^[0-9]+$ && "$release_tag" == "$RELEASE_TAG" && "$draft" == "false" ]]
+          tag_sha=$(gh api "/repos/${GH_REPO}/commits/${RELEASE_TAG}" --jq .sha)
+          [[ "$tag_sha" == "$RELEASE_SHA" ]]
+
+          {
+            echo "publish=true"
+            echo "sha=${RELEASE_SHA}"
+            echo "tag=${RELEASE_TAG}"
+            echo "version=${RELEASE_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Check out released commit
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.publication.outputs.publish == 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.release.outputs.sha }}
+          ref: ${{ steps.publication.outputs.sha }}
           fetch-depth: 0
 
       - name: Set up Bun
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.publication.outputs.publish == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
       - name: Set up Node
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.publication.outputs.publish == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -99,14 +139,14 @@ jobs:
           scope: "@fx"
 
       - name: Validate, package, and publish
-        if: steps.release.outputs.release_created == 'true'
+        if: steps.publication.outputs.publish == 'true'
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_SHA: ${{ steps.release.outputs.sha }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SHA: ${{ steps.publication.outputs.sha }}
+          RELEASE_TAG: ${{ steps.publication.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.publication.outputs.version }}
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
