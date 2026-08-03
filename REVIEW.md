@@ -12,9 +12,8 @@ Cross-reference every PR against task lists in `docs/changes/` and `docs/tasks.m
 
 Use the [plugin guide](docs/manual/plugins.md) as the practical reference. For plugin changes, verify:
 
-- Trust is explicit: plugin code, dependencies, and lifecycle scripts are unsandboxed.
 - Core and plugin ownership boundaries remain intact, including type-only use of `tx/plugin`.
-- Initialization, collision, rollback, and failure isolation preserve atomic contributions and healthy plugins.
+- A failed plugin contributes nothing and does not block healthy plugins.
 - Marketplace names and configured entry paths remain unique, safe, relative, and contained.
 - React and Ink come from injected dependencies rather than separate runtime imports.
 - Observable behavior has Bun tests, required coverage is preserved, and `bun run check` passes.

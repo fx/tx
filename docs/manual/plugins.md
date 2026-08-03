@@ -54,14 +54,16 @@ The initialization API provides an immutable `identity`, read-only `env`, shared
 
 Use `api.dependencies.react` and `api.dependencies.ink` instead of importing separate runtime copies; the injected values share the host's React and Ink instances and include tx and dependency version metadata.
 
-Commands and child definitions registered during initialization are staged as one atomic contribution. A load, initialization, invalid-export, or command-collision failure discards that plugin's entire stage while preserving earlier and unrelated healthy plugins. Registration ends when initialization ends. Failures are diagnosed, healthy commands can still dispatch, and the invocation exits nonzero if any plugin failed.
+Commands and child definitions registered during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed, and the invocation exits nonzero if any plugin failed.
 
 ## Bundled plugins
 
-Bundled feature plugins live under `plugins/<name>/`, conventionally at `plugins/<name>/index.ts`. Only the root `cli.ts` composition root selects and orders defaults. Modules under `src/` must remain feature-neutral and must not import or name bundled plugins; a bundled plugin's complete module graph must not import private core implementation under `src/`. Use type-only imports from `tx/plugin`, standard Node.js or Bun APIs, and plugin-owned modules. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
+Bundled feature plugins live under `plugins/<name>/`, conventionally at `plugins/<name>/index.ts`. Only the root `cli.ts` composition root selects and orders defaults. Modules under `src/` must remain feature-neutral and must not import or name bundled plugins; a bundled plugin's complete module graph must not import private core implementation under `src/`.
+
+Use type-only imports from `tx/plugin`, standard Node.js or Bun APIs, and plugin-owned modules. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
 
 ## Validate changes
 
 Run `bun run check` to lint, type-check, test, and build. Add Bun tests for observable behavior and preserve 100% statement, function, and line coverage of production code.
 
-For normative detail, see the [plugin system specification](../specs/plugin-system/), [architecture specification](../specs/architecture/), and completed [external marketplace boundary change](../changes/0003-externalize-marketplace-plugin.md).
+For normative detail, see the [plugin system specification](../specs/plugin-system/) and [architecture specification](../specs/architecture/). The completed [external marketplace boundary change](../changes/0003-externalize-marketplace-plugin.md) records the implementation history.
