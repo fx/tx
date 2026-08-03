@@ -5,7 +5,7 @@
 Add the shared plugin runtime, a standalone bundled first-party marketplace plugin, Git-backed external marketplaces, TypeScript plugin loading, dependency installation, and injected core dependencies as defined by the [Plugin System spec](../specs/plugin-system/).
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0001
 
 ## Motivation
@@ -96,13 +96,13 @@ The scoped API records marketplace and plugin ownership for every command. It in
   - [x] Update core bundling and first-party registration to statically import only `plugins/marketplace/`'s entry module
   - [x] Add an automated module-graph boundary test covering every bundled plugin entry and rejecting plugin-to-`src/` imports, runtime `tx/plugin` imports, and core imports of bundled implementation modules beyond each entry
   - [x] Update affected unit and integration tests while preserving all standing type, coverage, and build gates
-- [ ] Add end-to-end plugin-system verification
-  - [ ] Verify the bundled marketplace plugin uses the same registration and collision behavior as external plugins
-  - [ ] Test a local Git marketplace containing multiple plugins
-  - [ ] Test a single-file plugin, nested commands, shared Ink, and marketplace dependencies
-  - [ ] Test unsafe names, empty command segments, invalid manifests, missing entries, invalid exports, command collisions, failed clone/install cleanup, and removal
-  - [ ] Test that a broken marketplace is reported without blocking first-party removal or healthy plugins
-  - [ ] Verify bundled and installed plugins load when running the compiled executable
+- [x] Add end-to-end plugin-system verification (PR #10)
+  - [x] Verify the bundled marketplace plugin uses the same registration and collision behavior as external plugins
+  - [x] Test a local Git marketplace containing multiple plugins
+  - [x] Test a single-file plugin, nested commands, shared Ink, and marketplace dependencies
+  - [x] Test unsafe names, empty command segments, invalid manifests, missing entries, invalid exports, command collisions, failed clone/install cleanup, and removal
+  - [x] Test that a broken marketplace is reported without blocking first-party removal or healthy plugins
+  - [x] Verify bundled and installed plugins load when running the compiled executable
 
 ## Open Questions
 
