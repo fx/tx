@@ -4,7 +4,7 @@
 
 The plugin system is a generic host for trusted plugins. Core code under `src/` owns plugin identity, contribution staging, initialization, and command dispatch only. Marketplace behavior is owned entirely by the bundled marketplace plugin outside `src/`; that plugin could be copied to another repository and consume only public `tx/plugin` types plus standard Node.js and Bun APIs.
 
-The requirements below describe the approved target architecture. [Change 0003](../../changes/0003-externalize-marketplace-plugin.md) tracks the implementation gap.
+The approved target architecture is implemented: the core is generic, and the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md).
 
 ## Requirements
 

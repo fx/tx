@@ -4,7 +4,7 @@
 
 `tx` is a small, extensible command-line toolbox. The host MUST be written in TypeScript, MUST run on Bun, and SHOULD be distributable as a single executable. Core implementation under `src/` is feature-neutral; user-facing functionality MAY live in public or private plugins.
 
-The approved target architecture is partially unimplemented. [Change 0003](../../changes/0003-externalize-marketplace-plugin.md) tracks the remaining boundary changes.
+The generic core and fully plugin-owned marketplace boundary approved in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md) are implemented.
 
 ## Requirements
 
