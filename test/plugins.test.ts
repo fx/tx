@@ -43,8 +43,7 @@ function outputContext(): CommandProcessContext & { stdoutText(): string } {
 }
 
 describe("public plugin contract", () => {
-  test("is type-only at runtime and injects shared frozen dependencies", async () => {
-    expect(Object.keys(await import("tx/plugin"))).toEqual([]);
+  test("injects shared frozen dependencies for the type-only contract", () => {
     expect(coreDependencies.react).toBe(react);
     expect(coreDependencies.ink).toBe(ink);
     expect(coreDependencies.tx.version).toBe(packageMetadata.version);

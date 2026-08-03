@@ -12,7 +12,7 @@ Cross-reference every PR against task lists in `docs/changes/` and `docs/tasks.m
 
 Use the [plugin guide](docs/manual/plugins.md) as the practical reference. For plugin changes, verify:
 
-- Core and plugin ownership boundaries remain intact, including type-only use of `tx/plugin`.
+- Core and plugin ownership boundaries remain intact, including type-only use of `@fx/tx/plugin`.
 - A failed plugin contributes nothing and does not block healthy plugins.
 - Marketplace plugin names are unique and safe; configured entries are non-empty repository-relative regular files contained after resolution.
 - React and Ink come from injected dependencies rather than separate runtime imports.

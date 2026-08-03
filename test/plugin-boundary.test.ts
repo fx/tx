@@ -187,33 +187,33 @@ async function txPluginViolations(
     if (
       isImportDeclaration(node) &&
       isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === "tx/plugin" &&
+      node.moduleSpecifier.text === "@fx/tx/plugin" &&
       node.importClause?.phaseModifier !== SyntaxKind.TypeKeyword
     ) {
-      violations.push("tx/plugin imports must use import type");
+      violations.push("@fx/tx/plugin imports must use import type");
     }
     if (
       isExportDeclaration(node) &&
       node.moduleSpecifier &&
       isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === "tx/plugin" &&
+      node.moduleSpecifier.text === "@fx/tx/plugin" &&
       !node.isTypeOnly
     ) {
-      violations.push("tx/plugin re-exports must use export type");
+      violations.push("@fx/tx/plugin re-exports must use export type");
     }
     if (
       isImportEqualsDeclaration(node) &&
       isExternalModuleReference(node.moduleReference) &&
       isStringLiteral(node.moduleReference.expression) &&
-      node.moduleReference.expression.text === "tx/plugin" &&
+      node.moduleReference.expression.text === "@fx/tx/plugin" &&
       !node.isTypeOnly
     ) {
-      violations.push("tx/plugin imports must use import type");
+      violations.push("@fx/tx/plugin imports must use import type");
     }
     if (isCallExpression(node) && isRuntimeModuleCall(node)) {
       const specifier = runtimeModuleSpecifier(node);
-      if (specifier?.text === "tx/plugin") {
-        violations.push("tx/plugin cannot be loaded at runtime");
+      if (specifier?.text === "@fx/tx/plugin") {
+        violations.push("@fx/tx/plugin cannot be loaded at runtime");
       } else if (!specifier) {
         const argument = node.arguments[0];
         if (argument && isIdentifier(argument)) {
@@ -231,8 +231,8 @@ async function txPluginViolations(
       bindings,
       checker,
     );
-    if (specifier?.text === "tx/plugin") {
-      violations.push("tx/plugin cannot be loaded at runtime");
+    if (specifier?.text === "@fx/tx/plugin") {
+      violations.push("@fx/tx/plugin cannot be loaded at runtime");
     }
   }
   return violations;
@@ -447,20 +447,20 @@ test("bundled plugin entry discovery supports every TypeScript module extension"
   }
 });
 
-test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () => {
+test("AST checks reject forbidden @fx/tx/plugin syntax and graph escapes", async () => {
   const root = await mkdtemp(join(tmpdir(), "tx-plugin-boundary-"));
   const fixtureSources = [
-    ["allowed-import.ts", 'import type { Plugin } from "tx/plugin";', 0],
-    ["allowed-export.ts", 'export type { Plugin } from "tx/plugin";', 0],
-    ["allowed-import-type.ts", 'type Plugin = import("tx/plugin").Plugin;', 0],
-    ["allowed-import-equals.ts", 'import type api = require("tx/plugin");', 0],
-    ["mixed-import.ts", 'import { type Plugin } from "tx/plugin";', 1],
-    ["side-effect.ts", 'import "tx/plugin";', 1],
-    ["value-import.ts", 'import { Plugin } from "tx/plugin";', 1],
-    ["value-export.ts", 'export { Plugin } from "tx/plugin";', 1],
-    ["dynamic-import.ts", 'const plugin = import("tx/plugin");', 1],
-    ["require.ts", 'const plugin = require("tx/plugin");', 1],
-    ["import-equals.ts", 'import api = require("tx/plugin");', 1],
+    ["allowed-import.ts", 'import type { Plugin } from "@fx/tx/plugin";', 0],
+    ["allowed-export.ts", 'export type { Plugin } from "@fx/tx/plugin";', 0],
+    ["allowed-import-type.ts", 'type Plugin = import("@fx/tx/plugin").Plugin;', 0],
+    ["allowed-import-equals.ts", 'import type api = require("@fx/tx/plugin");', 0],
+    ["mixed-import.ts", 'import { type Plugin } from "@fx/tx/plugin";', 1],
+    ["side-effect.ts", 'import "@fx/tx/plugin";', 1],
+    ["value-import.ts", 'import { Plugin } from "@fx/tx/plugin";', 1],
+    ["value-export.ts", 'export { Plugin } from "@fx/tx/plugin";', 1],
+    ["dynamic-import.ts", 'const plugin = import("@fx/tx/plugin");', 1],
+    ["require.ts", 'const plugin = require("@fx/tx/plugin");', 1],
+    ["import-equals.ts", 'import api = require("@fx/tx/plugin");', 1],
   ] as const;
 
   try {
@@ -565,7 +565,7 @@ test("string-bound module edges respect lexical symbols and immutability", async
         'const reassignedPath = "../../src/core.ts";',
         'reassignedPath = "./local.ts";',
         "void import(reassignedPath);",
-        'const pluginApi = "tx/plugin";',
+        'const pluginApi = "@fx/tx/plugin";',
         "function load(pluginApi: string) {",
         "  void import(pluginApi);",
         "}",
@@ -606,7 +606,7 @@ test("string-bound module edges respect lexical symbols and immutability", async
       ).toHaveLength(1);
       expect(
         pluginViolations.filter((message) =>
-          message.includes("tx/plugin cannot be loaded at runtime"),
+          message.includes("@fx/tx/plugin cannot be loaded at runtime"),
         ),
       ).toHaveLength(1);
       expect(
@@ -639,7 +639,7 @@ test("bundled plugin graphs allow dynamic plugin imports but reject non-literal 
         'const corePath = "../../src/core.ts";',
         "void import(corePath);",
         "require(corePath);",
-        'const pluginApi = "tx/plugin";',
+        'const pluginApi = "@fx/tx/plugin";',
         "void import(pluginApi);",
         "require(pluginApi);",
       ].join("\n"),
@@ -665,7 +665,7 @@ test("bundled plugin graphs allow dynamic plugin imports but reject non-literal 
       ).toHaveLength(2);
       expect(
         violations.filter((message) =>
-          message.includes("tx/plugin cannot be loaded at runtime"),
+          message.includes("@fx/tx/plugin cannot be loaded at runtime"),
         ),
       ).toHaveLength(2);
       expect(
@@ -723,9 +723,9 @@ test("bundled plugin graphs allow literal local and static type-only imports", a
     await writeFile(
       join(pluginRoot, "index.ts"),
       [
-        'import type { Plugin } from "tx/plugin";',
-        'type PluginModule = import("tx/plugin");',
-        'import type api = require("tx/plugin");',
+        'import type { Plugin } from "@fx/tx/plugin";',
+        'type PluginModule = import("@fx/tx/plugin");',
+        'import type api = require("@fx/tx/plugin");',
         'void import("./local.ts");',
         'require("./local.ts");',
       ].join("\n"),

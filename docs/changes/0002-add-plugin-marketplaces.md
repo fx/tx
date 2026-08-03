@@ -35,7 +35,7 @@ The [Plugin System requirements](../specs/plugin-system/index.md#requirements) o
 
 - Relocating the bundled marketplace implementation from `src/` to `plugins/marketplace/` while preserving its statically bundled entry registration.
 - Loading the bundled marketplace module through the same scoped plugin initializer used for external plugins.
-- Exporting the public plugin TypeScript types from a stable `tx/plugin` package path.
+- Exporting the public plugin TypeScript types from a stable `@fx/tx/plugin` package path.
 - Keeping incomplete marketplace clones outside the installed marketplace directory until validation and dependency installation succeed.
 
 ## Design
@@ -94,9 +94,9 @@ The scoped API records marketplace and plugin ownership for every command. It in
   - [x] Dynamically import TypeScript plugin entries in deterministic order
 - [x] Enforce the standalone bundled marketplace plugin boundary (PR #9)
   - [x] Move the bundled marketplace entry and all feature-owned command and management modules from `src/` into `plugins/marketplace/`, leaving only generic plugin runtime and loading infrastructure in `src/`
-  - [x] Replace imports of core implementation modules with injected `PluginAPI` capabilities; keep any `tx/plugin` imports type-only and use standard Node.js or Bun APIs directly where needed
+  - [x] Replace imports of core implementation modules with injected `PluginAPI` capabilities; keep any `@fx/tx/plugin` imports type-only and use standard Node.js or Bun APIs directly where needed
   - [x] Update core bundling and first-party registration to statically import only `plugins/marketplace/`'s entry module
-  - [x] Add an automated module-graph boundary test covering every bundled plugin entry and rejecting plugin-to-`src/` imports, runtime `tx/plugin` imports, and core imports of bundled implementation modules beyond each entry
+  - [x] Add an automated module-graph boundary test covering every bundled plugin entry and rejecting plugin-to-`src/` imports, runtime `@fx/tx/plugin` imports, and core imports of bundled implementation modules beyond each entry
   - [x] Update affected unit and integration tests while preserving all standing type, coverage, and build gates
 - [x] Add end-to-end plugin-system verification (PR #10)
   - [x] Verify the bundled marketplace plugin uses the same registration and collision behavior as external plugins

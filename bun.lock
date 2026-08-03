@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "tx",
+      "name": "@fx/tx",
       "dependencies": {
         "@types/node": "26.1.2",
         "@types/react": "19.2.18",

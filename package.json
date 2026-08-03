@@ -1,16 +1,44 @@
 {
-  "name": "tx",
+  "name": "@fx/tx",
   "version": "0.0.0",
-  "private": true,
+  "description": "Extensible command-line toolbox",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fx/tx.git"
+  },
+  "homepage": "https://github.com/fx/tx#readme",
+  "bugs": {
+    "url": "https://github.com/fx/tx/issues"
+  },
   "bin": {
-    "tx": "./cli.ts"
+    "tx": "./dist/tx"
   },
   "exports": {
     "./plugin": {
-      "types": "./src/plugin.ts",
-      "import": "./src/plugin.ts"
+      "types": "./src/plugin.ts"
     }
+  },
+  "files": [
+    "dist/tx",
+    "src/plugin.ts",
+    "src/context.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
   },
   "scripts": {
     "format": "biome format --write .",
