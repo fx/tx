@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -100,7 +100,7 @@ export default plugin;
             moduleResolution: "Bundler",
             allowImportingTsExtensions: true,
           },
-          include: ["plugin.ts"],
+          include: ["plugin.ts", "plugins/**/*.ts"],
         }),
       ),
     ]);
@@ -114,6 +114,11 @@ export default plugin;
         "--ignore-scripts",
       ],
       consumerRoot,
+    );
+    await cp(
+      join(repositoryRoot, "plugins", "marketplace"),
+      join(consumerRoot, "plugins", "marketplace"),
+      { recursive: true },
     );
     const binary = join(consumerRoot, "node_modules", ".bin", "tx");
     const runtimePath = join(temporaryRoot, "runtime-path");
