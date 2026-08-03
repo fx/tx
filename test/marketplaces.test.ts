@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   deriveMarketplaceName,
   MarketplaceManager,
+  normalizeMarketplaceRepository,
   parseAddMarketplaceArguments,
   parseListMarketplaceArguments,
   parseRemoveMarketplaceArguments,
@@ -120,6 +121,21 @@ describe("marketplace names and arguments", () => {
     (repository) => expect(() => deriveMarketplaceName(repository)).toThrow(),
   );
 
+  test.each([
+    ["fx/tx", "https://github.com/fx/tx.git"],
+    ["fx/tx.git", "https://github.com/fx/tx.git"],
+    ["github/.github", "https://github.com/github/.github.git"],
+    ["./fx/tx", "./fx/tx"],
+    ["../local/repository", "../local/repository"],
+    ["/local/repository", "/local/repository"],
+    ["C:\\repos\\windows.git", "C:\\repos\\windows.git"],
+    ["https://github.com/fx/tx.git", "https://github.com/fx/tx.git"],
+    ["ssh://git@github.com/fx/tx.git", "ssh://git@github.com/fx/tx.git"],
+    ["git@github.com:fx/tx.git", "git@github.com:fx/tx.git"],
+  ])("normalizes repository %s as %s", (repository, expected) => {
+    expect(normalizeMarketplaceRepository(repository)).toBe(expected);
+  });
+
   test("strictly parses add arguments with the name in either position", () => {
     expect(parseAddMarketplaceArguments(["repo"])).toEqual({
       repository: "repo",
@@ -164,7 +180,10 @@ describe("marketplace manifests", () => {
   test("accepts unknown fields and preserves manifest order", async () => {
     const root = await temporaryDirectory("tx-manifest-valid-");
     try {
-      await mkdir(join(root, "plugins", "work"), { recursive: true });
+      await Promise.all([
+        mkdir(join(root, ".tx"), { recursive: true }),
+        mkdir(join(root, "plugins", "work"), { recursive: true }),
+      ]);
       await writeFile(
         join(root, "plugins", "notes.ts"),
         "export default () => {};",
@@ -173,8 +192,9 @@ describe("marketplace manifests", () => {
         join(root, "plugins", "work", "index.ts"),
         "export default () => {};",
       );
+      await writeFile(join(root, "tx.marketplace.json"), "{}");
       await writeFile(
-        join(root, "tx.marketplace.json"),
+        join(root, ".tx/config.json"),
         JSON.stringify({
           future: { enabled: true },
           plugins: [
@@ -202,9 +222,38 @@ describe("marketplace manifests", () => {
     }
   });
 
+  test("falls back to the legacy root manifest", async () => {
+    const root = await temporaryDirectory("tx-manifest-legacy-");
+    try {
+      await writeFile(join(root, "plugin.ts"), "export default () => {};");
+      await writeFile(
+        join(root, "tx.marketplace.json"),
+        '{"plugins":[{"name":"plugin","entry":"plugin.ts"}]}',
+      );
+
+      expect((await readMarketplaceManifest(root)).plugins[0]?.name).toBe(
+        "plugin",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("identifies a selected legacy manifest that cannot be resolved", async () => {
+    const root = await temporaryDirectory("tx-manifest-legacy-missing-");
+    try {
+      await symlink("missing.json", join(root, "tx.marketplace.json"));
+      await expect(readMarketplaceManifest(root)).rejects.toThrow(
+        "Missing tx.marketplace.json",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test.each([
-    ["missing", undefined, "Missing tx.marketplace.json"],
-    ["malformed JSON", "{", "Invalid tx.marketplace.json"],
+    ["missing", undefined, "Missing .tx/config.json"],
+    ["malformed JSON", "{", "Invalid .tx/config.json"],
     ["non-object", "[]", "must contain a plugins array"],
     ["missing plugins", "{}", "must contain a plugins array"],
     ["empty plugins", '{"plugins":[]}', "plugins must not be empty"],
@@ -263,11 +312,14 @@ describe("marketplace manifests", () => {
     const parent = await temporaryDirectory("tx-manifest-invalid-");
     const root = join(parent, "marketplace");
     try {
-      await mkdir(join(root, "plugins"), { recursive: true });
+      await Promise.all([
+        mkdir(join(root, ".tx"), { recursive: true }),
+        mkdir(join(root, "plugins"), { recursive: true }),
+      ]);
       await writeFile(join(parent, "outside.ts"), "outside");
       await writeFile(join(root, "plugin.ts"), "plugin");
       if (contents !== undefined) {
-        await writeFile(join(root, "tx.marketplace.json"), contents);
+        await writeFile(join(root, ".tx/config.json"), contents);
       }
       await expect(readMarketplaceManifest(root)).rejects.toThrow(expected);
     } finally {
@@ -281,11 +333,11 @@ describe("marketplace manifests", () => {
     const loop = join(parent, "loop");
     try {
       await expect(readMarketplaceManifest(missing)).rejects.toThrow(
-        "Missing tx.marketplace.json",
+        "Missing .tx/config.json",
       );
       await symlink("loop", loop);
       await expect(readMarketplaceManifest(loop)).rejects.toThrow(
-        "Unable to read tx.marketplace.json",
+        "Unable to read .tx/config.json",
       );
     } finally {
       await rm(parent, { recursive: true, force: true });
@@ -295,10 +347,10 @@ describe("marketplace manifests", () => {
   test("allows contained manifest symlinks and rejects escaping ones", async () => {
     const parent = await temporaryDirectory("tx-manifest-file-symlink-");
     const root = join(parent, "marketplace");
-    const manifestPath = join(root, "tx.marketplace.json");
+    const manifestPath = join(root, ".tx/config.json");
     const manifest = '{"plugins":[{"name":"notes","entry":"plugin.ts"}]}';
     try {
-      await mkdir(root);
+      await mkdir(join(root, ".tx"), { recursive: true });
       await writeFile(join(root, "plugin.ts"), "plugin");
       await writeFile(join(root, "manifest.json"), manifest);
       await writeFile(join(parent, "outside.json"), manifest);
@@ -311,7 +363,7 @@ describe("marketplace manifests", () => {
       await rm(manifestPath);
       await symlink(join(parent, "outside.json"), manifestPath);
       await expect(readMarketplaceManifest(root)).rejects.toThrow(
-        "tx.marketplace.json escapes the marketplace",
+        ".tx/config.json escapes the marketplace",
       );
     } finally {
       await rm(parent, { recursive: true, force: true });
@@ -321,9 +373,10 @@ describe("marketplace manifests", () => {
   test("preserves non-missing filesystem errors for plugin entries", async () => {
     const root = await temporaryDirectory("tx-manifest-entry-error-");
     try {
+      await mkdir(join(root, ".tx"));
       await symlink("loop.ts", join(root, "loop.ts"));
       await writeFile(
-        join(root, "tx.marketplace.json"),
+        join(root, ".tx/config.json"),
         '{"plugins":[{"name":"notes","entry":"loop.ts"}]}',
       );
       await expect(readMarketplaceManifest(root)).rejects.toHaveProperty(
@@ -339,12 +392,12 @@ describe("marketplace manifests", () => {
     const parent = await temporaryDirectory("tx-manifest-symlink-");
     const root = join(parent, "marketplace");
     try {
-      await mkdir(root);
+      await mkdir(join(root, ".tx"), { recursive: true });
       await writeFile(join(root, "inside.ts"), "inside");
       await writeFile(join(parent, "outside.ts"), "outside");
       await symlink(join(root, "inside.ts"), join(root, "linked.ts"));
       await writeFile(
-        join(root, "tx.marketplace.json"),
+        join(root, ".tx/config.json"),
         '{"plugins":[{"name":"notes","entry":"linked.ts"}]}',
       );
       expect((await readMarketplaceManifest(root)).plugins[0]?.entryPath).toBe(
@@ -366,9 +419,10 @@ describe("marketplace preparation", () => {
   test("validates first and installs dependencies only with package.json", async () => {
     const root = await temporaryDirectory("tx-marketplace-prepare-");
     try {
+      await mkdir(join(root, ".tx"));
       await writeFile(join(root, "plugin.ts"), "export default () => {};");
       await writeFile(
-        join(root, "tx.marketplace.json"),
+        join(root, ".tx/config.json"),
         '{"plugins":[{"name":"plugin","entry":"plugin.ts"}]}',
       );
       const calls: unknown[][] = [];
@@ -423,6 +477,18 @@ describe("shell-free process execution", () => {
 });
 
 describe("MarketplaceManager", () => {
+  test("directs callers to provide a name when one cannot be derived", async () => {
+    const manager = new MarketplaceManager("/unused", {
+      runGit: async () => {
+        throw new Error("Git must not run");
+      },
+    });
+
+    await expect(manager.add("https://example.com/..")).rejects.toThrow(
+      'Cannot derive a safe marketplace name from "https://example.com/.."; pass --name <name>',
+    );
+  });
+
   test("clones local Git repositories, awaits preparation, lists, and removes", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplaces-");
     try {
@@ -478,8 +544,9 @@ describe("MarketplaceManager", () => {
       const manager = new MarketplaceManager(root, {
         runGit: async (args) => {
           const staging = args.at(-1) as string;
+          await mkdir(join(staging, ".tx"));
           await writeFile(
-            join(staging, "tx.marketplace.json"),
+            join(staging, ".tx/config.json"),
             '{"plugins":[{"name":"plugin","entry":"plugin.ts"}]}',
           );
           await writeFile(
@@ -533,14 +600,14 @@ describe("MarketplaceManager", () => {
         prepare: async () => {},
       });
 
-      await manager.add("repository", "installed");
+      await manager.add("fx/tx", "installed");
       await manager.list();
 
       expect(calls.map(({ args }) => args)).toEqual([
         [
           "clone",
           "--",
-          "repository",
+          "https://github.com/fx/tx.git",
           expect.stringContaining(".installed-staging-"),
         ],
         ["-C", join(root, "installed"), "config", "--get", "remote.origin.url"],

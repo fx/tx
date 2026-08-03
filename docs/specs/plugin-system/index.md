@@ -131,8 +131,12 @@ export interface CommandContext {
 
 ### Marketplace Plugin Ownership
 
-- The default marketplace plugin MUST own marketplace storage, data paths, local names, `tx.marketplace.json`, discovery, ordering, dynamic imports, Git operations, Bun dependency installation, diagnostics and recovery mapping, and `marketplace add`, `marketplace list`, and `marketplace remove` behavior.
-- The marketplace plugin MUST translate each discovered manifest entry into a lazy generic child plugin definition with an immutable generic identity.
+- The default marketplace plugin MUST own marketplace storage, data paths, local names, repository-local `.tx/config.json`, discovery, ordering, dynamic imports, Git operations, Bun dependency installation, diagnostics and recovery mapping, and `marketplace add`, `marketplace list`, and `marketplace remove` behavior.
+- `.tx/config.json` MUST contain the marketplace `plugins` array, MAY contain additional repository configuration, and MUST resolve plugin entries relative to the repository root.
+- Installed marketplaces that predate `.tx/config.json` MUST remain loadable through the legacy root `tx.marketplace.json` manifest; when both files exist, `.tx/config.json` MUST take precedence.
+- `marketplace add` MUST accept Git clone sources and expand bare GitHub `owner/repository` shorthand to its HTTPS clone source.
+- Automatically loading `.tx/config.json` from the current working repository is out of scope.
+- The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
 - The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
 - Marketplace discovery, import, or initialization failures MUST be mapped by the marketplace plugin into marketplace-aware diagnostics while preserving generic host failure isolation.
 - Removing a broken marketplace MUST remain possible because the marketplace management commands are committed independently of discovered child failures.

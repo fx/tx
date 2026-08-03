@@ -47,6 +47,13 @@ export interface MarketplaceManagerOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
+const githubRepositoryPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
+
+export function normalizeMarketplaceRepository(repository: string): string {
+  if (!githubRepositoryPattern.test(repository)) return repository;
+  return `https://github.com/${repository}${repository.endsWith(".git") ? "" : ".git"}`;
+}
+
 export function deriveMarketplaceName(repository: string): string {
   if (!repository) throw new Error("Repository must not be empty");
 
@@ -146,7 +153,17 @@ export class MarketplaceManager implements MarketplaceOperations {
   }
 
   async add(repository: string, requestedName?: string): Promise<string> {
-    const name = requestedName ?? deriveMarketplaceName(repository);
+    let name = requestedName;
+    if (name === undefined) {
+      try {
+        name = deriveMarketplaceName(repository);
+      } catch (error) {
+        throw new Error(
+          `Cannot derive a safe marketplace name from "${repository}"; pass --name <name>`,
+          { cause: error },
+        );
+      }
+    }
     const target = containedMarketplacePath(this.#root, name);
     await mkdir(this.#root, { recursive: true });
     if (await pathExists(target)) {
@@ -155,9 +172,10 @@ export class MarketplaceManager implements MarketplaceOperations {
 
     const staging = await mkdtemp(join(dirname(target), `.${name}-staging-`));
     try {
-      await this.#runGit(["clone", "--", repository, staging], {
-        env: this.#env,
-      });
+      await this.#runGit(
+        ["clone", "--", normalizeMarketplaceRepository(repository), staging],
+        { env: this.#env },
+      );
       if (this.#prepare) await this.#prepare(staging);
       else await prepareMarketplace(staging, { env: this.#env });
       if (await pathExists(target)) {
