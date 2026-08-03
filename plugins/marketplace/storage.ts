@@ -72,30 +72,25 @@ export function resolveUserDataDirectory(
 ): string {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
-  const home = options.home ?? homedir();
+  const home = () => requiredHome(options.home ?? homedir());
   const paths = pathImplementation(platform);
 
   if (platform === "win32") {
     const base =
       environmentValue(env, "LOCALAPPDATA") ?? environmentValue(env, "APPDATA");
     if (base) return paths.join(base, "tx");
-    return paths.join(requiredHome(home), "AppData", "Local", "tx");
+    return paths.join(home(), "AppData", "Local", "tx");
   }
 
   if (platform === "darwin") {
-    return paths.join(
-      requiredHome(home),
-      "Library",
-      "Application Support",
-      "tx",
-    );
+    return paths.join(home(), "Library", "Application Support", "tx");
   }
 
   const xdgDataHome = environmentValue(env, "XDG_DATA_HOME");
   const base =
     xdgDataHome && paths.isAbsolute(xdgDataHome)
       ? xdgDataHome
-      : paths.join(requiredHome(home), ".local", "share");
+      : paths.join(home(), ".local", "share");
   return paths.join(base, "tx");
 }
 
@@ -115,7 +110,7 @@ export function validateMarketplaceName(name: string): string {
   return name;
 }
 
-function containedMarketplacePath(root: string, name: string): string {
+export function containedMarketplacePath(root: string, name: string): string {
   validateMarketplaceName(name);
   return pathImplementation(process.platform).resolve(root, name);
 }
@@ -284,7 +279,7 @@ export async function prepareMarketplace(
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
+export async function pathExists(path: string): Promise<boolean> {
   try {
     await lstat(path);
     return true;

@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
 import type { Stats } from "node:fs";
 import { lstat, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  containedMarketplacePath,
   discoverInstalledMarketplaces,
+  pathExists,
   prepareMarketplace,
   validateMarketplaceName,
 } from "./storage.ts";
@@ -38,34 +40,6 @@ export interface MarketplaceManagerOptions {
   readonly runGit?: RunGit;
   readonly prepare?: (checkout: string) => Promise<void>;
   readonly env?: Readonly<Record<string, string | undefined>>;
-}
-
-function containedMarketplacePath(root: string, name: string): string {
-  validateMarketplaceName(name);
-  const resolvedRoot = resolve(root);
-  const target = resolve(resolvedRoot, name);
-  const relation = relative(resolvedRoot, target);
-  if (
-    !relation ||
-    relation.startsWith(`..${sep}`) ||
-    relation === ".." ||
-    isAbsolute(relation)
-  ) {
-    throw new Error(
-      `Marketplace path for "${name}" escapes marketplace storage`,
-    );
-  }
-  return target;
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 export function deriveMarketplaceName(repository: string): string {

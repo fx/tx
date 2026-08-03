@@ -12,7 +12,6 @@ import {
   discoverInstalledMarketplaces,
   readMarketplaceManifest,
   resolveMarketplaceDirectory,
-  validateMarketplaceName,
 } from "./storage.ts";
 
 export type { MarketplaceOperations } from "./manager.ts";
@@ -155,7 +154,7 @@ export function createMarketplacePlugin(
 
         command("marketplace remove", async (args, context) => {
           const name = parseRemoveMarketplaceArguments(args);
-          await manager.remove(validateMarketplaceName(name));
+          await manager.remove(name);
           context.stdout.write(`Removed marketplace "${name}".\n`);
         });
 

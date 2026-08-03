@@ -44,10 +44,12 @@ export async function initializePlugins(
   options: InitializePluginsOptions = {},
 ): Promise<readonly PluginLoadFailure[]> {
   const failures: PluginLoadFailure[] = [];
-  const queue = [...definitions];
+  const queue: Array<PluginDefinition | undefined> = [...definitions];
 
   for (let index = 0; index < queue.length; index += 1) {
-    const definition = queue[index] as PluginDefinition;
+    const definition = queue[index];
+    queue[index] = undefined;
+    if (!definition) continue;
     let identity: PluginIdentity;
     try {
       identity = freezePluginIdentity(definition.identity);
@@ -59,15 +61,14 @@ export async function initializePlugins(
       continue;
     }
 
-    let active = true;
-    const registrations: CommandRegistration[] = [];
-    const children: PluginDefinition[] = [];
+    let registrations: CommandRegistration[] | undefined = [];
+    let children: PluginDefinition[] | undefined = [];
     const api: PluginAPI = Object.freeze({
       identity,
       env: options.env ?? process.env,
       dependencies: options.dependencies ?? coreDependencies,
       command(path: string | readonly string[], handler: CommandHandler) {
-        if (!active) {
+        if (!registrations) {
           throw new Error(
             `Plugin ${identity.name} cannot register commands after initialization`,
           );
@@ -75,7 +76,7 @@ export async function initializePlugins(
         registrations.push({ path, owner: identity, handler });
       },
       plugin(child: PluginDefinition) {
-        if (!active) {
+        if (!children) {
           throw new Error(
             `Plugin ${identity.name} cannot contribute plugins after initialization`,
           );
@@ -90,11 +91,15 @@ export async function initializePlugins(
         throw new Error("Plugin definition must load a function");
       }
       await plugin(api);
-      active = false;
-      registry.registerBatch(registrations);
-      queue.push(...children);
+      const stagedRegistrations = registrations;
+      const stagedChildren = children;
+      registrations = undefined;
+      children = undefined;
+      registry.registerBatch(stagedRegistrations);
+      queue.push(...stagedChildren);
     } catch (error) {
-      active = false;
+      registrations = undefined;
+      children = undefined;
       failures.push(Object.freeze({ identity, message: errorMessage(error) }));
     }
   }
