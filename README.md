@@ -1,6 +1,40 @@
 # tx
 
-Toolbox
+Extensible command-line toolbox.
+
+## Install
+
+The first supported release target is Linux x64 with glibc and a baseline x86-64 CPU. The standalone executable does not require Bun or Node.js.
+
+The low-setup installation path uses the public GitHub Release asset:
+
+```sh
+mise use -g github:fx/tx
+```
+
+Verify the installation:
+
+```sh
+tx --version
+```
+
+### GitHub Packages
+
+`@fx/tx` is also published to `npm.pkg.github.com`. GitHub requires authentication to download npm packages even when the package is public. Create a classic personal access token with `read:packages`, then configure npm without committing the token:
+
+```sh
+npm config set @fx:registry https://npm.pkg.github.com
+npm config set --location=user //npm.pkg.github.com/:_authToken "$GITHUB_PACKAGES_TOKEN"
+npm install -g @fx/tx
+```
+
+The same authenticated registry configuration supports mise's npm backend:
+
+```sh
+mise use -g npm:@fx/tx
+```
+
+Prefer `mise use -g github:fx/tx` unless GitHub Packages integration is specifically required.
 
 ## Plugins
 
@@ -12,4 +46,22 @@ tx marketplace list
 tx marketplace remove repository
 ```
 
+Plugin authors import the public contract as types only:
+
+```ts
+import type { Plugin } from "@fx/tx/plugin";
+```
+
 Marketplace plugins, dependencies, and install scripts are not sandboxed and run with the same permissions as `tx`. Install only code you trust. See the [plugin guide](docs/manual/plugins.md) for repository setup and plugin authoring.
+
+## Releases
+
+[Release Please](https://github.com/googleapis/release-please-action) maintains the release PR, `package.json` version, tag, GitHub Release, and CHANGELOG from conventional commits. Release PRs are never auto-merged; a maintainer must review required CI and merge each one manually.
+
+After the merge's push-to-main CI succeeds, the same release workflow invocation verifies the release SHA and version invariants, publishes the absent `@fx/tx` version to GitHub Packages, and uploads `tx-linux-x64` plus `SHA256SUMS` to the existing GitHub Release. Retries do not overwrite an existing package version; release assets may be replaced after verification.
+
+Repository prerequisites are documented by the workflow permissions: Actions must be allowed to create pull requests, `GITHUB_TOKEN` must have package write access, the `CI` check remains required, and a maintainer must make the GitHub Package public after its first publication if public access is desired. The package visibility change and first release are manual operations.
+
+## License
+
+[MIT](LICENSE)
