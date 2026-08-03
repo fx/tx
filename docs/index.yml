@@ -4,11 +4,11 @@
 specs:
   - name: architecture
     path: specs/architecture/
-    description: Core runtime, packaging, storage, and development conventions for tx.
+    description: Generic core runtime, neutral composition, packaging, and development conventions for tx.
     status: active
   - name: plugin-system
     path: specs/plugin-system/
-    description: Marketplace installation, plugin discovery, command registration, and dependency injection.
+    description: Generic plugin hosting and externalized marketplace-plugin ownership contracts.
     status: active
 
 changes:
@@ -27,3 +27,11 @@ changes:
     status: complete
     depends_on:
       - "0001"
+  - id: "0003"
+    name: externalize-marketplace-plugin
+    path: changes/0003-externalize-marketplace-plugin.md
+    description: Reduce core to a generic plugin host and move all marketplace ownership into an externalizable default plugin.
+    spec: plugin-system
+    status: complete
+    depends_on:
+      - "0002"

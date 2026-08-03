@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   createMarketplacePlugin,
   type MarketplaceOperations,
 } from "../plugins/marketplace/index.ts";
 import { CommandRegistry, dispatch } from "../src/commands.ts";
 import type { CommandProcessContext } from "../src/context.ts";
-import { initializePlugin } from "../src/plugins.ts";
+import { initializePlugins } from "../src/plugins.ts";
+import { temporaryDirectory } from "./helpers.ts";
 
 class RecordingManager implements MarketplaceOperations {
   readonly calls: unknown[][] = [];
@@ -58,11 +61,9 @@ function outputContext(): CommandProcessContext & {
 
 async function setup(manager = new RecordingManager()) {
   const registry = new CommandRegistry();
-  await initializePlugin(
-    registry,
-    { marketplace: "core", plugin: "marketplace" },
-    createMarketplacePlugin({ manager }),
-  );
+  expect(
+    await initializePlugins(registry, [createMarketplacePlugin({ manager })]),
+  ).toEqual([]);
   return { manager, registry };
 }
 
@@ -72,8 +73,7 @@ describe("first-party marketplace plugin", () => {
 
     for (const command of ["add", "list", "remove"]) {
       expect(registry.resolve(["marketplace", command])?.owner).toEqual({
-        marketplace: "core",
-        plugin: "marketplace",
+        name: "marketplace",
       });
     }
     expect(registry.help()).toBe(
@@ -140,13 +140,50 @@ describe("first-party marketplace plugin", () => {
     expect(context.stderrText()).toStartWith("Error: Usage:");
   });
 
+  test("maps discovery storage failures without disabling management commands", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-discovery-");
+    const dataHome = join(temporaryRoot, "data");
+    const storage = join(dataHome, "tx", "marketplaces");
+    try {
+      await mkdir(join(dataHome, "tx"), { recursive: true });
+      await writeFile(storage, "not a directory");
+      const registry = new CommandRegistry();
+
+      const failures = await initializePlugins(
+        registry,
+        [createMarketplacePlugin({ manager: new RecordingManager() })],
+        { env: { XDG_DATA_HOME: dataHome } },
+      );
+
+      expect(failures).toHaveLength(1);
+      expect(failures[0]?.identity).toEqual({
+        name: "installed",
+        parent: { name: "marketplace" },
+      });
+      expect(failures[0]?.message).toStartWith(
+        "Marketplace discovery failed: ENOTDIR",
+      );
+      expect(failures[0]?.message).toEndWith(
+        `Check that marketplace storage at "${storage}" is readable, then retry.`,
+      );
+      expect(failures[0]?.message).not.toContain("marketplace remove");
+      for (const command of ["add", "list", "remove"]) {
+        expect(registry.resolve(["marketplace", command])?.owner).toEqual({
+          name: "marketplace",
+        });
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("resolves marketplace storage from each command context", async () => {
     const registry = new CommandRegistry();
-    await initializePlugin(
-      registry,
-      { marketplace: "core", plugin: "marketplace" },
-      createMarketplacePlugin(),
-    );
+    expect(
+      await initializePlugins(registry, [createMarketplacePlugin()], {
+        env: { XDG_DATA_HOME: "/definitely/missing/tx-test-data" },
+      }),
+    ).toEqual([]);
 
     const helpContext = outputContext();
     expect(await dispatch(registry, [], helpContext)).toMatchObject({

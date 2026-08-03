@@ -35,6 +35,7 @@ test("the production build is a standalone executable", async () => {
       mkdir(runtimeDirectory),
       cp(join(repositoryRoot, "src"), stagedSource, { recursive: true }),
       cp(join(repositoryRoot, "plugins"), stagedPlugins, { recursive: true }),
+      copyFile(join(repositoryRoot, "cli.ts"), join(stagedProject, "cli.ts")),
       copyFile(
         join(repositoryRoot, "package.json"),
         join(stagedProject, "package.json"),
@@ -106,7 +107,6 @@ test("the production build is a standalone executable", async () => {
           };
           command("top", (args, context) => context.stdout.write(JSON.stringify({
             args,
-            marketplace: context.marketplace,
             plugin: context.plugin,
           }) + "\\n"));
         };`,
@@ -140,7 +140,6 @@ test("the production build is a standalone executable", async () => {
             output.destroy();
             context.stdout.write(JSON.stringify({
               args,
-              marketplace: context.marketplace,
               plugin: context.plugin,
               cwd: context.cwd,
               dependency: message,
@@ -161,7 +160,10 @@ test("the production build is a standalone executable", async () => {
     const env = {
       ...process.env,
       DEV: "true",
-      PATH: `${dirname(process.execPath)}:${PATH ?? ""}`,
+      PATH: (PATH ?? "")
+        .split(":")
+        .filter((entry) => entry !== dirname(process.execPath))
+        .join(":"),
       XDG_DATA_HOME: dataDirectory,
     };
     const runStandalone = (args: string[], cwd?: string): CommandResult => {
@@ -214,8 +216,13 @@ test("the production build is a standalone executable", async () => {
     expect(top.exitCode).toBe(0);
     expect(JSON.parse(top.stdout)).toEqual({
       args: ["one", "two"],
-      marketplace: "fixture",
-      plugin: "top",
+      plugin: {
+        name: "top",
+        parent: {
+          name: "fixture",
+          parent: { name: "installed", parent: { name: "marketplace" } },
+        },
+      },
     });
     expect(top.stderr).toBe("");
 
@@ -226,8 +233,13 @@ test("the production build is a standalone executable", async () => {
     expect(nested.exitCode).toBe(0);
     expect(JSON.parse(nested.stdout)).toEqual({
       args: ["remaining", "argv"],
-      marketplace: "fixture",
-      plugin: "nested",
+      plugin: {
+        name: "nested",
+        parent: {
+          name: "fixture",
+          parent: { name: "installed", parent: { name: "marketplace" } },
+        },
+      },
       cwd: runtimeDirectory,
       dependency: "loaded dependency",
       sameInstances: true,

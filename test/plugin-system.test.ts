@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createGitRepository, temporaryDirectory } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
-const cliPath = join(repositoryRoot, "src", "cli.ts");
+const cliPath = join(repositoryRoot, "cli.ts");
 
 interface CliResult {
   readonly exitCode: number;
@@ -175,7 +175,7 @@ describe("source CLI plugin registration", () => {
       expect(result.exitCode).toBe(2);
       expect(result.stdout).toBe("");
       expect(result.stderr).toContain(
-        "Error loading plugin invalid-path/invalid-path: Command path must contain one or more non-empty segments",
+        "Error loading plugin marketplace/installed/invalid-path/invalid-path: Command path must contain one or more non-empty segments",
       );
       expect(result.stderr).toContain('Unknown command "ghost valid"');
     } finally {
@@ -203,7 +203,7 @@ describe("source CLI plugin registration", () => {
       expect(list.exitCode).toBe(1);
       expect(list.stdout).toContain(`external\t${source}\n`);
       expect(list.stderr).toContain(
-        'Error loading plugin external/collision: Command "marketplace list" is already registered by core/marketplace; cannot register it for external/collision',
+        'Error loading plugin marketplace/installed/external/collision: Command "marketplace list" is already registered by marketplace; cannot register it for marketplace/installed/external/collision',
       );
 
       const rolledBack = runCli(dataHome, "ghost", "bundled-collision");
@@ -248,7 +248,7 @@ describe("source CLI plugin registration", () => {
       expect(shared.exitCode).toBe(1);
       expect(shared.stdout).toBe("alpha\n");
       expect(shared.stderr).toContain(
-        'Error loading plugin personal/beta: Command "shared" is already registered by personal/alpha; cannot register it for personal/beta',
+        'Error loading plugin marketplace/installed/personal/beta: Command "shared" is already registered by marketplace/installed/personal/alpha; cannot register it for marketplace/installed/personal/beta',
       );
 
       const earlier = runCli(dataHome, "alpha", "only");
@@ -294,13 +294,15 @@ test("broken marketplaces remain removable without blocking healthy plugins", as
     expect(isolated.exitCode).toBe(1);
     expect(isolated.stdout).toBe("healthy\n");
     expect(isolated.stderr).toBe(
-      "Error loading plugin broken/broken: Plugin broken/broken must default-export a function\n",
+      'Error loading plugin marketplace/installed/broken/broken: Marketplace "broken" plugin "broken" failed: Plugin broken must default-export a function. Run "tx marketplace remove broken" to remove it.\n',
     );
 
     const removeBroken = runCli(dataHome, "marketplace", "remove", "broken");
     expect(removeBroken.exitCode).toBe(1);
     expect(removeBroken.stdout).toBe('Removed marketplace "broken".\n');
-    expect(removeBroken.stderr).toContain("Error loading plugin broken/broken");
+    expect(removeBroken.stderr).toContain(
+      "Error loading plugin marketplace/installed/broken/broken",
+    );
     await expectNoMarketplaceArtifacts(dataHome, "broken");
 
     const recovered = runCli(dataHome, "healthy", "run");

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "tx": "./src/cli.ts"
+    "tx": "./cli.ts"
   },
   "exports": {
     "./plugin": {

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defaultPlugins } from "../cli.ts";
 import { main } from "../src/cli.ts";
 import { CommandRegistry } from "../src/commands.ts";
 import {
@@ -50,11 +51,11 @@ function capturedContext(env: Record<string, string | undefined> = {}): {
 
 test("main returns the dispatcher exit code with injected process wiring", async () => {
   const registry = new CommandRegistry();
-  registry.register("fail", { marketplace: "core", plugin: "test" }, () => {
+  registry.register("fail", { name: "test", parent: { name: "core" } }, () => {
     throw new Error("failed");
   });
 
-  expect(await main(["fail"], registry, quietContext())).toBe(1);
+  expect(await main(["fail"], [], registry, quietContext())).toBe(1);
 });
 
 test("main bootstraps bundled plugins only for its default registry", async () => {
@@ -69,13 +70,20 @@ test("main bootstraps bundled plugins only for its default registry", async () =
     } as NodeJS.WriteStream,
   };
 
-  expect(await main(["marketplace", "--help"], undefined, context)).toBe(0);
+  expect(
+    await main(
+      ["marketplace", "--help"],
+      defaultPlugins,
+      new CommandRegistry(),
+      context,
+    ),
+  ).toBe(0);
   expect(stdout).toBe(
     "Usage: tx marketplace <command>\n\nCommands:\n  add\n  list\n  remove\n",
   );
 
   stdout = "";
-  expect(await main([], new CommandRegistry(), context)).toBe(0);
+  expect(await main([], [], new CommandRegistry(), context)).toBe(0);
   expect(stdout).toBe("Usage: tx <command>\n");
 });
 
@@ -83,7 +91,7 @@ test("default startup dispatches healthy plugins but returns failure for ordered
   const dataHome = await mkdtemp(join(tmpdir(), "tx-cli-plugins-"));
   const marketplaceRoot = join(dataHome, "tx", "marketplaces");
   try {
-    for (const name of ["alpha", "beta"]) {
+    for (const name of ["alpha", "beta", "gamma", "delta"]) {
       await mkdir(join(marketplaceRoot, name), { recursive: true });
     }
     await writeFile(
@@ -102,13 +110,37 @@ test("default startup dispatches healthy plugins but returns failure for ordered
       join(marketplaceRoot, "beta", "tx.marketplace.json"),
       '{"plugins":[{"name":"broken","entry":"broken.ts"}]}',
     );
+    await writeFile(
+      join(marketplaceRoot, "gamma", "throwing.ts"),
+      'export default () => { throw "plain failure"; };\n',
+    );
+    await writeFile(
+      join(marketplaceRoot, "gamma", "tx.marketplace.json"),
+      '{"plugins":[{"name":"throwing","entry":"throwing.ts"}]}',
+    );
+    await writeFile(
+      join(marketplaceRoot, "delta", "tx.marketplace.json"),
+      "{}",
+    );
 
     const output = capturedContext({ XDG_DATA_HOME: dataHome });
 
-    expect(await main(["healthy"], undefined, output.context)).toBe(1);
+    expect(
+      await main(
+        ["healthy"],
+        defaultPlugins,
+        new CommandRegistry(),
+        output.context,
+      ),
+    ).toBe(1);
     expect(output.stdoutText()).toBe("dispatched\n");
     expect(output.stderrText()).toBe(
-      "Error loading plugin beta/broken: Plugin beta/broken must default-export a function\n",
+      [
+        'Error loading plugin marketplace/installed/delta: Marketplace "delta" failed: tx.marketplace.json must contain a plugins array. Run "tx marketplace remove delta" to remove it.',
+        'Error loading plugin marketplace/installed/beta/broken: Marketplace "beta" plugin "broken" failed: Plugin broken must default-export a function. Run "tx marketplace remove beta" to remove it.',
+        'Error loading plugin marketplace/installed/gamma/throwing: Marketplace "gamma" plugin "throwing" failed: plain failure. Run "tx marketplace remove gamma" to remove it.',
+        "",
+      ].join("\n"),
     );
   } finally {
     await rm(dataHome, { recursive: true, force: true });
@@ -131,11 +163,16 @@ test("first-party commands survive later external collisions", async () => {
     const output = capturedContext({ XDG_DATA_HOME: dataHome });
 
     expect(
-      await main(["marketplace", "--help"], undefined, output.context),
+      await main(
+        ["marketplace", "--help"],
+        defaultPlugins,
+        new CommandRegistry(),
+        output.context,
+      ),
     ).toBe(1);
     expect(output.stdoutText()).toContain("  list\n");
     expect(output.stderrText()).toContain(
-      'Error loading plugin personal/collision: Command "marketplace list" is already registered by core/marketplace',
+      'Error loading plugin marketplace/installed/personal/collision: Command "marketplace list" is already registered by marketplace',
     );
   } finally {
     await rm(dataHome, { recursive: true, force: true });
@@ -157,7 +194,7 @@ test("importing the CLI does not invoke main", () => {
     [
       process.execPath,
       "--eval",
-      'Bun.argv.slice = () => { throw new Error("main invoked during import"); }; await import("./src/cli.ts");',
+      'Bun.argv.slice = () => { throw new Error("main invoked during import"); }; await import("./cli.ts");',
     ],
     {
       cwd: `${import.meta.dir}/..`,
@@ -170,12 +207,9 @@ test("importing the CLI does not invoke main", () => {
 });
 
 test("the CLI entrypoint retains import.meta.main wiring", () => {
-  const result = Bun.spawnSync(
-    [process.execPath, "run", "src/cli.ts", "--help"],
-    {
-      cwd: `${import.meta.dir}/..`,
-    },
-  );
+  const result = Bun.spawnSync([process.execPath, "run", "cli.ts", "--help"], {
+    cwd: `${import.meta.dir}/..`,
+  });
 
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).toBe(
@@ -185,10 +219,9 @@ test("the CLI entrypoint retains import.meta.main wiring", () => {
 });
 
 test("the CLI entrypoint exposes usage failures as process exit codes", () => {
-  const result = Bun.spawnSync(
-    [process.execPath, "run", "src/cli.ts", "unknown"],
-    { cwd: `${import.meta.dir}/..` },
-  );
+  const result = Bun.spawnSync([process.execPath, "run", "cli.ts", "unknown"], {
+    cwd: `${import.meta.dir}/..`,
+  });
 
   expect(result.exitCode).toBe(2);
   expect(result.stdout.toString()).toBe("");

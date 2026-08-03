@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -57,8 +57,9 @@ export default plugin;
           target: "ESNext",
           module: "Preserve",
           moduleResolution: "Bundler",
+          allowImportingTsExtensions: true,
         },
-        include: ["plugin.ts"],
+        include: ["plugin.ts", "plugins/**/*.ts"],
       }),
     );
 
@@ -87,6 +88,11 @@ export default plugin;
         ],
         { cwd: consumerRoot },
       ),
+    );
+    await cp(
+      join(repositoryRoot, "plugins", "marketplace"),
+      join(consumerRoot, "plugins", "marketplace"),
+      { recursive: true },
     );
     expectSuccess(
       Bun.spawnSync(

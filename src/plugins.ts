@@ -1,23 +1,17 @@
-import { pathToFileURL } from "node:url";
 import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
-import marketplacePlugin from "../plugins/marketplace/index.ts";
-import type { CommandRegistration, CommandRegistry } from "./commands.ts";
-import type { CommandOwner } from "./context.ts";
 import {
-  discoverInstalledMarketplaces,
-  type MarketplaceManifest,
-  prepareMarketplace,
-  readMarketplaceManifest,
-  resolveMarketplaceDirectory,
-  validateMarketplaceName,
-} from "./marketplaces.ts";
+  type CommandRegistration,
+  type CommandRegistry,
+  freezePluginIdentity,
+} from "./commands.ts";
 import type {
   CommandHandler,
   CoreDependencies,
-  Plugin,
   PluginAPI,
+  PluginDefinition,
+  PluginIdentity,
 } from "./plugin.ts";
 
 export const coreDependencies: CoreDependencies = Object.freeze({
@@ -28,152 +22,87 @@ export const coreDependencies: CoreDependencies = Object.freeze({
     react: packageMetadata.dependencies.react,
     ink: packageMetadata.dependencies.ink,
   }),
-  marketplace: Object.freeze({
-    resolveDirectory: resolveMarketplaceDirectory,
-    validateName: validateMarketplaceName,
-    discover: discoverInstalledMarketplaces,
-    prepare: prepareMarketplace,
-  }),
 });
 
-export interface PluginModule {
-  readonly default?: unknown;
+export interface PluginLoadFailure {
+  readonly identity: PluginIdentity;
+  readonly message: string;
 }
 
-export type PluginSource = Plugin | PluginModule;
-export type ImportPlugin = (entryPath: string) => Promise<PluginModule>;
-
-export type PluginLoadFailure =
-  | {
-      readonly kind: "marketplace";
-      readonly marketplace: string;
-      readonly message: string;
-    }
-  | {
-      readonly kind: "plugin";
-      readonly marketplace: string;
-      readonly plugin: string;
-      readonly message: string;
-    };
-
-export interface InitializeMarketplacePluginsOptions {
-  readonly importPlugin?: ImportPlugin;
-}
-
-function pluginName(owner: CommandOwner): string {
-  return `${owner.marketplace}/${owner.plugin}`;
-}
-
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  const valueType = typeof value;
-  return (
-    value !== null &&
-    (valueType === "object" || valueType === "function") &&
-    typeof (value as PromiseLike<unknown>).then === "function"
-  );
-}
-
-function resolvePlugin(source: PluginSource, owner: CommandOwner): Plugin {
-  const candidate = typeof source === "function" ? source : source.default;
-  if (typeof candidate !== "function") {
-    throw new Error(
-      `Plugin ${pluginName(owner)} must default-export a function`,
-    );
-  }
-  return candidate as Plugin;
-}
-
-export async function initializeFirstPartyPlugins(
-  registry: CommandRegistry,
-): Promise<void> {
-  await initializePlugin(
-    registry,
-    { marketplace: "core", plugin: "marketplace" },
-    marketplacePlugin,
-  );
+export interface InitializePluginsOptions {
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  readonly dependencies?: CoreDependencies;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function importPlugin(entryPath: string): Promise<PluginModule> {
-  return import(pathToFileURL(entryPath).href);
-}
-
-export async function initializeMarketplacePlugins(
+export async function initializePlugins(
   registry: CommandRegistry,
-  root: string,
-  options: InitializeMarketplacePluginsOptions = {},
+  definitions: readonly PluginDefinition[] = [],
+  options: InitializePluginsOptions = {},
 ): Promise<readonly PluginLoadFailure[]> {
   const failures: PluginLoadFailure[] = [];
-  const marketplaces = await discoverInstalledMarketplaces(root);
+  const queue: Array<PluginDefinition | undefined> = [...definitions];
 
-  for (const { name: marketplace, checkout } of marketplaces) {
-    let manifest: MarketplaceManifest;
+  for (let index = 0; index < queue.length; index += 1) {
+    const definition = queue[index];
+    queue[index] = undefined;
+    if (!definition) continue;
+    let identity: PluginIdentity;
     try {
-      manifest = await readMarketplaceManifest(checkout);
+      identity = freezePluginIdentity(definition.identity);
     } catch (error) {
       failures.push({
-        kind: "marketplace",
-        marketplace,
+        identity: Object.freeze({ name: "<invalid>" }),
         message: errorMessage(error),
       });
       continue;
     }
 
-    for (const plugin of manifest.plugins) {
-      try {
-        const source = await (options.importPlugin ?? importPlugin)(
-          plugin.entryPath,
-        );
-        await initializePlugin(
-          registry,
-          { marketplace, plugin: plugin.name },
-          source,
-        );
-      } catch (error) {
-        failures.push({
-          kind: "plugin",
-          marketplace,
-          plugin: plugin.name,
-          message: errorMessage(error),
-        });
+    let registrations: CommandRegistration[] | undefined = [];
+    let children: PluginDefinition[] | undefined = [];
+    const api: PluginAPI = Object.freeze({
+      identity,
+      env: options.env ?? process.env,
+      dependencies: options.dependencies ?? coreDependencies,
+      command(path: string | readonly string[], handler: CommandHandler) {
+        if (!registrations) {
+          throw new Error(
+            `Plugin ${identity.name} cannot register commands after initialization`,
+          );
+        }
+        registrations.push({ path, owner: identity, handler });
+      },
+      plugin(child: PluginDefinition) {
+        if (!children) {
+          throw new Error(
+            `Plugin ${identity.name} cannot contribute plugins after initialization`,
+          );
+        }
+        children.push(child);
+      },
+    });
+
+    try {
+      const plugin = await definition.load();
+      if (typeof plugin !== "function") {
+        throw new Error("Plugin definition must load a function");
       }
+      await plugin(api);
+      const stagedRegistrations = registrations;
+      const stagedChildren = children;
+      registrations = undefined;
+      children = undefined;
+      registry.registerBatch(stagedRegistrations);
+      queue.push(...stagedChildren);
+    } catch (error) {
+      registrations = undefined;
+      children = undefined;
+      failures.push(Object.freeze({ identity, message: errorMessage(error) }));
     }
   }
 
   return Object.freeze(failures);
-}
-
-export async function initializePlugin(
-  registry: CommandRegistry,
-  owner: CommandOwner,
-  source: PluginSource,
-): Promise<void> {
-  const scopedOwner = Object.freeze({ ...owner });
-  const plugin = resolvePlugin(source, scopedOwner);
-  let registrations: CommandRegistration[] | undefined = [];
-  const api: PluginAPI = Object.freeze({
-    command(path: string | readonly string[], handler: CommandHandler) {
-      if (!registrations) {
-        throw new Error(
-          `Plugin ${pluginName(scopedOwner)} cannot register commands after initialization`,
-        );
-      }
-      registrations.push({ path, owner: scopedOwner, handler });
-    },
-    dependencies: coreDependencies,
-  });
-
-  let batch: CommandRegistration[] = [];
-  try {
-    const result = plugin(api);
-    if (isPromiseLike(result)) await result;
-  } finally {
-    batch = registrations ?? [];
-    registrations = undefined;
-  }
-
-  registry.registerBatch(batch);
 }

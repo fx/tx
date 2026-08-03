@@ -9,12 +9,13 @@ import {
   EXIT_USAGE,
   normalizeCommandPath,
 } from "../src/commands.ts";
-import type { CommandOwner, CommandProcessContext } from "../src/context.ts";
+import type { CommandProcessContext } from "../src/context.ts";
+import type { PluginIdentity } from "../src/plugin.ts";
 
-const coreOwner: CommandOwner = { marketplace: "core", plugin: "notes" };
-const externalOwner: CommandOwner = {
-  marketplace: "personal",
-  plugin: "journal",
+const coreOwner: PluginIdentity = { name: "notes", parent: { name: "core" } };
+const externalOwner: PluginIdentity = {
+  name: "journal",
+  parent: { name: "personal" },
 };
 
 function outputContext(): CommandProcessContext & {
@@ -48,7 +49,7 @@ function outputContext(): CommandProcessContext & {
 function registerNoop(
   registry: CommandRegistry,
   path: string | readonly string[],
-  owner: CommandOwner = coreOwner,
+  owner: PluginIdentity = coreOwner,
   handler: CommandHandler = () => {},
 ) {
   return registry.register(path, owner, handler);
@@ -100,29 +101,25 @@ describe("CommandRegistry", () => {
   test("snapshots and freezes command path and owner metadata", async () => {
     const registry = new CommandRegistry();
     const path = ["notes"];
-    const owner = { marketplace: "original", plugin: "journal" };
-    let received:
-      | { args: string[]; marketplace: string; plugin: string }
-      | undefined;
+    const owner = { name: "journal", parent: { name: "original" } };
+    let received: { args: string[]; plugin: PluginIdentity } | undefined;
     const command = registry.register(path, owner, (args, context) => {
       received = {
         args,
-        marketplace: context.marketplace,
         plugin: context.plugin,
       };
     });
 
     path[0] = "changed";
-    owner.marketplace = "changed";
-    owner.plugin = "changed";
+    owner.name = "changed";
+    owner.parent.name = "changed";
 
     expect(Object.isFrozen(command)).toBe(true);
     expect(Object.isFrozen(command.path)).toBe(true);
     expect(Object.isFrozen(command.owner)).toBe(true);
     expect(() => ((command.path as string[])[0] = "changed")).toThrow();
     expect(
-      () =>
-        ((command.owner as { marketplace: string }).marketplace = "changed"),
+      () => ((command.owner as { name: string }).name = "changed"),
     ).toThrow();
 
     expect(
@@ -130,8 +127,7 @@ describe("CommandRegistry", () => {
     ).toEqual({ exitCode: EXIT_SUCCESS, command });
     expect(received).toEqual({
       args: ["today"],
-      marketplace: "original",
-      plugin: "journal",
+      plugin: { name: "journal", parent: { name: "original" } },
     });
     expect(() => registerNoop(registry, "notes", externalOwner)).toThrow(
       'Command "notes" is already registered by original/journal; cannot register it for personal/journal',
@@ -276,8 +272,7 @@ describe("dispatch", () => {
     let received:
       | {
           args: string[];
-          marketplace: string;
-          plugin: string;
+          plugin: PluginIdentity;
           sameCwd: boolean;
         }
       | undefined;
@@ -288,7 +283,6 @@ describe("dispatch", () => {
       (args, handlerContext) => {
         received = {
           args,
-          marketplace: handlerContext.marketplace,
           plugin: handlerContext.plugin,
           sameCwd: handlerContext.cwd === context.cwd,
         };
@@ -304,8 +298,7 @@ describe("dispatch", () => {
     ).toEqual({ exitCode: EXIT_SUCCESS, command });
     expect(received).toEqual({
       args: ["today", "--json"],
-      marketplace: "personal",
-      plugin: "journal",
+      plugin: { name: "journal", parent: { name: "personal" } },
       sameCwd: true,
     });
   });

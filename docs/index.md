@@ -4,8 +4,8 @@
 
 | Spec | Description | Status |
 |------|-------------|--------|
-| [Architecture](specs/architecture/) | Core runtime, packaging, storage, and development conventions for tx. | active |
-| [Plugin System](specs/plugin-system/) | Marketplace installation, plugin discovery, command registration, and dependency injection. | active |
+| [Architecture](specs/architecture/) | Generic core runtime, neutral composition, packaging, and development conventions for tx. | active |
+| [Plugin System](specs/plugin-system/) | Generic plugin hosting and externalized marketplace-plugin ownership contracts. | active |
 
 ## Changes
 
@@ -13,3 +13,4 @@
 |---|--------|------|--------|------------|
 | 0001 | [Bootstrap Core CLI](changes/0001-bootstrap-core-cli.md) | [Architecture](specs/architecture/) | complete | — |
 | 0002 | [Add Plugin Marketplaces](changes/0002-add-plugin-marketplaces.md) | [Plugin System](specs/plugin-system/) | complete | 0001 |
+| 0003 | [Externalize Marketplace Plugin](changes/0003-externalize-marketplace-plugin.md) | [Plugin System](specs/plugin-system/) | complete | 0002 |

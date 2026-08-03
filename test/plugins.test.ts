@@ -1,23 +1,29 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
 
 import { CommandRegistry, dispatch } from "../src/commands.ts";
 import type { CommandProcessContext } from "../src/context.ts";
-import type { Plugin, PluginAPI } from "../src/plugin.ts";
-import {
-  coreDependencies,
-  initializeMarketplacePlugins,
-  initializePlugin,
-  type PluginSource,
-} from "../src/plugins.ts";
+import type {
+  CoreDependencies,
+  Plugin,
+  PluginAPI,
+  PluginDefinition,
+  PluginIdentity,
+} from "../src/plugin.ts";
+import { coreDependencies, initializePlugins } from "../src/plugins.ts";
 
-const coreOwner = { marketplace: "core", plugin: "marketplace" };
-const personalOwner = { marketplace: "personal", plugin: "notes" };
+function definition(
+  name: string,
+  plugin: Plugin,
+  parent?: PluginIdentity,
+): PluginDefinition {
+  return {
+    identity: parent ? { name, parent } : { name },
+    load: () => plugin,
+  };
+}
 
 function outputContext(): CommandProcessContext & { stdoutText(): string } {
   let stdout = "";
@@ -36,16 +42,9 @@ function outputContext(): CommandProcessContext & { stdoutText(): string } {
   };
 }
 
-function invalidSource(defaultExport: unknown): PluginSource {
-  return { default: defaultExport } as PluginSource;
-}
-
 describe("public plugin contract", () => {
-  test("is available from the stable package export", async () => {
+  test("is type-only at runtime and injects shared frozen dependencies", async () => {
     expect(Object.keys(await import("tx/plugin"))).toEqual([]);
-  });
-
-  test("injects shared module identities and canonical package versions", () => {
     expect(coreDependencies.react).toBe(react);
     expect(coreDependencies.ink).toBe(ink);
     expect(coreDependencies.tx.version).toBe(packageMetadata.version);
@@ -53,362 +52,181 @@ describe("public plugin contract", () => {
       react: packageMetadata.dependencies.react,
       ink: packageMetadata.dependencies.ink,
     });
-    expect(packageMetadata.dependencies["@types/react"]).toBe("19.2.18");
-    expect(packageMetadata.dependencies["@types/node"]).toBe("26.1.2");
     expect(Object.isFrozen(coreDependencies)).toBe(true);
     expect(Object.isFrozen(coreDependencies.tx)).toBe(true);
     expect(Object.isFrozen(coreDependencies.versions)).toBe(true);
-    expect(Object.isFrozen(coreDependencies.marketplace)).toBe(true);
-    expect(typeof coreDependencies.marketplace.resolveDirectory).toBe(
-      "function",
-    );
-    expect(typeof coreDependencies.marketplace.validateName).toBe("function");
-    expect(typeof coreDependencies.marketplace.discover).toBe("function");
-    expect(typeof coreDependencies.marketplace.prepare).toBe("function");
+    expect("marketplace" in coreDependencies).toBe(false);
   });
 });
 
-async function writeMarketplace(
-  root: string,
-  name: string,
-  plugins: readonly { readonly name: string; readonly entry: string }[],
-): Promise<string> {
-  const checkout = join(root, name);
-  await mkdir(checkout, { recursive: true });
-  for (const plugin of plugins) {
-    const entry = join(checkout, plugin.entry);
-    await mkdir(join(entry, ".."), { recursive: true });
-    await writeFile(entry, "export default () => {};\n");
-  }
-  await writeFile(
-    join(checkout, "tx.marketplace.json"),
-    JSON.stringify({ plugins }),
-  );
-  return checkout;
-}
-
-describe("installed marketplace plugin loading", () => {
-  test("imports TypeScript entries and initializes them through the shared path", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tx-plugin-import-"));
-    try {
-      const checkout = await writeMarketplace(root, "personal", [
-        { name: "notes", entry: "notes.ts" },
-      ]);
-      await writeFile(
-        join(checkout, "notes.ts"),
-        'export default ({ command }) => command("notes open", () => {});\n',
-      );
-      const registry = new CommandRegistry();
-
-      expect(await initializeMarketplacePlugins(registry, root)).toEqual([]);
-      expect(registry.resolve(["notes", "open"])?.owner).toEqual({
-        marketplace: "personal",
-        plugin: "notes",
-      });
-      expect(
-        (await dispatch(registry, ["notes", "open"], outputContext())).exitCode,
-      ).toBe(0);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("loads by marketplace name and manifest order while isolating failures", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tx-plugin-order-"));
-    try {
-      await writeMarketplace(root, "zeta", [
-        { name: "collision", entry: "collision.ts" },
-      ]);
-      await writeMarketplace(root, "alpha", [
-        { name: "good", entry: "good.ts" },
-        { name: "broken", entry: "broken.ts" },
-        { name: "after", entry: "after.ts" },
-      ]);
-      await mkdir(join(root, "beta"));
-      await writeFile(join(root, "beta", "tx.marketplace.json"), "{}");
-      await mkdir(join(root, ".staging"));
-      await writeFile(join(root, "plain"), "ignored");
-
-      const imported: string[] = [];
-      const registry = new CommandRegistry();
-      const failures = await initializeMarketplacePlugins(registry, root, {
-        importPlugin: async (entryPath) => {
-          imported.push(entryPath);
-          if (entryPath.endsWith("broken.ts")) throw "broken import";
-          return {
-            default: ({ command }: PluginAPI) => {
-              command(
-                entryPath.endsWith("after.ts") ? "after" : "shared",
-                () => {},
-              );
-            },
-          };
-        },
-      });
-
-      expect(imported.map((entry) => entry.slice(root.length + 1))).toEqual([
-        "alpha/good.ts",
-        "alpha/broken.ts",
-        "alpha/after.ts",
-        "zeta/collision.ts",
-      ]);
-      expect(failures).toEqual([
-        {
-          kind: "plugin",
-          marketplace: "alpha",
-          plugin: "broken",
-          message: "broken import",
-        },
-        {
-          kind: "marketplace",
-          marketplace: "beta",
-          message: "tx.marketplace.json must contain a plugins array",
-        },
-        {
-          kind: "plugin",
-          marketplace: "zeta",
-          plugin: "collision",
-          message:
-            'Command "shared" is already registered by alpha/good; cannot register it for zeta/collision',
-        },
-      ]);
-      expect(Object.isFrozen(failures)).toBe(true);
-      expect(registry.resolve(["shared"])?.owner).toEqual({
-        marketplace: "alpha",
-        plugin: "good",
-      });
-      expect(registry.resolve(["after"])?.owner).toEqual({
-        marketplace: "alpha",
-        plugin: "after",
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("returns no failures for missing marketplace storage", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tx-plugin-missing-"));
-    try {
-      expect(
-        await initializeMarketplacePlugins(
-          new CommandRegistry(),
-          join(root, "missing"),
-        ),
-      ).toEqual([]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("initializePlugin", () => {
-  test("uses one scoped API for a statically supplied synchronous plugin", async () => {
+describe("initializePlugins", () => {
+  test("initializes roots and committed children in deterministic FIFO order", async () => {
     const registry = new CommandRegistry();
-    let receivedAPI: PluginAPI | undefined;
-    const plugin: Plugin = (api) => {
-      receivedAPI = api;
-      api.command(["marketplace", "list"], (_args, context) => {
-        context.stdout.write(`${context.marketplace}/${context.plugin}`);
-      });
-    };
-
-    await initializePlugin(registry, coreOwner, plugin);
-
-    expect(receivedAPI?.dependencies).toBe(coreDependencies);
-    expect(Object.isFrozen(receivedAPI)).toBe(true);
-    const context = outputContext();
-    const result = await dispatch(registry, ["marketplace", "list"], context);
-    expect(result.command?.path).toEqual(["marketplace", "list"]);
-    expect(result.command?.owner).toEqual(coreOwner);
-    expect(context.stdoutText()).toBe("core/marketplace");
-  });
-
-  test("awaits a dynamically supplied asynchronous default export", async () => {
-    const registry = new CommandRegistry();
-    const owner = { ...personalOwner };
-    let initialized = false;
-    const loading = initializePlugin(registry, owner, {
-      default: (async ({ command }) => {
-        await Promise.resolve();
-        initialized = true;
-        command("notes open", () => {});
-      }) satisfies Plugin,
-    });
-    owner.marketplace = "changed";
-    owner.plugin = "changed";
-
-    await loading;
-
-    expect(initialized).toBe(true);
-    expect(registry.resolve(["notes", "open"])?.owner).toEqual(personalOwner);
-  });
-
-  test.each([
-    ["missing", {}],
-    ["undefined", { default: undefined }],
-    ["non-function", invalidSource("not a function")],
-  ])("rejects a %s default export with its owner", async (_label, source) => {
-    const registry = new CommandRegistry();
-
-    await expect(
-      initializePlugin(registry, personalOwner, source),
-    ).rejects.toThrow("Plugin personal/notes must default-export a function");
-    expect(registry.help()).toBe("Usage: tx <command>\n");
-  });
-
-  test.each([
-    [
-      "throws",
-      (({ command }) => {
-        command("ghost sync", () => {});
-        throw new Error("sync initialization failed");
-      }) satisfies Plugin,
-    ],
-    [
-      "rejects",
-      (async ({ command }) => {
-        command("ghost async", () => {});
-        await Promise.resolve();
-        throw new Error("async initialization failed");
-      }) satisfies Plugin,
-    ],
-  ])(
-    "leaves no commands or ghost nodes when initialization %s",
-    async (_label, plugin) => {
-      const registry = new CommandRegistry();
-
-      await expect(
-        initializePlugin(registry, personalOwner, plugin),
-      ).rejects.toThrow(/initialization failed/);
-      expect(registry.resolve(["ghost", "sync"])).toBeUndefined();
-      expect(registry.resolve(["ghost", "async"])).toBeUndefined();
-      expect(registry.help(["ghost"])).toBeUndefined();
-      expect(registry.help()).toBe("Usage: tx <command>\n");
-    },
-  );
-
-  test("rolls back the whole plugin on an invalid path", async () => {
-    const registry = new CommandRegistry();
-    const plugin: Plugin = ({ command }) => {
-      command("ghost valid", () => {});
-      command(["ghost", "   "], () => {});
-    };
-
-    await expect(
-      initializePlugin(registry, personalOwner, plugin),
-    ).rejects.toThrow(
-      "Command path must contain one or more non-empty segments",
-    );
-    expect(registry.resolve(["ghost", "valid"])).toBeUndefined();
-    expect(registry.help(["ghost"])).toBeUndefined();
-  });
-
-  test("rolls back the whole plugin on an intra-batch collision", async () => {
-    const registry = new CommandRegistry();
-    const plugin: Plugin = ({ command }) => {
-      command("ghost other", () => {});
-      command("duplicate", () => {});
-      command(["duplicate"], () => {});
-    };
-
-    await expect(
-      initializePlugin(registry, personalOwner, plugin),
-    ).rejects.toThrow(
-      'Command "duplicate" is already registered by personal/notes; cannot register it for personal/notes',
-    );
-    expect(registry.resolve(["duplicate"])).toBeUndefined();
-    expect(registry.help(["ghost"])).toBeUndefined();
-  });
-
-  test("keeps earlier plugins while rejecting a later collision atomically", async () => {
-    const registry = new CommandRegistry();
-    await initializePlugin(registry, coreOwner, ({ command }) => {
-      command("marketplace add", () => {});
-    });
-
-    const plugin: Plugin = ({ command }) => {
-      command("ghost current", () => {});
-      command(["marketplace", "add"], () => {});
-    };
-    await expect(
-      initializePlugin(registry, personalOwner, plugin),
-    ).rejects.toThrow(
-      'Command "marketplace add" is already registered by core/marketplace; cannot register it for personal/notes',
-    );
-
-    expect(registry.resolve(["marketplace", "add"])?.owner).toEqual(coreOwner);
-    expect(registry.resolve(["ghost", "current"])).toBeUndefined();
-    expect(registry.help(["ghost"])).toBeUndefined();
-    expect(registry.help()).toContain("  marketplace\n");
-  });
-
-  test("closes synchronous registration before queued microtasks", async () => {
-    const registry = new CommandRegistry();
-    let lateError: unknown;
-    await initializePlugin(registry, personalOwner, (api) => {
-      api.command("notes current", () => {});
-      queueMicrotask(() => {
-        try {
-          api.command("notes microtask", () => {});
-        } catch (error) {
-          lateError = error;
-        }
-      });
-    });
-
-    expect(lateError).toEqual(
-      new Error(
-        "Plugin personal/notes cannot register commands after initialization",
-      ),
-    );
-    expect(registry.resolve(["notes", "current"])).toBeDefined();
-    expect(registry.resolve(["notes", "microtask"])).toBeUndefined();
-  });
-
-  test("closes registration before commit-phase path normalization", async () => {
-    const registry = new CommandRegistry();
-    const reentrantPath = ["placeholder"];
-    let retainedAPI: PluginAPI | undefined;
-    Object.defineProperty(reentrantPath, 0, {
-      get() {
-        retainedAPI?.command("notes reentrant", () => {});
-        return "notes";
+    const order: string[] = [];
+    const child = (name: string, parent: PluginIdentity): PluginDefinition => ({
+      identity: { name, parent },
+      load: async () => {
+        order.push(`load:${name}`);
+        return ({ command }) => {
+          order.push(`init:${name}`);
+          command(name, () => {});
+        };
       },
     });
+    const alpha: PluginDefinition = {
+      identity: { name: "alpha" },
+      load: () => (api) => {
+        order.push("init:alpha");
+        api.plugin(child("alpha-child", api.identity));
+      },
+    };
+    const beta: PluginDefinition = {
+      identity: { name: "beta" },
+      load: () => (api) => {
+        order.push("init:beta");
+        api.plugin(child("beta-child", api.identity));
+      },
+    };
 
-    await expect(
-      initializePlugin(registry, personalOwner, (api) => {
-        retainedAPI = api;
-        api.command(reentrantPath, () => {});
-      }),
-    ).rejects.toThrow(
-      "Plugin personal/notes cannot register commands after initialization",
-    );
-    expect(registry.resolve(["notes"])).toBeUndefined();
-    expect(registry.resolve(["notes", "reentrant"])).toBeUndefined();
-    expect(registry.help(["notes"])).toBeUndefined();
+    expect(await initializePlugins(registry, [alpha, beta])).toEqual([]);
+    expect(order).toEqual([
+      "init:alpha",
+      "init:beta",
+      "load:alpha-child",
+      "init:alpha-child",
+      "load:beta-child",
+      "init:beta-child",
+    ]);
+    expect(registry.resolve(["alpha-child"])?.owner).toEqual({
+      name: "alpha-child",
+      parent: { name: "alpha" },
+    });
   });
 
-  test("closes registration after initialization for retained API references", async () => {
+  test("exposes immutable identity, env, dependencies, and generic command context", async () => {
+    const registry = new CommandRegistry();
+    const env = { TEST_VALUE: "yes" };
+    const customDependencies = { ...coreDependencies } as CoreDependencies;
+    let retainedAPI: PluginAPI | undefined;
+    const identity = { name: "leaf", parent: { name: "root" } };
+    const plugin: Plugin = (api) => {
+      retainedAPI = api;
+      api.command("inspect", (_args, context) => {
+        context.stdout.write(
+          `${context.plugin.parent?.name}/${context.plugin.name}`,
+        );
+      });
+    };
+
+    expect(
+      await initializePlugins(
+        registry,
+        [definition("leaf", plugin, identity.parent)],
+        {
+          env,
+          dependencies: customDependencies,
+        },
+      ),
+    ).toEqual([]);
+    expect(retainedAPI?.env).toBe(env);
+    expect(retainedAPI?.dependencies).toBe(customDependencies);
+    expect(retainedAPI?.identity).toEqual(identity);
+    expect(Object.isFrozen(retainedAPI)).toBe(true);
+    expect(Object.isFrozen(retainedAPI?.identity)).toBe(true);
+    expect(Object.isFrozen(retainedAPI?.identity.parent)).toBe(true);
+    const context = outputContext();
+    expect(await dispatch(registry, ["inspect"], context)).toMatchObject({
+      exitCode: 0,
+    });
+    expect(context.stdoutText()).toBe("root/leaf");
+  });
+
+  test("atomically discards commands and children after initialization failure", async () => {
+    const registry = new CommandRegistry();
+    let childLoaded = false;
+    const failures = await initializePlugins(registry, [
+      definition("broken", ({ command, plugin, identity }) => {
+        command("ghost", () => {});
+        plugin({
+          identity: { name: "ghost-child", parent: identity },
+          load: () => {
+            childLoaded = true;
+            return () => {};
+          },
+        });
+        throw new Error("initialization failed");
+      }),
+      definition("healthy", ({ command }) => command("healthy", () => {})),
+    ]);
+
+    expect(failures).toEqual([
+      { identity: { name: "broken" }, message: "initialization failed" },
+    ]);
+    expect(childLoaded).toBe(false);
+    expect(registry.resolve(["ghost"])).toBeUndefined();
+    expect(registry.resolve(["healthy"])).toBeDefined();
+  });
+
+  test("isolates load, shape, identity, and collision failures", async () => {
+    const registry = new CommandRegistry();
+    const failures = await initializePlugins(registry, [
+      definition("first", ({ command }) => command("shared", () => {})),
+      {
+        identity: { name: "throwing" },
+        load: async () => {
+          throw "load failed";
+        },
+      },
+      { identity: { name: "shape" }, load: () => 42 as unknown as Plugin },
+      { identity: { name: " " }, load: () => () => {} },
+      definition("collision", ({ command, plugin }) => {
+        command("rolled-back", () => {});
+        command("shared", () => {});
+        plugin(definition("never", () => {}));
+      }),
+    ]);
+
+    expect(
+      failures.map(({ identity, message }) => [identity.name, message]),
+    ).toEqual([
+      ["throwing", "load failed"],
+      ["shape", "Plugin definition must load a function"],
+      ["<invalid>", "Plugin identity name must not be empty"],
+      [
+        "collision",
+        'Command "shared" is already registered by first; cannot register it for collision',
+      ],
+    ]);
+    expect(registry.resolve(["shared"])?.owner).toEqual({ name: "first" });
+    expect(registry.resolve(["rolled-back"])).toBeUndefined();
+  });
+
+  test("closes command and child contribution after initialization", async () => {
     const registry = new CommandRegistry();
     let retainedAPI: PluginAPI | undefined;
-    await initializePlugin(registry, personalOwner, (api) => {
-      retainedAPI = api;
-      api.command("notes current", () => {});
-    });
+    expect(
+      await initializePlugins(registry, [
+        definition("retained", (api) => {
+          retainedAPI = api;
+          api.command("current", () => {});
+        }),
+      ]),
+    ).toEqual([]);
 
-    expect(() => retainedAPI?.command("notes late", () => {})).toThrow(
-      "Plugin personal/notes cannot register commands after initialization",
+    expect(() => retainedAPI?.command("late", () => {})).toThrow(
+      "Plugin retained cannot register commands after initialization",
     );
-    expect(registry.resolve(["notes", "current"])).toBeDefined();
-    expect(registry.resolve(["notes", "late"])).toBeUndefined();
+    expect(() => retainedAPI?.plugin(definition("late", () => {}))).toThrow(
+      "Plugin retained cannot contribute plugins after initialization",
+    );
   });
 
-  test("accepts a plugin that registers no commands", async () => {
+  test("supports empty defaults and plugins without contributions", async () => {
     const registry = new CommandRegistry();
-
-    await initializePlugin(registry, personalOwner, () => {});
-
+    expect(await initializePlugins(registry)).toEqual([]);
+    expect(
+      await initializePlugins(registry, [definition("empty", () => {})]),
+    ).toEqual([]);
     expect(registry.help()).toBe("Usage: tx <command>\n");
   });
 });

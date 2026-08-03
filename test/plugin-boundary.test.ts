@@ -20,19 +20,24 @@ import {
 } from "node:path";
 import {
   type CallExpression,
+  isBinaryExpression,
   isCallExpression,
   isExportDeclaration,
   isExternalModuleReference,
   isIdentifier,
   isImportDeclaration,
   isImportEqualsDeclaration,
+  isPostfixUnaryExpression,
+  isPrefixUnaryExpression,
   isStringLiteral,
+  isVariableDeclaration,
   type Node,
+  NodeFlags,
   type SourceFile,
   type StringLiteral,
   SyntaxKind,
 } from "typescript/unstable/ast";
-import { API, type Program } from "typescript/unstable/async";
+import { API, type Checker, type Program } from "typescript/unstable/async";
 
 const repositoryRoot = resolve(import.meta.dir, "..");
 const pluginsRoot = join(repositoryRoot, "plugins");
@@ -64,8 +69,79 @@ function runtimeModuleSpecifier(
   return argument && isStringLiteral(argument) ? argument : undefined;
 }
 
-function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
+async function immutableStringBindings(
+  sourceFile: SourceFile,
+  checker: Checker,
+): Promise<ReadonlyMap<number, StringLiteral>> {
+  const declarations: {
+    readonly name: Node;
+    readonly literal: StringLiteral;
+  }[] = [];
+  const reassignedNames: Node[] = [];
+
+  function visit(node: Node): void {
+    if (
+      isVariableDeclaration(node) &&
+      isIdentifier(node.name) &&
+      node.initializer &&
+      isStringLiteral(node.initializer) &&
+      (node.parent.flags & NodeFlags.Const) !== 0
+    ) {
+      declarations.push({ name: node.name, literal: node.initializer });
+    } else if (
+      isBinaryExpression(node) &&
+      node.operatorToken.kind >= SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= SyntaxKind.LastAssignment &&
+      isIdentifier(node.left)
+    ) {
+      reassignedNames.push(node.left);
+    } else if (
+      (isPrefixUnaryExpression(node) || isPostfixUnaryExpression(node)) &&
+      (node.operator === SyntaxKind.PlusPlusToken ||
+        node.operator === SyntaxKind.MinusMinusToken) &&
+      isIdentifier(node.operand)
+    ) {
+      reassignedNames.push(node.operand);
+    }
+    node.forEachChild(visit);
+  }
+  visit(sourceFile);
+
+  const reassignedIds = new Set(
+    (
+      await Promise.all(
+        reassignedNames.map((name) => checker.getSymbolAtLocation(name)),
+      )
+    )
+      .filter((symbol) => symbol !== undefined)
+      .map((symbol) => symbol.id),
+  );
+  const bindings = new Map<number, StringLiteral>();
+  for (const declaration of declarations) {
+    const symbol = await checker.getSymbolAtLocation(declaration.name);
+    if (symbol && !reassignedIds.has(symbol.id)) {
+      bindings.set(symbol.id, declaration.literal);
+    }
+  }
+  return bindings;
+}
+
+async function resolvedStringBinding(
+  identifier: Node,
+  bindings: ReadonlyMap<number, StringLiteral>,
+  checker: Checker,
+): Promise<StringLiteral | undefined> {
+  const symbol = await checker.getSymbolAtLocation(identifier);
+  return symbol ? bindings.get(symbol.id) : undefined;
+}
+
+async function moduleSpecifiers(
+  sourceFile: SourceFile,
+  checker: Checker,
+): Promise<readonly StringLiteral[]> {
   const specifiers: StringLiteral[] = [];
+  const identifiers: Node[] = [];
+  const bindings = await immutableStringBindings(sourceFile, checker);
 
   function visit(node: Node): void {
     if (
@@ -83,16 +159,29 @@ function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
     } else if (isCallExpression(node)) {
       const specifier = runtimeModuleSpecifier(node);
       if (specifier) specifiers.push(specifier);
+      else if (isRuntimeModuleCall(node)) {
+        const argument = node.arguments[0];
+        if (argument && isIdentifier(argument)) identifiers.push(argument);
+      }
     }
     node.forEachChild(visit);
   }
 
   visit(sourceFile);
+  for (const identifier of identifiers) {
+    const binding = await resolvedStringBinding(identifier, bindings, checker);
+    if (binding) specifiers.push(binding);
+  }
   return specifiers;
 }
 
-function txPluginViolations(sourceFile: SourceFile): string[] {
+async function txPluginViolations(
+  sourceFile: SourceFile,
+  checker: Checker,
+): Promise<string[]> {
   const violations: string[] = [];
+  const runtimeIdentifiers: Node[] = [];
+  const bindings = await immutableStringBindings(sourceFile, checker);
 
   function visit(node: Node): void {
     if (
@@ -121,16 +210,31 @@ function txPluginViolations(sourceFile: SourceFile): string[] {
     ) {
       violations.push("tx/plugin imports must use import type");
     }
-    if (
-      isCallExpression(node) &&
-      runtimeModuleSpecifier(node)?.text === "tx/plugin"
-    ) {
-      violations.push("tx/plugin cannot be loaded at runtime");
+    if (isCallExpression(node) && isRuntimeModuleCall(node)) {
+      const specifier = runtimeModuleSpecifier(node);
+      if (specifier?.text === "tx/plugin") {
+        violations.push("tx/plugin cannot be loaded at runtime");
+      } else if (!specifier) {
+        const argument = node.arguments[0];
+        if (argument && isIdentifier(argument)) {
+          runtimeIdentifiers.push(argument);
+        }
+      }
     }
     node.forEachChild(visit);
   }
 
   visit(sourceFile);
+  for (const identifier of runtimeIdentifiers) {
+    const specifier = await resolvedStringBinding(
+      identifier,
+      bindings,
+      checker,
+    );
+    if (specifier?.text === "tx/plugin") {
+      violations.push("tx/plugin cannot be loaded at runtime");
+    }
+  }
   return violations;
 }
 
@@ -180,6 +284,7 @@ async function requiredSourceFile(
 
 async function bundledPluginViolations(
   program: Program,
+  checker: Checker,
   entries: readonly string[],
 ): Promise<string[]> {
   const violations: string[] = [];
@@ -191,22 +296,26 @@ async function bundledPluginViolations(
     visited.add(canonicalPath);
     const sourceFile = await requiredSourceFile(program, canonicalPath);
     violations.push(
-      ...txPluginViolations(sourceFile).map(
+      ...(await txPluginViolations(sourceFile, checker)).map(
         (message) => `${relative(repositoryRoot, canonicalPath)}: ${message}`,
       ),
     );
     sourceFile.forEachChild(function checkRuntimeModuleCall(node): void {
-      if (isCallExpression(node) && isRuntimeModuleCall(node)) {
+      if (
+        isCallExpression(node) &&
+        isIdentifier(node.expression) &&
+        node.expression.text === "require"
+      ) {
         const argument = node.arguments[0];
         if (!argument || !isStringLiteral(argument)) {
           violations.push(
-            `${relative(repositoryRoot, canonicalPath)}: runtime module specifiers must be string literals`,
+            `${relative(repositoryRoot, canonicalPath)}: require specifiers must be string literals`,
           );
         }
       }
       node.forEachChild(checkRuntimeModuleCall);
     });
-    for (const literal of moduleSpecifiers(sourceFile)) {
+    for (const literal of await moduleSpecifiers(sourceFile, checker)) {
       if (!literal.text.startsWith(".")) continue;
       const imported = await resolveRelativeModule(canonicalPath, literal.text);
       if (!imported) {
@@ -231,26 +340,24 @@ async function bundledPluginViolations(
 
 async function corePluginImportViolations(
   program: Program,
-  entries: ReadonlySet<string>,
+  checker: Checker,
+  roots: {
+    readonly source: string;
+    readonly plugins: string;
+    readonly repository: string;
+  } = { source: sourceRoot, plugins: pluginsRoot, repository: repositoryRoot },
 ): Promise<string[]> {
   const violations: string[] = [];
-  const canonicalPluginsRoot = await realpath(pluginsRoot);
-  const canonicalEntries = new Set(
-    await Promise.all([...entries].map((entry) => realpath(entry))),
-  );
-  for (const discoveredPath of await sourceModules(sourceRoot)) {
+  const canonicalPluginsRoot = await realpath(roots.plugins);
+  for (const discoveredPath of await sourceModules(roots.source)) {
     const path = await realpath(discoveredPath);
     const sourceFile = await requiredSourceFile(program, path);
-    for (const literal of moduleSpecifiers(sourceFile)) {
+    for (const literal of await moduleSpecifiers(sourceFile, checker)) {
       if (!literal.text.startsWith(".")) continue;
       const imported = await resolveRelativeModule(path, literal.text);
-      if (
-        imported &&
-        isWithin(canonicalPluginsRoot, imported) &&
-        !canonicalEntries.has(imported)
-      ) {
+      if (imported && isWithin(canonicalPluginsRoot, imported)) {
         violations.push(
-          `${relative(repositoryRoot, path)} imports bundled implementation ${relative(repositoryRoot, imported)}`,
+          `${relative(roots.repository, path)} imports bundled implementation ${relative(roots.repository, imported)}`,
         );
       }
     }
@@ -275,7 +382,7 @@ async function bundledPluginEntries(root = pluginsRoot): Promise<string[]> {
 
 async function withProgram<T>(
   configPath: string,
-  operation: (program: Program) => Promise<T>,
+  operation: (program: Program, checker: Checker) => Promise<T>,
 ): Promise<T> {
   const api = new API();
   try {
@@ -283,7 +390,7 @@ async function withProgram<T>(
     try {
       const project = snapshot.getProject(configPath);
       if (!project) throw new Error(`TypeScript did not load ${configPath}`);
-      return await operation(project.program);
+      return await operation(project.program, project.checker);
     } finally {
       await snapshot.dispose();
     }
@@ -295,12 +402,15 @@ async function withProgram<T>(
 test("bundled plugin module graphs stay behind the public boundary", async () => {
   const entries = await bundledPluginEntries();
   expect(entries.length).toBeGreaterThan(0);
-  await withProgram(join(repositoryRoot, "tsconfig.json"), async (program) => {
-    expect(await bundledPluginViolations(program, entries)).toEqual([]);
-    expect(await corePluginImportViolations(program, new Set(entries))).toEqual(
-      [],
-    );
-  });
+  await withProgram(
+    join(repositoryRoot, "tsconfig.json"),
+    async (program, checker) => {
+      expect(await bundledPluginViolations(program, checker, entries)).toEqual(
+        [],
+      );
+      expect(await corePluginImportViolations(program, checker)).toEqual([]);
+    },
+  );
 });
 
 test("bundled plugin entry discovery supports every TypeScript module extension", async () => {
@@ -372,7 +482,10 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
         ].join("\n"),
       ),
       writeFile(join(root, "plugins", "two", "index.ts"), "export {};"),
-      writeFile(join(root, "src", "core.ts"), "export {};"),
+      writeFile(
+        join(root, "src", "core.ts"),
+        'import "../plugins/one/index.ts";',
+      ),
       writeFile(join(root, "src", "dynamic.ts"), "export {};"),
       writeFile(join(root, "src", "required.ts"), "export {};"),
       writeFile(
@@ -384,16 +497,17 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       ),
     ]);
 
-    await withProgram(join(root, "tsconfig.json"), async (program) => {
+    await withProgram(join(root, "tsconfig.json"), async (program, checker) => {
       for (const [name, , expectedCount] of fixtureSources) {
         expect(
-          txPluginViolations(
+          await txPluginViolations(
             await requiredSourceFile(program, await realpath(join(root, name))),
+            checker,
           ),
         ).toHaveLength(expectedCount);
       }
 
-      const graphViolations = await bundledPluginViolations(program, [
+      const graphViolations = await bundledPluginViolations(program, checker, [
         join(root, "plugins", "one", "index.ts"),
       ]);
       expect(graphViolations).toHaveLength(5);
@@ -415,13 +529,102 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       expect(
         graphViolations.every((message) => message.includes("escapes")),
       ).toBe(true);
+      expect(
+        await corePluginImportViolations(program, checker, {
+          source: join(root, "src"),
+          plugins: join(root, "plugins"),
+          repository: root,
+        }),
+      ).toEqual([
+        "src/core.ts imports bundled implementation plugins/one/index.ts",
+      ]);
     });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("bundled plugin graphs reject non-literal runtime module specifiers", async () => {
+test("string-bound module edges respect lexical symbols and immutability", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tx-plugin-bindings-"));
+
+  try {
+    const pluginRoot = join(root, "plugins", "one");
+    await mkdir(pluginRoot, { recursive: true });
+    await mkdir(join(root, "src"));
+    await writeFile(
+      join(pluginRoot, "index.ts"),
+      [
+        'const corePath = "../../src/core.ts";',
+        "{",
+        '  const corePath = "./local.ts";',
+        "  void import(corePath);",
+        "}",
+        "void import(corePath);",
+        'let mutablePath = "../../src/core.ts";',
+        "void import(mutablePath);",
+        'const reassignedPath = "../../src/core.ts";',
+        'reassignedPath = "./local.ts";',
+        "void import(reassignedPath);",
+        'const pluginApi = "tx/plugin";',
+        "function load(pluginApi: string) {",
+        "  void import(pluginApi);",
+        "}",
+        "void load(pluginApi);",
+        "void import(pluginApi);",
+      ].join("\n"),
+    );
+    await writeFile(join(pluginRoot, "local.ts"), "export {};");
+    await writeFile(join(root, "src", "core.ts"), "export {};");
+    await writeFile(
+      join(root, "src", "host.ts"),
+      [
+        'const pluginPath = "../plugins/one/index.ts";',
+        "{",
+        '  const pluginPath = "./local.ts";',
+        "  void import(pluginPath);",
+        "}",
+        "void import(pluginPath);",
+      ].join("\n"),
+    );
+    await writeFile(join(root, "src", "local.ts"), "export {};");
+    await writeFile(
+      join(root, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { noEmit: true },
+        include: ["**/*.ts"],
+      }),
+    );
+
+    await withProgram(join(root, "tsconfig.json"), async (program, checker) => {
+      const pluginViolations = await bundledPluginViolations(program, checker, [
+        join(pluginRoot, "index.ts"),
+      ]);
+      expect(
+        pluginViolations.filter((message) =>
+          message.includes("import escapes bundled plugin"),
+        ),
+      ).toHaveLength(1);
+      expect(
+        pluginViolations.filter((message) =>
+          message.includes("tx/plugin cannot be loaded at runtime"),
+        ),
+      ).toHaveLength(1);
+      expect(
+        await corePluginImportViolations(program, checker, {
+          source: join(root, "src"),
+          plugins: join(root, "plugins"),
+          repository: root,
+        }),
+      ).toEqual([
+        "src/host.ts imports bundled implementation plugins/one/index.ts",
+      ]);
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("bundled plugin graphs allow dynamic plugin imports but reject non-literal require", async () => {
   const root = await mkdtemp(join(tmpdir(), "tx-plugin-nonliteral-"));
 
   try {
@@ -431,6 +634,8 @@ test("bundled plugin graphs reject non-literal runtime module specifiers", async
     await writeFile(
       join(pluginRoot, "index.ts"),
       [
+        "declare const entryPath: string;",
+        "void import(entryPath);",
         'const corePath = "../../src/core.ts";',
         "void import(corePath);",
         "require(corePath);",
@@ -448,16 +653,26 @@ test("bundled plugin graphs reject non-literal runtime module specifiers", async
       }),
     );
 
-    await withProgram(join(root, "tsconfig.json"), async (program) => {
-      const violations = await bundledPluginViolations(program, [
+    await withProgram(join(root, "tsconfig.json"), async (program, checker) => {
+      const violations = await bundledPluginViolations(program, checker, [
         join(pluginRoot, "index.ts"),
       ]);
-      expect(violations).toHaveLength(4);
+      expect(violations).toHaveLength(6);
       expect(
-        violations.every((message) =>
-          message.includes("runtime module specifiers must be string literals"),
+        violations.filter((message) =>
+          message.includes("require specifiers must be string literals"),
         ),
-      ).toBe(true);
+      ).toHaveLength(2);
+      expect(
+        violations.filter((message) =>
+          message.includes("tx/plugin cannot be loaded at runtime"),
+        ),
+      ).toHaveLength(2);
+      expect(
+        violations.filter((message) =>
+          message.includes("import escapes bundled plugin"),
+        ),
+      ).toHaveLength(2);
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -483,9 +698,11 @@ test("bundled plugin graphs reject symlink escapes", async () => {
       }),
     );
 
-    await withProgram(join(root, "tsconfig.json"), async (program) => {
+    await withProgram(join(root, "tsconfig.json"), async (program, checker) => {
       expect(
-        await bundledPluginViolations(program, [join(pluginRoot, "index.ts")]),
+        await bundledPluginViolations(program, checker, [
+          join(pluginRoot, "index.ts"),
+        ]),
       ).toEqual([
         expect.stringContaining(
           "import escapes bundled plugin: ./core-link.ts",
@@ -522,9 +739,11 @@ test("bundled plugin graphs allow literal local and static type-only imports", a
       }),
     );
 
-    await withProgram(join(root, "tsconfig.json"), async (program) => {
+    await withProgram(join(root, "tsconfig.json"), async (program, checker) => {
       expect(
-        await bundledPluginViolations(program, [join(pluginRoot, "index.ts")]),
+        await bundledPluginViolations(program, checker, [
+          join(pluginRoot, "index.ts"),
+        ]),
       ).toEqual([]);
     });
   } finally {
