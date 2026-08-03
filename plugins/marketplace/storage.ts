@@ -195,7 +195,7 @@ export async function readMarketplaceManifest(
     document = JSON.parse(await readFile(resolvedManifestPath, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`Missing ${manifestFilename}`);
+      throw new Error(`Missing ${selectedManifestFilename}`);
     }
     if (error instanceof SyntaxError) {
       throw new Error(`Invalid ${selectedManifestFilename}: ${error.message}`);

@@ -239,6 +239,18 @@ describe("marketplace manifests", () => {
     }
   });
 
+  test("identifies a selected legacy manifest that cannot be resolved", async () => {
+    const root = await temporaryDirectory("tx-manifest-legacy-missing-");
+    try {
+      await symlink("missing.json", join(root, "tx.marketplace.json"));
+      await expect(readMarketplaceManifest(root)).rejects.toThrow(
+        "Missing tx.marketplace.json",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test.each([
     ["missing", undefined, "Missing .tx/config.json"],
     ["malformed JSON", "{", "Invalid .tx/config.json"],
@@ -465,6 +477,18 @@ describe("shell-free process execution", () => {
 });
 
 describe("MarketplaceManager", () => {
+  test("directs callers to provide a name when one cannot be derived", async () => {
+    const manager = new MarketplaceManager("/unused", {
+      runGit: async () => {
+        throw new Error("Git must not run");
+      },
+    });
+
+    await expect(manager.add("https://example.com/..")).rejects.toThrow(
+      'Cannot derive a safe marketplace name from "https://example.com/.."; pass --name <name>',
+    );
+  });
+
   test("clones local Git repositories, awaits preparation, lists, and removes", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplaces-");
     try {

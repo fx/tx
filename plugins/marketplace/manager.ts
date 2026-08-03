@@ -153,7 +153,17 @@ export class MarketplaceManager implements MarketplaceOperations {
   }
 
   async add(repository: string, requestedName?: string): Promise<string> {
-    const name = requestedName ?? deriveMarketplaceName(repository);
+    let name = requestedName;
+    if (name === undefined) {
+      try {
+        name = deriveMarketplaceName(repository);
+      } catch (error) {
+        throw new Error(
+          `Cannot derive a safe marketplace name from "${repository}"; pass --name <name>`,
+          { cause: error },
+        );
+      }
+    }
     const target = containedMarketplacePath(this.#root, name);
     await mkdir(this.#root, { recursive: true });
     if (await pathExists(target)) {
