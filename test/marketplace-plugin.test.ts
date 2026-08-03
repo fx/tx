@@ -5,7 +5,7 @@ import {
 } from "../plugins/marketplace/index.ts";
 import { CommandRegistry, dispatch } from "../src/commands.ts";
 import type { CommandProcessContext } from "../src/context.ts";
-import { initializePlugin } from "../src/plugins.ts";
+import { initializePlugins } from "../src/plugins.ts";
 
 class RecordingManager implements MarketplaceOperations {
   readonly calls: unknown[][] = [];
@@ -58,11 +58,9 @@ function outputContext(): CommandProcessContext & {
 
 async function setup(manager = new RecordingManager()) {
   const registry = new CommandRegistry();
-  await initializePlugin(
-    registry,
-    { marketplace: "core", plugin: "marketplace" },
-    createMarketplacePlugin({ manager }),
-  );
+  expect(
+    await initializePlugins(registry, [createMarketplacePlugin({ manager })]),
+  ).toEqual([]);
   return { manager, registry };
 }
 
@@ -72,8 +70,7 @@ describe("first-party marketplace plugin", () => {
 
     for (const command of ["add", "list", "remove"]) {
       expect(registry.resolve(["marketplace", command])?.owner).toEqual({
-        marketplace: "core",
-        plugin: "marketplace",
+        name: "marketplace",
       });
     }
     expect(registry.help()).toBe(
@@ -142,11 +139,11 @@ describe("first-party marketplace plugin", () => {
 
   test("resolves marketplace storage from each command context", async () => {
     const registry = new CommandRegistry();
-    await initializePlugin(
-      registry,
-      { marketplace: "core", plugin: "marketplace" },
-      createMarketplacePlugin(),
-    );
+    expect(
+      await initializePlugins(registry, [createMarketplacePlugin()], {
+        env: { XDG_DATA_HOME: "/definitely/missing/tx-test-data" },
+      }),
+    ).toEqual([]);
 
     const helpContext = outputContext();
     expect(await dispatch(registry, [], helpContext)).toMatchObject({

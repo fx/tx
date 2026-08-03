@@ -1,20 +1,15 @@
-export interface CommandOwner {
-  readonly marketplace: string;
-  readonly plugin: string;
-}
+import type { PluginIdentity } from "./plugin.ts";
 
-export interface CommandContext extends CommandOwner {
+export interface CommandContext {
   cwd: string;
   env: Record<string, string | undefined>;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
+  plugin: PluginIdentity;
 }
 
-export type CommandProcessContext = Omit<
-  CommandContext,
-  "marketplace" | "plugin"
->;
+export type CommandProcessContext = Omit<CommandContext, "plugin">;
 
 export function createProcessContext(): CommandProcessContext {
   return {

@@ -27,6 +27,7 @@ import {
   isImportDeclaration,
   isImportEqualsDeclaration,
   isStringLiteral,
+  isVariableDeclaration,
   type Node,
   type SourceFile,
   type StringLiteral,
@@ -64,8 +65,28 @@ function runtimeModuleSpecifier(
   return argument && isStringLiteral(argument) ? argument : undefined;
 }
 
+function staticStringBindings(
+  sourceFile: SourceFile,
+): ReadonlyMap<string, StringLiteral> {
+  const bindings = new Map<string, StringLiteral>();
+  function visit(node: Node): void {
+    if (
+      isVariableDeclaration(node) &&
+      isIdentifier(node.name) &&
+      node.initializer &&
+      isStringLiteral(node.initializer)
+    ) {
+      bindings.set(node.name.text, node.initializer);
+    }
+    node.forEachChild(visit);
+  }
+  visit(sourceFile);
+  return bindings;
+}
+
 function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
   const specifiers: StringLiteral[] = [];
+  const bindings = staticStringBindings(sourceFile);
 
   function visit(node: Node): void {
     if (
@@ -83,6 +104,13 @@ function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
     } else if (isCallExpression(node)) {
       const specifier = runtimeModuleSpecifier(node);
       if (specifier) specifiers.push(specifier);
+      else if (isRuntimeModuleCall(node)) {
+        const argument = node.arguments[0];
+        if (argument && isIdentifier(argument)) {
+          const bound = bindings.get(argument.text);
+          if (bound) specifiers.push(bound);
+        }
+      }
     }
     node.forEachChild(visit);
   }
@@ -93,6 +121,7 @@ function moduleSpecifiers(sourceFile: SourceFile): readonly StringLiteral[] {
 
 function txPluginViolations(sourceFile: SourceFile): string[] {
   const violations: string[] = [];
+  const bindings = staticStringBindings(sourceFile);
 
   function visit(node: Node): void {
     if (
@@ -121,11 +150,16 @@ function txPluginViolations(sourceFile: SourceFile): string[] {
     ) {
       violations.push("tx/plugin imports must use import type");
     }
-    if (
-      isCallExpression(node) &&
-      runtimeModuleSpecifier(node)?.text === "tx/plugin"
-    ) {
-      violations.push("tx/plugin cannot be loaded at runtime");
+    if (isCallExpression(node) && isRuntimeModuleCall(node)) {
+      const argument = node.arguments[0];
+      const specifier =
+        runtimeModuleSpecifier(node) ??
+        (argument && isIdentifier(argument)
+          ? bindings.get(argument.text)
+          : undefined);
+      if (specifier?.text === "tx/plugin") {
+        violations.push("tx/plugin cannot be loaded at runtime");
+      }
     }
     node.forEachChild(visit);
   }
@@ -196,11 +230,15 @@ async function bundledPluginViolations(
       ),
     );
     sourceFile.forEachChild(function checkRuntimeModuleCall(node): void {
-      if (isCallExpression(node) && isRuntimeModuleCall(node)) {
+      if (
+        isCallExpression(node) &&
+        isIdentifier(node.expression) &&
+        node.expression.text === "require"
+      ) {
         const argument = node.arguments[0];
         if (!argument || !isStringLiteral(argument)) {
           violations.push(
-            `${relative(repositoryRoot, canonicalPath)}: runtime module specifiers must be string literals`,
+            `${relative(repositoryRoot, canonicalPath)}: require specifiers must be string literals`,
           );
         }
       }
@@ -231,26 +269,23 @@ async function bundledPluginViolations(
 
 async function corePluginImportViolations(
   program: Program,
-  entries: ReadonlySet<string>,
+  roots: {
+    readonly source: string;
+    readonly plugins: string;
+    readonly repository: string;
+  } = { source: sourceRoot, plugins: pluginsRoot, repository: repositoryRoot },
 ): Promise<string[]> {
   const violations: string[] = [];
-  const canonicalPluginsRoot = await realpath(pluginsRoot);
-  const canonicalEntries = new Set(
-    await Promise.all([...entries].map((entry) => realpath(entry))),
-  );
-  for (const discoveredPath of await sourceModules(sourceRoot)) {
+  const canonicalPluginsRoot = await realpath(roots.plugins);
+  for (const discoveredPath of await sourceModules(roots.source)) {
     const path = await realpath(discoveredPath);
     const sourceFile = await requiredSourceFile(program, path);
     for (const literal of moduleSpecifiers(sourceFile)) {
       if (!literal.text.startsWith(".")) continue;
       const imported = await resolveRelativeModule(path, literal.text);
-      if (
-        imported &&
-        isWithin(canonicalPluginsRoot, imported) &&
-        !canonicalEntries.has(imported)
-      ) {
+      if (imported && isWithin(canonicalPluginsRoot, imported)) {
         violations.push(
-          `${relative(repositoryRoot, path)} imports bundled implementation ${relative(repositoryRoot, imported)}`,
+          `${relative(roots.repository, path)} imports bundled implementation ${relative(roots.repository, imported)}`,
         );
       }
     }
@@ -297,9 +332,7 @@ test("bundled plugin module graphs stay behind the public boundary", async () =>
   expect(entries.length).toBeGreaterThan(0);
   await withProgram(join(repositoryRoot, "tsconfig.json"), async (program) => {
     expect(await bundledPluginViolations(program, entries)).toEqual([]);
-    expect(await corePluginImportViolations(program, new Set(entries))).toEqual(
-      [],
-    );
+    expect(await corePluginImportViolations(program)).toEqual([]);
   });
 });
 
@@ -372,7 +405,10 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
         ].join("\n"),
       ),
       writeFile(join(root, "plugins", "two", "index.ts"), "export {};"),
-      writeFile(join(root, "src", "core.ts"), "export {};"),
+      writeFile(
+        join(root, "src", "core.ts"),
+        'import "../plugins/one/index.ts";',
+      ),
       writeFile(join(root, "src", "dynamic.ts"), "export {};"),
       writeFile(join(root, "src", "required.ts"), "export {};"),
       writeFile(
@@ -415,13 +451,22 @@ test("AST checks reject forbidden tx/plugin syntax and graph escapes", async () 
       expect(
         graphViolations.every((message) => message.includes("escapes")),
       ).toBe(true);
+      expect(
+        await corePluginImportViolations(program, {
+          source: join(root, "src"),
+          plugins: join(root, "plugins"),
+          repository: root,
+        }),
+      ).toEqual([
+        "src/core.ts imports bundled implementation plugins/one/index.ts",
+      ]);
     });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("bundled plugin graphs reject non-literal runtime module specifiers", async () => {
+test("bundled plugin graphs allow dynamic plugin imports but reject non-literal require", async () => {
   const root = await mkdtemp(join(tmpdir(), "tx-plugin-nonliteral-"));
 
   try {
@@ -431,6 +476,8 @@ test("bundled plugin graphs reject non-literal runtime module specifiers", async
     await writeFile(
       join(pluginRoot, "index.ts"),
       [
+        "declare const entryPath: string;",
+        "void import(entryPath);",
         'const corePath = "../../src/core.ts";',
         "void import(corePath);",
         "require(corePath);",
@@ -452,12 +499,22 @@ test("bundled plugin graphs reject non-literal runtime module specifiers", async
       const violations = await bundledPluginViolations(program, [
         join(pluginRoot, "index.ts"),
       ]);
-      expect(violations).toHaveLength(4);
+      expect(violations).toHaveLength(6);
       expect(
-        violations.every((message) =>
-          message.includes("runtime module specifiers must be string literals"),
+        violations.filter((message) =>
+          message.includes("require specifiers must be string literals"),
         ),
-      ).toBe(true);
+      ).toHaveLength(2);
+      expect(
+        violations.filter((message) =>
+          message.includes("tx/plugin cannot be loaded at runtime"),
+        ),
+      ).toHaveLength(2);
+      expect(
+        violations.filter((message) =>
+          message.includes("import escapes bundled plugin"),
+        ),
+      ).toHaveLength(2);
     });
   } finally {
     await rm(root, { recursive: true, force: true });

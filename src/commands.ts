@@ -1,5 +1,9 @@
-import type { CommandOwner, CommandProcessContext } from "./context.ts";
-import type { CommandContext, CommandHandler } from "./plugin.ts";
+import type { CommandProcessContext } from "./context.ts";
+import type {
+  CommandContext,
+  CommandHandler,
+  PluginIdentity,
+} from "./plugin.ts";
 
 export type { CommandHandler } from "./plugin.ts";
 
@@ -7,13 +11,13 @@ export type CommandPath = string | readonly string[];
 
 export interface Command {
   readonly path: readonly string[];
-  readonly owner: CommandOwner;
+  readonly owner: PluginIdentity;
   readonly handler: CommandHandler;
 }
 
 export interface CommandRegistration {
   readonly path: CommandPath;
-  readonly owner: CommandOwner;
+  readonly owner: PluginIdentity;
   readonly handler: CommandHandler;
 }
 
@@ -31,8 +35,25 @@ export const EXIT_SUCCESS = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_USAGE = 2;
 
-function ownerName(owner: CommandOwner): string {
-  return `${owner.marketplace}/${owner.plugin}`;
+export function identityName(identity: PluginIdentity): string {
+  const names: string[] = [];
+  let current: PluginIdentity | undefined = identity;
+  while (current) {
+    names.push(current.name);
+    current = current.parent;
+  }
+  return names.reverse().join("/");
+}
+
+export function freezePluginIdentity(identity: PluginIdentity): PluginIdentity {
+  if (!identity.name.trim())
+    throw new Error("Plugin identity name must not be empty");
+  const parent = identity.parent
+    ? freezePluginIdentity(identity.parent)
+    : undefined;
+  return Object.freeze(
+    parent ? { name: identity.name, parent } : { name: identity.name },
+  );
 }
 
 export function normalizeCommandPath(path: CommandPath): readonly string[] {
@@ -65,7 +86,7 @@ export class CommandRegistry {
 
   register(
     path: CommandPath,
-    owner: CommandOwner,
+    owner: PluginIdentity,
     handler: CommandHandler,
   ): Command {
     return this.registerBatch([{ path, owner, handler }])[0] as Command;
@@ -74,13 +95,16 @@ export class CommandRegistry {
   registerBatch(
     registrations: readonly CommandRegistration[],
   ): readonly Command[] {
-    const commands = registrations.map(({ path, owner, handler }) =>
-      Object.freeze({
-        path: normalizeCommandPath(path),
-        owner: Object.freeze({ ...owner }),
-        handler,
-      }),
-    );
+    const commands: Command[] = [];
+    for (const { path, owner, handler } of registrations) {
+      commands.push(
+        Object.freeze({
+          path: normalizeCommandPath(path),
+          owner: freezePluginIdentity(owner),
+          handler,
+        }),
+      );
+    }
     const pending = new Map<string, Command>();
 
     for (const command of commands) {
@@ -88,7 +112,7 @@ export class CommandRegistry {
       const conflicting = this.#find(command.path) ?? pending.get(key);
       if (conflicting) {
         throw new Error(
-          `Command "${command.path.join(" ")}" is already registered by ${ownerName(conflicting.owner)}; cannot register it for ${ownerName(command.owner)}`,
+          `Command "${command.path.join(" ")}" is already registered by ${identityName(conflicting.owner)}; cannot register it for ${identityName(command.owner)}`,
         );
       }
       pending.set(key, command);
@@ -208,7 +232,7 @@ export async function dispatch(
     return { exitCode: EXIT_USAGE };
   }
 
-  const context: CommandContext = { ...processContext, ...command.owner };
+  const context: CommandContext = { ...processContext, plugin: command.owner };
   const args = argv.slice(command.path.length);
 
   try {

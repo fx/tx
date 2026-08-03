@@ -9,22 +9,9 @@ export type CommandHandler = (
   context: CommandContext,
 ) => void | Promise<void>;
 
-export interface UserDataDirectoryOptions {
-  readonly platform?: NodeJS.Platform;
-  readonly env?: Readonly<Record<string, string | undefined>>;
-  readonly home?: string;
-}
-
-export interface MarketplaceCheckout {
+export interface PluginIdentity {
   readonly name: string;
-  readonly checkout: string;
-}
-
-export interface MarketplaceCapabilities {
-  resolveDirectory(options?: UserDataDirectoryOptions): string;
-  validateName(name: string): string;
-  discover(root: string): Promise<readonly MarketplaceCheckout[]>;
-  prepare(checkout: string): Promise<void>;
+  readonly parent?: PluginIdentity;
 }
 
 export interface CoreDependencies {
@@ -37,12 +24,19 @@ export interface CoreDependencies {
     readonly react: string;
     readonly ink: string;
   };
-  readonly marketplace: MarketplaceCapabilities;
+}
+
+export interface PluginDefinition {
+  readonly identity: PluginIdentity;
+  load(): Plugin | Promise<Plugin>;
 }
 
 export interface PluginAPI {
-  command(path: string | readonly string[], handler: CommandHandler): void;
+  readonly identity: PluginIdentity;
+  readonly env: Readonly<Record<string, string | undefined>>;
   readonly dependencies: CoreDependencies;
+  command(path: string | readonly string[], handler: CommandHandler): void;
+  plugin(definition: PluginDefinition): void;
 }
 
 export type Plugin = (api: PluginAPI) => void | Promise<void>;

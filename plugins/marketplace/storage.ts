@@ -1,14 +1,22 @@
+import { execFile } from "node:child_process";
 import type { Dirent, Stats } from "node:fs";
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
+import { promisify } from "node:util";
 
-import type {
-  MarketplaceCheckout,
-  UserDataDirectoryOptions,
-} from "./plugin.ts";
+const executeFile = promisify(execFile);
 
-export type { UserDataDirectoryOptions } from "./plugin.ts";
+export interface UserDataDirectoryOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  readonly home?: string;
+}
+
+export interface MarketplaceCheckout {
+  readonly name: string;
+  readonly checkout: string;
+}
 
 export interface MarketplacePluginEntry {
   readonly name: string;
@@ -22,11 +30,15 @@ export interface MarketplaceManifest {
 
 export type RunBun = (
   args: readonly string[],
-  options: { readonly cwd: string },
+  options: {
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  },
 ) => Promise<void>;
 
 export interface PrepareMarketplaceOptions {
   readonly runBun?: RunBun;
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 const marketplaceNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -238,19 +250,21 @@ export async function readMarketplaceManifest(
 
 export async function runBun(
   args: readonly string[],
-  options: { readonly cwd: string },
+  options: {
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+  },
 ): Promise<void> {
-  const bunProcess = Bun.spawn(["bun", ...args], {
-    cwd: options.cwd,
-    stdout: "ignore",
-    stderr: "pipe",
-  });
-  const [exitCode, stderr] = await Promise.all([
-    bunProcess.exited,
-    new Response(bunProcess.stderr).text(),
-  ]);
-  if (exitCode !== 0) {
-    const detail = stderr.trim();
+  try {
+    await executeFile(process.execPath, [...args], {
+      cwd: options.cwd,
+      env: { ...options.env, BUN_BE_BUN: "1" },
+    });
+  } catch (error) {
+    const detail =
+      typeof (error as { stderr?: unknown }).stderr === "string"
+        ? (error as { stderr: string }).stderr.trim()
+        : "";
     throw new Error(
       `Bun dependency installation failed${detail ? `: ${detail}` : ""}`,
     );
@@ -263,7 +277,10 @@ export async function prepareMarketplace(
 ): Promise<void> {
   await readMarketplaceManifest(checkout);
   if (await pathExists(resolve(checkout, "package.json"))) {
-    await (options.runBun ?? runBun)(["install"], { cwd: checkout });
+    await (options.runBun ?? runBun)(["install"], {
+      cwd: checkout,
+      env: options.env ?? process.env,
+    });
   }
 }
 

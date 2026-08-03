@@ -3,7 +3,7 @@ export {};
 const inkDevExpression = "process.env['DEV']";
 
 const build = await Bun.build({
-  entrypoints: ["src/cli.ts"],
+  entrypoints: ["cli.ts"],
   compile: { outfile: "dist/tx" },
   minify: true,
   plugins: [
