@@ -14,6 +14,6 @@ Use the [plugin guide](docs/manual/plugins.md) as the practical reference. For p
 
 - Core and plugin ownership boundaries remain intact, including type-only use of `tx/plugin`.
 - A failed plugin contributes nothing and does not block healthy plugins.
-- Marketplace names and configured entry paths remain unique, safe, relative, and contained.
+- Marketplace plugin names are unique and safe; configured entries are non-empty repository-relative regular files contained after resolution.
 - React and Ink come from injected dependencies rather than separate runtime imports.
 - Observable behavior has Bun tests, required coverage is preserved, and `bun run check` passes.
