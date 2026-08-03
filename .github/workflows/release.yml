@@ -136,12 +136,10 @@ jobs:
 
           cp dist/tx release/tx-linux-x64
           chmod 755 release/tx-linux-x64
-          (cd release && sha256sum tx-linux-x64 > SHA256SUMS && sha256sum --check SHA256SUMS)
+          (cd release && sha256sum tx-linux-x64 > SHA256SUMS)
           gh release upload "$RELEASE_TAG" release/tx-linux-x64 release/SHA256SUMS --clobber
 
           expected_size=$(stat -c %s release/tx-linux-x64)
-          actual_size=$(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
-            --jq '.assets[] | select(.name == "tx-linux-x64") | .size')
-          checksum_size=$(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
-            --jq '.assets[] | select(.name == "SHA256SUMS") | .size')
+          read -r actual_size checksum_size < <(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq '[([.assets[] | select(.name == "tx-linux-x64") | .size][0] // 0), ([.assets[] | select(.name == "SHA256SUMS") | .size][0] // 0)] | @tsv')
           [[ "$actual_size" == "$expected_size" && "$checksum_size" -gt 0 ]]
