@@ -8,6 +8,8 @@ Add the shared plugin runtime, a standalone bundled first-party marketplace plug
 **Status:** complete
 **Depends On:** 0001
 
+> **Historical note:** This completed change records the original marketplace implementation. [Change 0003](./0003-externalize-marketplace-plugin.md) supersedes its architectural ownership boundary without reopening this change or altering its completed tasks.
+
 ## Motivation
 
 The public core becomes useful when private repositories can add personal commands without modifying or rebuilding it. One repository must be able to expose multiple single-file or multi-file plugins. Marketplace management itself dogfoods that system as a bundled first-party plugin whose implementation remains independent of core implementation modules.

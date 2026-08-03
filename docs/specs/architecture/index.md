@@ -2,9 +2,9 @@
 
 ## Overview
 
-`tx` is a small, extensible command-line toolbox. The core MUST be written in TypeScript, MUST run on Bun, and SHOULD be distributable as a single executable. The core repository is public; personal functionality MAY live in private plugin repositories.
+`tx` is a small, extensible command-line toolbox. The host MUST be written in TypeScript, MUST run on Bun, and SHOULD be distributable as a single executable. Core implementation under `src/` is feature-neutral; user-facing functionality MAY live in public or private plugins.
 
-The system is not yet implemented. This document defines the initial desired architecture.
+The approved target architecture is partially unimplemented. [Change 0003](../../changes/0003-externalize-marketplace-plugin.md) tracks the remaining boundary changes.
 
 ## Requirements
 
@@ -13,9 +13,10 @@ The system is not yet implemented. This document defines the initial desired arc
 - Running `tx` without a command MUST show help.
 - Running an unknown command MUST fail with a non-zero exit code and show a useful error.
 - Core and plugin commands MUST share one command tree.
-- User-facing feature commands supplied by the core repository SHOULD be implemented as bundled first-party plugins under `plugins/` rather than privileged dispatcher branches or feature implementations in `src/`.
 - Command paths MUST support one or more segments, such as `marketplace add` and `notes daily open`.
 - `--help` MUST work at the root and at every command node.
+- Core implementation under `src/` MUST own only generic plugin hosting, generic context and dependency injection, command-tree construction, and dispatch.
+- No module under `src/` MUST import, name, or select a default plugin.
 
 #### Scenario: Root help
 
@@ -31,29 +32,43 @@ The system is not yet implemented. This document defines the initial desired arc
 
 ### Runtime and Distribution
 
-- The core MUST target Bun and TypeScript.
-- The core SHOULD compile to one executable for each supported platform.
-- A compiled core MAY load plugin source and dependencies from the user data directory.
+- The host MUST target Bun and TypeScript.
+- The host SHOULD compile to one executable for each supported platform.
+- A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage.
 - The initial supported platform MAY be the developer's current platform; additional targets MAY be added later.
 
-#### Scenario: Standalone core
+#### Scenario: Standalone host
 
 - **GIVEN** a compiled `tx` executable
 - **WHEN** the user runs it on a supported platform
-- **THEN** the core starts without a separately installed Node.js runtime
+- **THEN** the generic host starts without a separately installed Node.js or Bun runtime
 
-### Local State
+### State Ownership
 
-- Mutable state MUST live outside the executable.
-- The user data directory MUST contain marketplace checkouts and generated plugin metadata.
-- Removing the user data directory MAY reset all installed marketplaces and plugins.
-- The initial implementation MUST NOT require a database.
+- Mutable feature state MUST live outside the executable.
+- Generic core modules MUST NOT own marketplace storage locations, manifests, names, discovery, Git operations, or dependency installation.
+- A plugin MAY own mutable state and resolve its own platform-appropriate data paths through standard Node.js or Bun APIs.
+- Removing plugin-owned state MAY reset that plugin's installed data without changing the generic host contract.
+- The initial architecture MUST NOT require a database.
 
 #### Scenario: Fresh state
 
-- **GIVEN** no `tx` user data directory exists
-- **WHEN** the user first runs `tx`
-- **THEN** the directory is created as needed and bundled first-party plugins remain usable
+- **GIVEN** no marketplace plugin data directory exists
+- **WHEN** `tx` starts
+- **THEN** the generic host initializes and the marketplace plugin creates its state only when its own behavior requires it
+
+### Composition Root
+
+- A repository composition root outside `src/` MUST supply an ordered list of default plugin definitions to the host.
+- Default plugin ordering MUST be explicit at the composition root.
+- The composition root MAY import default plugin entries; core implementation under `src/` MUST NOT.
+- A default plugin MUST be removable or replaceable without adding feature-specific vocabulary to `src/`.
+
+#### Scenario: Neutral core
+
+- **GIVEN** the default marketplace plugin is removed from repository composition
+- **WHEN** the host is built
+- **THEN** no module under `src/` requires marketplace code or marketplace-specific public types
 
 ### Development Conventions
 
@@ -80,7 +95,6 @@ The system is not yet implemented. This document defines the initial desired arc
 - CI MUST run Biome formatting and lint checks, TypeScript checking, Bun tests with coverage, and the production build.
 - CI MUST fail when any command fails or any coverage category falls below 100%.
 - Required checks MUST NOT use failure suppression.
-- The bootstrap change MUST include the complete CI workflow; CI setup MUST NOT be deferred to a later change.
 
 #### Scenario: Coverage regression
 
@@ -98,18 +112,18 @@ The system is not yet implemented. This document defines the initial desired arc
 
 ### Components
 
-The generic core runtime in `src/` has four small responsibilities:
+Generic core implementation in `src/` has four responsibilities:
 
-1. Parse the command path and select the longest registered match.
-2. Load bundled first-party and installed marketplace plugins through the same plugin contract.
-3. Let those plugins register commands in one command tree.
-4. Execute the selected command with a shared context.
+1. Initialize generic plugin definitions and isolate failures.
+2. Atomically commit commands and lazy child definitions contributed by each successful plugin.
+3. Build one command tree using immutable plugin identities and generic contexts.
+4. Dispatch the longest matching command.
 
-Bundled feature implementations live under the repository-root `plugins/` directory, outside `src/`. Marketplace management is one such bundled first-party plugin. The core may know its entry module for bundling and registration, but the dispatcher and generic runtime contain no marketplace-specific implementation.
+The repository composition root lives outside `src/` and supplies ordered default definitions. Feature implementations, including marketplace management, live outside `src/` and depend only on the public plugin contract plus standard runtime APIs.
 
-No general hook framework, daemon, registry service, sandbox, signing system, or database is part of the initial architecture.
+No general daemon, registry service, sandbox, signing system, or database is part of the initial architecture.
 
-### Proposed Project Shape
+### Project Shape
 
 ```text
 src/
@@ -120,45 +134,36 @@ src/
   plugins.ts
 plugins/
   marketplace/
-    index.ts
+<repository composition root>
 test/
 ```
 
-This layout is implementation guidance and MAY change while preserving the observable requirements.
+The exact filenames MAY change, but the composition and ownership boundaries MUST remain observable in the module graph.
 
 ### Quality Commands
 
 The package scripts SHOULD expose one stable local and CI interface:
 
 ```text
-bun run format       # write Biome formatting fixes
-bun run lint         # check Biome formatting and lint rules
-bun run typecheck    # TypeScript validation without emit
-bun run test         # Bun tests with 100% coverage enforcement
-bun run build        # compile the production executable
-bun run check        # lint, typecheck, test, and build
+bun run format
+bun run lint
+bun run typecheck
+bun run test
+bun run build
+bun run check
 ```
 
-CI uses the non-writing commands and installs with the frozen Bun lockfile.
+CI uses non-writing commands and installs with the frozen Bun lockfile.
 
 ### Command Resolution
 
 Commands are identified by arrays of path segments. Dispatch selects the longest registered command path matching the start of `argv`; all remaining values are passed to the command handler.
 
-For example, with commands `notes` and `notes daily open`, the input below selects the latter:
-
-```text
-tx notes daily open today --json
-```
-
-The handler receives `today --json`.
-
 ## Constraints
 
-- The first version assumes plugins are trusted personal code.
-- The first version does not sandbox plugins.
-- The first version does not provide plugin signing, provenance, rollback, or a hosted marketplace catalog.
-- Errors from a plugin MUST be reported cleanly and MUST produce a non-zero exit code.
+- Plugins are trusted personal code and are not sandboxed.
+- Plugin signing, provenance, rollback, and hosted catalogs are out of scope.
+- Errors from one plugin MUST be reported cleanly and MUST NOT prevent unrelated committed commands from dispatching.
 
 ## Open Questions
 
@@ -169,6 +174,7 @@ The handler receives `today --json`.
 ## References
 
 - [Plugin System](../plugin-system/)
+- [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
 
 ## Changelog
@@ -179,3 +185,4 @@ The handler receives `today --json`.
 | 2026-08-02 | Made user-facing core features first-party plugins | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-02 | Required Biome, Bun tests, 100% coverage, and complete CI | [0001-bootstrap-core-cli](../../changes/0001-bootstrap-core-cli.md) |
 | 2026-08-02 | Separated bundled feature implementations from generic core runtime infrastructure | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
+| 2026-08-03 | Made repository composition neutral and limited `src/` to the generic plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |

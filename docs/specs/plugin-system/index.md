@@ -2,163 +2,93 @@
 
 ## Overview
 
-The plugin system lets the public `tx` core load personal commands from private or public Git repositories. A marketplace is one Git repository containing one or more plugins. A minimal plugin MUST be able to consist of a single TypeScript file.
+The plugin system is a generic host for trusted plugins. Core code under `src/` owns plugin identity, contribution staging, initialization, and command dispatch only. Marketplace behavior is owned entirely by the bundled marketplace plugin outside `src/`; that plugin could be copied to another repository and consume only public `tx/plugin` types plus standard Node.js and Bun APIs.
 
-The system is not yet implemented. This document defines the initial desired behavior.
+The requirements below describe the approved target architecture. [Change 0003](../../changes/0003-externalize-marketplace-plugin.md) tracks the implementation gap.
 
 ## Requirements
 
-### First-Party Plugins
+### Generic Plugin Host
 
-- User-facing features shipped with the core repository MUST use the same `Plugin` function contract and command-registration API as marketplace plugins.
-- Bundled first-party plugin source MUST live under `plugins/<name>/` at the repository root.
-- The entire module graph rooted at a bundled first-party plugin entry MUST NOT import implementation modules from `src/`.
-- Bundled first-party plugins MUST consume core capabilities only through the public `PluginAPI` and its injected dependencies. They MAY import standard Node.js or Bun APIs, and they MAY import types from `tx/plugin`.
-- Core modules MAY statically import only a bundled plugin's entry module for bundling and registration; they MUST NOT statically import any other module in that plugin's module graph.
-- First-party plugins MUST pass through the same registration, ownership, collision, help, and dispatch logic as marketplace plugins.
-- First-party plugins MUST be bundled with the core executable and MUST load before installed marketplace plugins.
-- The `marketplace` command tree MUST be registered by a first-party plugin named `marketplace`.
-- The command dispatcher MUST NOT contain marketplace-specific command branches.
+- Every plugin definition MUST have an immutable, marketplace-agnostic identity.
+- A plugin definition MAY lazily provide child plugin definitions.
+- The host MUST initialize root and child plugin definitions in deterministic FIFO order.
+- Commands and child plugin definitions contributed during one plugin initialization MUST be staged atomically.
+- If initialization succeeds, the host MUST commit all staged contributions together.
+- If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure against its generic identity, and continue initializing unrelated plugins.
+- A failed plugin MUST NOT prevent commands committed by healthy plugins from dispatching.
+- Command collisions MUST reject the later plugin's staged contribution without modifying previously committed commands.
+- Plugins are trusted code and execute with the same process permissions as `tx`.
 
-#### Scenario: Marketplace dogfooding
+#### Scenario: Atomic initialization
 
-- **GIVEN** no external marketplaces are installed
-- **WHEN** `tx` starts
-- **THEN** the bundled `marketplace` plugin registers `marketplace add`, `marketplace list`, and `marketplace remove` through the normal plugin API
+- **GIVEN** a plugin stages commands and child definitions
+- **WHEN** its initialization throws
+- **THEN** none of those commands or child definitions become visible
 
-#### Scenario: Uniform collision handling
+#### Scenario: Deterministic child initialization
 
-- **GIVEN** an external plugin attempts to register `marketplace add`
-- **WHEN** plugins are loaded
-- **THEN** normal command-collision handling rejects it and identifies both plugin owners
+- **GIVEN** plugins contribute lazy child definitions in a known order
+- **WHEN** the host initializes the plugin graph
+- **THEN** definitions are initialized in deterministic FIFO order
 
-#### Scenario: Standalone bundled plugin boundary
+#### Scenario: Failure isolation
 
-- **GIVEN** the repository's bundled first-party plugin entries and every module reachable from each entry
-- **WHEN** their static imports are inspected
-- **THEN** every bundled plugin is rooted under `plugins/<name>/`, no module in its graph imports a `src/` implementation module, any `tx/plugin` import is type-only, and core imports only each plugin entry module for bundling and registration
+- **GIVEN** one plugin fails and another plugin initializes successfully
+- **WHEN** command dispatch begins
+- **THEN** the healthy plugin's commands remain available and the failed plugin's diagnostic identifies only its generic plugin identity
 
-### Marketplace Management
+### Public Plugin Contract
 
-- `tx marketplace add <repository>` MUST install a marketplace from a Git repository URL or Git-compatible repository reference.
-- Adding a marketplace MUST clone it into the `tx` user data directory.
-- A marketplace MUST be identified by a stable local name.
-- A marketplace name MUST be one safe path component matching `[A-Za-z0-9][A-Za-z0-9._-]*` and MUST NOT be `.` or `..`.
-- Add and remove operations MUST verify that the resolved marketplace path remains inside the marketplace storage directory.
-- The name SHOULD default from the repository name and MAY be overridden with `--name`.
-- Adding a marketplace whose name already exists MUST fail without replacing it.
-- `tx marketplace list` MUST show installed marketplace names and sources.
-- `tx marketplace remove <name>` MUST remove that checkout and make its plugins unavailable.
-- The initial implementation MAY rely on the user's existing Git and SSH configuration for private repository access.
-
-#### Scenario: Add private marketplace
-
-- **GIVEN** the user can clone a private repository through their existing Git configuration
-- **WHEN** they run `tx marketplace add git@github.com:me/tx-plugins.git`
-- **THEN** the repository is cloned and its valid plugins become available on the next command dispatch
-
-#### Scenario: Duplicate marketplace
-
-- **GIVEN** marketplace `tx-plugins` is installed
-- **WHEN** the user adds another marketplace with the same local name
-- **THEN** the command fails and the existing checkout is unchanged
-
-#### Scenario: Invalid marketplace name
-
-- **GIVEN** a repository is available
-- **WHEN** the user adds it with the exact name `..` or with a name containing a path separator
-- **THEN** the command fails without writing outside the marketplace storage directory
-
-#### Scenario: Remove marketplace
-
-- **GIVEN** a command is provided by marketplace `personal`
-- **WHEN** the user runs `tx marketplace remove personal`
-- **THEN** the marketplace is removed and that command is no longer available
-
-### Marketplace Layout
-
-- A marketplace MUST contain `tx.marketplace.json` at its root.
-- The manifest MUST contain a non-empty `plugins` array.
-- Each plugin entry MUST declare a unique `name` and an `entry` path relative to the repository root.
-- Multiple plugin entries MAY point to files in different directories.
-- Unknown manifest fields SHOULD be ignored for forward compatibility.
-- Invalid manifests or missing entry files MUST make marketplace installation fail with a useful error.
-
-Example:
-
-```json
-{
-  "plugins": [
-    { "name": "notes", "entry": "plugins/notes.ts" },
-    { "name": "work", "entry": "plugins/work/index.ts" }
-  ]
-}
-```
-
-#### Scenario: Multiple plugins
-
-- **GIVEN** a marketplace manifest lists two valid plugin entries
-- **WHEN** the marketplace is added
-- **THEN** commands from both plugins are registered
-
-### Plugin Module Contract
-
-- A plugin entry MUST export a default plugin function.
-- The core MUST call the function with a plugin API object.
-- The plugin function MAY register any number of commands.
-- A minimal plugin MUST NOT require a package manifest, build step, or additional source file.
+- The public package MUST expose the plugin contract through `tx/plugin`.
+- The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, command registration, command context, and React, Ink, and version dependencies.
+- Public plugin types and initialization context MUST NOT contain marketplace names, paths, manifests, storage services, Git services, dependency installers, or marketplace-specific diagnostics.
+- Plugin identity MUST be assigned by the definition's owner and MUST NOT be mutable by the plugin during initialization.
+- Initialization context MUST expose only generic host capabilities.
+- A plugin MAY register any number of top-level or nested commands and MAY contribute any number of lazy child plugin definitions.
 - Plugin initialization MAY be asynchronous.
+- A minimal plugin MUST NOT require a package manifest, build step, or additional source file.
 
-The public contract is:
+Conceptual public shape:
 
 ```ts
-export type CommandHandler = (
-  args: string[],
-  context: CommandContext,
-) => void | Promise<void>
+export interface PluginIdentity {
+  readonly name: string
+  readonly parent?: PluginIdentity
+}
+
+export interface PluginDefinition {
+  readonly identity: PluginIdentity
+  load(): Plugin | Promise<Plugin>
+}
 
 export interface PluginAPI {
+  readonly identity: PluginIdentity
+  readonly dependencies: CoreDependencies
   command(path: string | string[], handler: CommandHandler): void
-  dependencies: CoreDependencies
+  plugin(definition: PluginDefinition): void
 }
 
 export type Plugin = (api: PluginAPI) => void | Promise<void>
 ```
 
-A minimal plugin is:
+The exact structural representation MAY vary, but it MUST preserve the owned contracts above.
 
-```ts
-import type {Plugin} from 'tx/plugin'
+#### Scenario: Marketplace-agnostic consumer
 
-const plugin: Plugin = ({command}) => {
-  command('hello', async (args, context) => {
-    context.stdout.write(`Hello ${args[0] ?? 'world'}\n`)
-  })
-}
+- **GIVEN** a plugin imports only public types from `tx/plugin`
+- **WHEN** it initializes under the host
+- **THEN** it can identify itself, register commands, contribute lazy children, and use injected React, Ink, and version dependencies without a marketplace-specific core API
 
-export default plugin
-```
+### Command Registration and Dispatch
 
-#### Scenario: Single-file plugin
-
-- **GIVEN** a marketplace lists one TypeScript file exporting a valid plugin function
-- **WHEN** `tx` loads installed plugins
-- **THEN** the function runs and its registered commands appear in root help
-
-#### Scenario: Invalid export
-
-- **GIVEN** a plugin entry does not export a function
-- **WHEN** `tx` loads it
-- **THEN** `tx` reports the marketplace and plugin name and exits non-zero
-
-### Command Registration
-
-- A plugin MAY register a top-level command such as `notes`.
-- A plugin MAY register nested commands such as `notes daily open`.
+- Core and plugin commands MUST share one command tree.
 - A string command path MUST be split on whitespace; an array path MUST use each array value as one segment.
 - Command paths MUST contain at least one segment, and every segment MUST be non-empty after trimming.
-- Registering a command path already owned by another first-party or marketplace plugin MUST fail and identify both owners.
-- Plugin commands MUST appear in normal root and nested help output.
+- Registering an already owned command path MUST fail and identify both generic plugin owners.
+- Dispatch MUST select the longest registered command path matching the start of the argument vector.
+- The selected handler MUST receive remaining arguments and a generic command context.
+- Root and nested help MUST include committed plugin commands.
 
 #### Scenario: Nested registration
 
@@ -169,12 +99,12 @@ export default plugin
 #### Scenario: Collision
 
 - **GIVEN** two plugins register `notes list`
-- **WHEN** plugins are loaded
-- **THEN** loading fails with an error naming the command and both plugins
+- **WHEN** the later plugin initializes
+- **THEN** its staged contributions are rejected with an error naming both generic plugin identities
 
-### Command Context
+### Generic Context and Dependencies
 
-Each handler MUST receive a context containing:
+Each command handler MUST receive generic process and identity context. The context MUST NOT expose marketplace-specific fields.
 
 ```ts
 export interface CommandContext {
@@ -183,134 +113,91 @@ export interface CommandContext {
   stdin: NodeJS.ReadStream
   stdout: NodeJS.WriteStream
   stderr: NodeJS.WriteStream
-  marketplace: string
-  plugin: string
+  plugin: PluginIdentity
 }
 ```
 
-The context MAY gain additional backward-compatible fields later. First-party plugins receive `context.marketplace` as `core`; the bundled marketplace plugin receives `context.plugin` as `marketplace`.
-
-### Injected Core Dependencies
-
-- The core MUST expose a versioned set of shared dependencies through `api.dependencies`.
-- The initial dependency set MUST include the core's React and Ink instances.
-- Plugins using the core renderer dependencies MUST obtain them from this object rather than importing separate copies.
-- A dependency not supplied by the core MAY be installed inside the marketplace repository and imported normally by the plugin.
-- The core MUST expose its own version and the injected dependency versions.
-
-Initial shape:
-
-```ts
-export interface CoreDependencies {
-  tx: {version: string}
-  react: typeof import('react')
-  ink: typeof import('ink')
-  versions: {
-    react: string
-    ink: string
-  }
-}
-```
-
-Example:
-
-```ts
-import type {Plugin} from 'tx/plugin'
-
-const plugin: Plugin = ({command, dependencies}) => {
-  const {react, ink} = dependencies
-
-  command('dashboard', async () => {
-    const App = () => react.createElement(ink.Text, null, 'Hello from Ink')
-    const instance = ink.render(react.createElement(App))
-    await instance.waitUntilExit()
-  })
-}
-
-export default plugin
-```
+- The core MUST expose React, Ink, tx version metadata, and dependency version metadata through injected dependencies.
+- Plugins using React or Ink MUST obtain the host instances from injected dependencies rather than importing separate runtime copies.
+- Core MUST NOT publicly inject marketplace storage, paths, Git, manifests, discovery, installation, or recovery services.
+- The context and dependencies MAY gain backward-compatible generic fields later.
 
 #### Scenario: Shared Ink
 
-- **GIVEN** a plugin obtains React and Ink from `api.dependencies`
+- **GIVEN** a plugin obtains React and Ink from injected dependencies
 - **WHEN** its command renders a TUI
 - **THEN** it uses the same React and Ink module instances as the core
 
-### Marketplace Dependencies
+### Marketplace Plugin Ownership
 
-- A marketplace MAY contain a `package.json` and Bun lockfile.
-- When a marketplace declares dependencies, adding it MUST install them before loading plugins.
-- Dependency installation MUST run from the marketplace root.
+- The default marketplace plugin MUST own marketplace storage, data paths, local names, `tx.marketplace.json`, discovery, ordering, dynamic imports, Git operations, Bun dependency installation, diagnostics and recovery mapping, and `marketplace add`, `marketplace list`, and `marketplace remove` behavior.
+- The marketplace plugin MUST translate each discovered manifest entry into a lazy generic child plugin definition with an immutable generic identity.
+- The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
+- Marketplace discovery, import, or initialization failures MUST be mapped by the marketplace plugin into marketplace-aware diagnostics while preserving generic host failure isolation.
+- Removing a broken marketplace MUST remain possible because the marketplace management commands are committed independently of discovered child failures.
+- A marketplace MAY contain a `package.json`; when present, the marketplace plugin MUST install its dependencies from the marketplace root before plugin loading.
+- In a compiled executable, the marketplace plugin MUST invoke Bun dependency installation through the running executable (`process.execPath`) with `BUN_BE_BUN=1` so installation does not depend on a separate `bun` executable on `PATH`.
 - A marketplace without `package.json` MUST skip dependency installation.
-- Plugin-specific dependency isolation inside one marketplace is not required initially.
 
-#### Scenario: Marketplace dependency
+The marketplace plugin owns the detailed marketplace command, manifest, path-safety, installation, and recovery contracts. Core consumes only the generic child definitions it contributes.
 
-- **GIVEN** a marketplace declares an npm dependency used by a plugin
-- **WHEN** the marketplace is added
-- **THEN** the dependency is installed and the plugin can import it
+#### Scenario: Broken marketplace recovery
 
-### Loading Lifecycle
+- **GIVEN** an installed marketplace child fails to import
+- **WHEN** initialization completes
+- **THEN** the marketplace plugin reports marketplace-aware recovery information while its management commands and healthy children remain available
 
-- First-party and marketplace plugin modules MUST be initialized by one shared loader.
-- Bundled first-party plugins MUST load before installed marketplaces.
-- Installed marketplaces MUST be discovered when `tx` starts.
-- Marketplace manifests and plugin entry modules MUST be attempted before dispatch.
-- A failure in an installed marketplace plugin MUST be reported but MUST NOT prevent first-party commands or plugins from other marketplaces from dispatching.
-- A plugin that fails to load MUST register no commands for that run.
-- The first-party marketplace plugin MUST remain usable to remove a broken marketplace.
-- Marketplace plugins MUST load in marketplace-name order and manifest order for deterministic diagnostics.
-- Command collisions MUST fail the later conflicting plugin rather than disable already registered first-party commands.
-- Plugins are trusted code and execute with the same process permissions as `tx`.
+#### Scenario: Compiled self-install
 
-#### Scenario: Remove a broken marketplace
+- **GIVEN** the compiled `tx` executable is running without a separate Bun executable on `PATH`
+- **WHEN** a marketplace with `package.json` is added
+- **THEN** dependency installation runs through the current executable in Bun mode and the marketplace can load
 
-- **GIVEN** an installed marketplace contains a plugin that no longer loads
-- **WHEN** `tx` starts
-- **THEN** it reports that plugin failure while keeping `tx marketplace remove <name>` available
+### Composition and Boundaries
+
+- The repository composition root outside `src/` MUST provide the ordered default plugin definitions to the generic host.
+- No module under `src/` MAY import, identify by name, or otherwise select a default plugin.
+- No module under `src/` MAY import a marketplace plugin implementation module.
+- A default plugin's complete module graph MUST NOT import core implementation modules under `src/`.
+- Default plugins MAY import public `tx/plugin` types type-only and MAY use standard Node.js and Bun APIs directly.
+- Plugin-owned nonliteral dynamic imports of plugin entry paths MUST be allowed.
+- Boundary enforcement MUST continue to forbid any static or dynamic import from a plugin into core implementation and any import from core implementation into a default plugin.
+- Copying the marketplace plugin to another repository MUST NOT require private core modules, repository-local aliases, or injected marketplace services.
+
+#### Scenario: Externalizable marketplace plugin
+
+- **GIVEN** the marketplace plugin's complete module graph
+- **WHEN** its imports and runtime dependencies are inspected
+- **THEN** it relies only on public `tx/plugin` types, standard Node.js and Bun APIs, and its own modules, including its owned nonliteral dynamic imports
 
 ## Design
 
-### Stored Layout
+### Ownership Boundary
 
-```text
-<tx-data>/
-  marketplaces/
-    personal/
-      repository checkout
-```
+The host accepts an ordered sequence of default definitions from a neutral composition root. Initialization uses a FIFO work queue. Each plugin receives a transaction-like staging API for commands and child definitions; successful initialization commits the stage, while failure drops it.
 
-A separate generated registry or database is not required initially; installed marketplace directories are the source of truth.
-
-### Installation Flow
-
-1. Determine the local marketplace name.
-2. Clone the repository into a temporary sibling directory.
-3. Read and validate `tx.marketplace.json`.
-4. Install dependencies when `package.json` exists.
-5. Move the completed checkout into the marketplaces directory.
-6. Remove the temporary directory if any step fails.
+The marketplace plugin is an ordinary default plugin and a producer of lazy child definitions. It performs filesystem discovery and dynamic import only when those definitions load. The host has no marketplace vocabulary and reports failures in generic identity terms; the marketplace plugin owns translation into user-facing marketplace diagnostics.
 
 ### Package API
 
-The public core package SHOULD expose plugin types through `tx/plugin`. Runtime plugins MUST receive core capabilities through the `PluginAPI` argument rather than importing core implementation modules. A shared loader accepts either a statically imported bundled-plugin entry function or a dynamically imported marketplace plugin function, assigns its owner, and invokes the same `PluginAPI` contract.
+`tx/plugin` is the only core contract available to a portable plugin. Imports from that path SHOULD be type-only unless a future public runtime API is explicitly specified. React, Ink, and versions remain dependency-injected runtime values.
 
 ## Constraints
 
-- Plugins are trusted personal code; sandboxing is out of scope.
-- Marketplace signing, checksums, provenance, version solving, catalogs, and automatic updates are out of scope.
-- One installed checkout represents the marketplace's current version.
-- The first version MAY support only Git clone and remove; update MAY be added later.
+- Plugin sandboxing, signing, provenance, rollback, catalogs, and automatic updates are out of scope.
+- One installed checkout represents a marketplace's current version.
+- Per-plugin dependency environments within one marketplace are not required.
+- Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
 
 ## Open Questions
 
-- `tx marketplace update` is intentionally deferred.
-- A future plugin API MAY add command descriptions, structured flags, aliases, or lifecycle hooks after concrete plugins require them.
+- A future plugin API MAY add command descriptions, structured flags, aliases, or additional generic lifecycle hooks after concrete plugins require them.
 - Core dependency additions SHOULD be demand-driven and backward-compatible.
 
 ## References
 
 - [Architecture](../architecture/)
+- [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -322,3 +209,4 @@ The public core package SHOULD expose plugin types through `tx/plugin`. Runtime 
 | 2026-08-02 | Made marketplace management a first-party plugin | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-02 | Added broken-plugin recovery and stricter name and command validation | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-02 | Required bundled first-party plugins to remain standalone from core implementation modules | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
+| 2026-08-03 | Assigned all marketplace orchestration to an externalizable default plugin and reduced core to a generic transactional plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
