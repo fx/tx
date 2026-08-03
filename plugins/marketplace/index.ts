@@ -10,6 +10,7 @@ import {
 } from "./manager.ts";
 import {
   discoverInstalledMarketplaces,
+  type MarketplaceCheckout,
   readMarketplaceManifest,
   resolveMarketplaceDirectory,
 } from "./storage.ts";
@@ -30,6 +31,12 @@ function childIdentity(name: string, parent: PluginIdentity): PluginIdentity {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function discoveryError(root: string, error: unknown): Error {
+  return new Error(
+    `Marketplace discovery failed: ${errorMessage(error)}. Check that marketplace storage at "${root}" is readable, then retry.`,
+  );
 }
 
 function recoveryError(
@@ -109,7 +116,12 @@ function discoveryDefinition(
   return Object.freeze({
     identity,
     async load(): Promise<Plugin> {
-      const marketplaces = await discoverInstalledMarketplaces(root);
+      let marketplaces: readonly MarketplaceCheckout[];
+      try {
+        marketplaces = await discoverInstalledMarketplaces(root);
+      } catch (error) {
+        throw discoveryError(root, error);
+      }
       return ({ plugin }) => {
         for (const marketplace of marketplaces) {
           plugin(
