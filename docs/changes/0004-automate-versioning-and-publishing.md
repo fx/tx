@@ -5,7 +5,7 @@
 Publish `@fx/tx` to GitHub Packages and a checksummed Linux x64 standalone executable to GitHub Releases through one Release Please-controlled workflow.
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** 0003
 
 ## Approval
@@ -55,11 +55,11 @@ The user approved this contract on 2026-08-03, including the package scope, cano
 
 ## Tasks
 
-- [ ] Record and index the approved distribution contract; amend architecture and plugin-system specifications.
-- [ ] Rename and package `@fx/tx`; add the license, deterministic build, version command, and package integration coverage.
-- [ ] Add Release Please configuration, dispatch-capable CI, and exact-SHA release orchestration.
-- [ ] Document installation, authentication, supported platform, plugin imports, and the manual release process.
-- [ ] Pass targeted tests, `bun run check`, production build, package inspection, and local workflow validation.
+- [x] Record and index the approved distribution contract; amend architecture and plugin-system specifications.
+- [x] Rename and package `@fx/tx`; add the license, deterministic build, version command, and package integration coverage.
+- [x] Add Release Please configuration, dispatch-capable CI, and exact-SHA release orchestration.
+- [x] Document installation, authentication, supported platform, plugin imports, and the manual release process.
+- [x] Pass targeted tests, `bun run check`, production build, package inspection, and local workflow validation.
 
 ## Open Questions
 

@@ -452,8 +452,16 @@ test("AST checks reject forbidden @fx/tx/plugin syntax and graph escapes", async
   const fixtureSources = [
     ["allowed-import.ts", 'import type { Plugin } from "@fx/tx/plugin";', 0],
     ["allowed-export.ts", 'export type { Plugin } from "@fx/tx/plugin";', 0],
-    ["allowed-import-type.ts", 'type Plugin = import("@fx/tx/plugin").Plugin;', 0],
-    ["allowed-import-equals.ts", 'import type api = require("@fx/tx/plugin");', 0],
+    [
+      "allowed-import-type.ts",
+      'type Plugin = import("@fx/tx/plugin").Plugin;',
+      0,
+    ],
+    [
+      "allowed-import-equals.ts",
+      'import type api = require("@fx/tx/plugin");',
+      0,
+    ],
     ["mixed-import.ts", 'import { type Plugin } from "@fx/tx/plugin";', 1],
     ["side-effect.ts", 'import "@fx/tx/plugin";', 1],
     ["value-import.ts", 'import { Plugin } from "@fx/tx/plugin";', 1],

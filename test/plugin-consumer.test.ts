@@ -53,8 +53,10 @@ test("the packed package installs a standalone CLI and public plugin types", asy
 
     const packageArchive = join(temporaryRoot, packed[0]?.filename ?? "");
     const packedMetadata = JSON.parse(
-      run(["tar", "-xOf", packageArchive, "package/package.json"], temporaryRoot)
-        .stdout,
+      run(
+        ["tar", "-xOf", packageArchive, "package/package.json"],
+        temporaryRoot,
+      ).stdout,
     ) as typeof packageMetadata;
     expect(packedMetadata.name).toBe(packageMetadata.name);
     expect(packedMetadata.version).toBe(packageMetadata.version);
@@ -104,7 +106,13 @@ export default plugin;
     ]);
 
     run(
-      [process.execPath, "install", "--production", "--offline", "--ignore-scripts"],
+      [
+        process.execPath,
+        "install",
+        "--production",
+        "--offline",
+        "--ignore-scripts",
+      ],
       consumerRoot,
     );
     const binary = join(consumerRoot, "node_modules", ".bin", "tx");

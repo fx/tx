@@ -40,6 +40,6 @@ changes:
     path: changes/0004-automate-versioning-and-publishing.md
     description: Publish the scoped package and checksummed Linux x64 executable through manually approved Release Please releases.
     spec: architecture
-    status: in-progress
+    status: complete
     depends_on:
       - "0003"
