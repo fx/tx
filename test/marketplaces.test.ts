@@ -275,6 +275,23 @@ describe("marketplace manifests", () => {
     }
   });
 
+  test("maps checkout resolution failures to manifest diagnostics", async () => {
+    const parent = await temporaryDirectory("tx-manifest-checkout-error-");
+    const missing = join(parent, "missing");
+    const loop = join(parent, "loop");
+    try {
+      await expect(readMarketplaceManifest(missing)).rejects.toThrow(
+        "Missing tx.marketplace.json",
+      );
+      await symlink("loop", loop);
+      await expect(readMarketplaceManifest(loop)).rejects.toThrow(
+        "Unable to read tx.marketplace.json",
+      );
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
   test("allows contained manifest symlinks and rejects escaping ones", async () => {
     const parent = await temporaryDirectory("tx-manifest-file-symlink-");
     const root = join(parent, "marketplace");
@@ -372,12 +389,15 @@ describe("marketplace preparation", () => {
 
 describe("shell-free process execution", () => {
   test("returns Git stdout and reports Git stderr", async () => {
-    expect((await runGit(["--version"])).stdout).toStartWith("git version");
-    await expect(runGit(["not-a-real-command"])).rejects.toThrow(
+    const options = { env: process.env };
+    expect((await runGit(["--version"], options)).stdout).toStartWith(
+      "git version",
+    );
+    await expect(runGit(["not-a-real-command"], options)).rejects.toThrow(
       "Git command failed:",
     );
     await expect(
-      runGit(["config", "--get", "tx.tests.missing-value"]),
+      runGit(["config", "--get", "tx.tests.missing-value"], options),
     ).rejects.toThrow("Git command failed");
   });
 
@@ -490,6 +510,42 @@ describe("MarketplaceManager", () => {
       expect(
         (await readdir(root)).filter((name) => name.includes("staging")),
       ).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("passes its initialization environment to every Git operation", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-git-env-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const env = Object.freeze({ PATH: "/test/bin", TOKEN: "secret" });
+      const calls: {
+        readonly args: readonly string[];
+        readonly env: Readonly<Record<string, string | undefined>>;
+      }[] = [];
+      const manager = new MarketplaceManager(root, {
+        env,
+        runGit: async (args, options) => {
+          calls.push({ args: [...args], env: options.env });
+          return { stdout: "ssh://example/repository.git\n" };
+        },
+        prepare: async () => {},
+      });
+
+      await manager.add("repository", "installed");
+      await manager.list();
+
+      expect(calls.map(({ args }) => args)).toEqual([
+        [
+          "clone",
+          "--",
+          "repository",
+          expect.stringContaining(".installed-staging-"),
+        ],
+        ["-C", join(root, "installed"), "config", "--get", "remote.origin.url"],
+      ]);
+      expect(calls.every((call) => call.env === env)).toBe(true);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

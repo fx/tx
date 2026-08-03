@@ -34,7 +34,12 @@ export interface GitResult {
   readonly stdout: string;
 }
 
-export type RunGit = (args: readonly string[]) => Promise<GitResult>;
+export type RunGit = (
+  args: readonly string[],
+  options: {
+    readonly env: Readonly<Record<string, string | undefined>>;
+  },
+) => Promise<GitResult>;
 
 export interface MarketplaceManagerOptions {
   readonly runGit?: RunGit;
@@ -107,9 +112,16 @@ export function parseRemoveMarketplaceArguments(
   return validateMarketplaceName(args[0] as string);
 }
 
-export async function runGit(args: readonly string[]): Promise<GitResult> {
+export async function runGit(
+  args: readonly string[],
+  options: {
+    readonly env: Readonly<Record<string, string | undefined>>;
+  },
+): Promise<GitResult> {
   try {
-    const { stdout } = await executeFile("git", [...args]);
+    const { stdout } = await executeFile("git", [...args], {
+      env: options.env,
+    });
     return { stdout };
   } catch (error) {
     const detail =
@@ -143,7 +155,9 @@ export class MarketplaceManager implements MarketplaceOperations {
 
     const staging = await mkdtemp(join(dirname(target), `.${name}-staging-`));
     try {
-      await this.#runGit(["clone", "--", repository, staging]);
+      await this.#runGit(["clone", "--", repository, staging], {
+        env: this.#env,
+      });
       if (this.#prepare) await this.#prepare(staging);
       else await prepareMarketplace(staging, { env: this.#env });
       if (await pathExists(target)) {
@@ -163,13 +177,10 @@ export class MarketplaceManager implements MarketplaceOperations {
         async ({ name, checkout }): Promise<MarketplaceListing> => {
           let source = "<unknown>";
           try {
-            const result = await this.#runGit([
-              "-C",
-              checkout,
-              "config",
-              "--get",
-              "remote.origin.url",
-            ]);
+            const result = await this.#runGit(
+              ["-C", checkout, "config", "--get", "remote.origin.url"],
+              { env: this.#env },
+            );
             source = result.stdout.trim() || "<unknown>";
           } catch {
             // A corrupt checkout remains visible and removable.

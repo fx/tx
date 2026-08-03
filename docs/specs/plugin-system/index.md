@@ -64,8 +64,9 @@ export interface PluginDefinition {
 
 export interface PluginAPI {
   readonly identity: PluginIdentity
+  readonly env: Readonly<Record<string, string | undefined>>
   readonly dependencies: CoreDependencies
-  command(path: string | string[], handler: CommandHandler): void
+  command(path: string | readonly string[], handler: CommandHandler): void
   plugin(definition: PluginDefinition): void
 }
 

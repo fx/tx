@@ -172,10 +172,11 @@ async function resolvePluginEntry(
 export async function readMarketplaceManifest(
   checkout: string,
 ): Promise<MarketplaceManifest> {
-  const checkoutPath = await realpath(checkout);
-  const manifestPath = resolve(checkoutPath, manifestFilename);
+  let checkoutPath: string;
   let document: unknown;
   try {
+    checkoutPath = await realpath(checkout);
+    const manifestPath = resolve(checkoutPath, manifestFilename);
     const resolvedManifestPath = await realpath(manifestPath);
     if (!isContainedPath(checkoutPath, resolvedManifestPath)) {
       throw new Error(`${manifestFilename} escapes the marketplace`);
@@ -187,6 +188,11 @@ export async function readMarketplaceManifest(
     }
     if (error instanceof SyntaxError) {
       throw new Error(`Invalid ${manifestFilename}: ${error.message}`);
+    }
+    if (typeof (error as NodeJS.ErrnoException).code === "string") {
+      throw new Error(
+        `Unable to read ${manifestFilename}: ${(error as Error).message}`,
+      );
     }
     throw error;
   }
