@@ -5,7 +5,7 @@
 Reduce `src/` to a generic plugin host and move all marketplace ownership and orchestration into an externalizable default plugin supplied by a neutral repository composition root.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0002
 
 ## Motivation
@@ -78,17 +78,17 @@ Amend boundary verification to inspect static and dynamic module edges semantica
 
 ## Tasks
 
-- [ ] Externalize marketplace ownership and make core a generic lazy child-plugin host in one implementation PR
-  - [ ] Add immutable marketplace-agnostic plugin identity, generic initialization context, lazy child definitions, atomic command/child staging, deterministic FIFO initialization, failure isolation, and generic dispatch contracts.
-  - [ ] Add a neutral repository composition root outside `src/` that supplies ordered default plugin definitions; remove all default-plugin imports and names from modules under `src/`.
-  - [ ] Move or delete every behavior in `src/marketplaces.ts`, leaving no marketplace storage, path, manifest, discovery, ordering, import, Git, installation, diagnostics, recovery, or command behavior in core.
-  - [ ] Move marketplace discovery, deterministic ordering, nonliteral dynamic imports, child-definition creation, and marketplace-aware failure/recovery orchestration into `plugins/marketplace/`.
-  - [ ] Generalize CLI, plugin initialization, contexts, commands, and public `tx/plugin` types; remove marketplace-specific public DI/types/context while retaining React, Ink, tx version, and dependency-version DI.
-  - [ ] Make compiled marketplace dependency installation invoke `process.execPath` with `BUN_BE_BUN=1`, including cleanup and diagnostic mapping on failure.
-  - [ ] Update unit, integration, end-to-end, and compiled-executable tests for atomic staging, FIFO child initialization, isolation, recovery, add/list/remove, discovery/import failures, and self-installation.
-  - [ ] Update module-boundary tests to allow plugin-owned nonliteral dynamic imports while forbidding plugin-to-core and core-to-default-plugin implementation imports.
-  - [ ] Add an externalizability fixture proving the marketplace plugin can be copied out and consume only public `tx/plugin` types plus standard Node.js/Bun APIs.
-  - [ ] Preserve 100% statement, function, and line coverage and pass formatting, linting, type checking, the full Bun test suite, boundary checks, and production build.
+- [x] Externalize marketplace ownership and make core a generic lazy child-plugin host in one implementation PR (PR #11)
+  - [x] Add immutable marketplace-agnostic plugin identity, generic initialization context, lazy child definitions, atomic command/child staging, deterministic FIFO initialization, failure isolation, and generic dispatch contracts.
+  - [x] Add a neutral repository composition root outside `src/` that supplies ordered default plugin definitions; remove all default-plugin imports and names from modules under `src/`.
+  - [x] Move or delete every behavior in `src/marketplaces.ts`, leaving no marketplace storage, path, manifest, discovery, ordering, import, Git, installation, diagnostics, recovery, or command behavior in core.
+  - [x] Move marketplace discovery, deterministic ordering, nonliteral dynamic imports, child-definition creation, and marketplace-aware failure/recovery orchestration into `plugins/marketplace/`.
+  - [x] Generalize CLI, plugin initialization, contexts, commands, and public `tx/plugin` types; remove marketplace-specific public DI/types/context while retaining React, Ink, tx version, and dependency-version DI.
+  - [x] Make compiled marketplace dependency installation invoke `process.execPath` with `BUN_BE_BUN=1`, including cleanup and diagnostic mapping on failure.
+  - [x] Update unit, integration, end-to-end, and compiled-executable tests for atomic staging, FIFO child initialization, isolation, recovery, add/list/remove, discovery/import failures, and self-installation.
+  - [x] Update module-boundary tests to allow plugin-owned nonliteral dynamic imports while forbidding plugin-to-core and core-to-default-plugin implementation imports.
+  - [x] Add an externalizability fixture proving the marketplace plugin can be copied out and consume only public `tx/plugin` types plus standard Node.js/Bun APIs.
+  - [x] Preserve 100% statement, function, and line coverage and pass formatting, linting, type checking, the full Bun test suite, boundary checks, and production build.
 
 ## Open Questions
 

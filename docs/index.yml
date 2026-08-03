@@ -32,6 +32,6 @@ changes:
     path: changes/0003-externalize-marketplace-plugin.md
     description: Reduce core to a generic plugin host and move all marketplace ownership into an externalizable default plugin.
     spec: plugin-system
-    status: draft
+    status: complete
     depends_on:
       - "0002"
