@@ -15,10 +15,10 @@ The approved target architecture is implemented: the core is generic, the market
 - The host MUST initialize root and child plugin definitions in deterministic FIFO order.
 - Commands and child plugin definitions contributed during one plugin initialization MUST be staged atomically.
 - If initialization succeeds, the host MUST commit all staged contributions together.
-- If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure against its generic identity, and continue initializing unrelated plugins.
+- If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure on standard error against its generic identity, and continue initializing unrelated plugins.
 - A failed plugin MUST NOT prevent commands committed by healthy plugins from dispatching.
 - A failed plugin MUST NOT change the process exit code; the exit code MUST be the result of the dispatched command alone.
-- Because a failed plugin's staged commands are never committed, invoking a command owned only by that plugin MUST still fail as an unknown command.
+- Because a failed plugin's staged commands are never committed, invoking a command owned only by that plugin MUST NOT run that plugin's handler; the invocation MUST resolve against the committed command tree like any unregistered path, so it MUST fail as an unknown command unless a committed command is a prefix of it.
 - Command collisions MUST reject the later plugin's staged contribution without modifying previously committed commands.
 - Plugins are trusted code and execute with the same process permissions as `tx`.
 
@@ -42,9 +42,9 @@ The approved target architecture is implemented: the core is generic, the market
 
 #### Scenario: Failure exit code isolation
 
-- **GIVEN** one plugin fails to initialize and a healthy plugin owns the invoked command
-- **WHEN** the command handler completes successfully
-- **THEN** the host reports the failure on standard error and exits with the command's own successful exit code
+- **GIVEN** one plugin fails to initialize and the invocation resolves to a committed command
+- **WHEN** dispatch produces that command's exit code
+- **THEN** the host reports the failure on standard error and exits with that exit code, whatever it is
 
 ### Public Plugin Contract
 

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Report a plugin initialization failure as a standard-error diagnostic only, so it never changes the exit code of a command the CLI dispatched successfully. A command owned only by a failed plugin was never registered and therefore still fails as an unknown command with exit code `2`.
+Report a plugin initialization failure as a standard-error diagnostic only, so it never changes the exit code of a command the CLI dispatched successfully. A command owned only by a failed plugin was never registered, so it resolves against the committed command tree like any unregistered path and fails as an unknown command with exit code `2` unless a registered command is a prefix of it.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
 **Status:** complete
@@ -12,7 +12,7 @@ Report a plugin initialization failure as a standard-error diagnostic only, so i
 
 **Approved:** 2026-08-04
 
-The user selected the unconditional "never escalate" contract over the strict and opt-in alternatives. An opt-in strict mode such as `TX_STRICT_PLUGINS`, escalation limited to the help path, and any new exit code value were explicitly excluded from this change.
+The user selected the unconditional "never escalate" contract over the strict and opt-in alternatives. The excluded alternatives are listed under Non-Goals.
 
 Completion still requires every task and acceptance scenario below.
 
@@ -49,24 +49,24 @@ The authoritative acceptance scenarios are owned by [Plugin System: Generic Plug
 
 ### Approach
 
-`main` returns `dispatch`'s exit code verbatim. The failure list is consumed only by the existing standard-error diagnostic loop, whose wording, ordering, and stream stay unchanged. `EXIT_FAILURE` becomes unused in `src/cli.ts` and its import is dropped; the constant remains exported from `src/commands.ts` because handler failures still return it.
+`main` returns `dispatch`'s exit code verbatim. The failure list is consumed only by the existing standard-error diagnostic loop, whose wording, ordering, and stream stay unchanged. `EXIT_FAILURE` becomes unused in `src/cli.ts` and its import is dropped.
 
-No change is required in `src/commands.ts`, `src/plugins.ts`, `src/context.ts`, `src/plugin.ts`, root `cli.ts`, or `plugins/marketplace/*`. The "failed plugin owned my command" case needs no code either: the failed plugin's staged contribution was discarded, so the command path was never registered and `dispatch` already returns `EXIT_USAGE`.
+No change is required in `src/commands.ts`, `src/plugins.ts`, `src/context.ts`, `src/plugin.ts`, root `cli.ts`, or `plugins/marketplace/*`. The "failed plugin owned my command" case needs no code either: the failed plugin's staged contribution was discarded, so the command path was never registered and `dispatch` resolves the invocation against the committed tree, returning `EXIT_USAGE` unless a registered command is a prefix of it.
 
 ### Decisions
 
 - **Decision:** A plugin initialization failure never changes the exit code.
   - **Why:** The exit code answers "did my command work"; the stderr diagnostic answers "is a plugin broken". Conflating them breaks recovery commands and scripted use.
-  - **Alternatives considered:** Escalating only on the help path was rejected as an arbitrary special case. An opt-in strict mode was deferred as demand-driven.
+  - **Alternatives considered:** Escalating only on the help path was rejected as an arbitrary special case. An opt-in strict mode was rejected for this change and left demand-driven, as recorded under Open Questions.
 - **Decision:** Unknown-command coverage of a failed plugin's commands is left to `dispatch`.
-  - **Why:** It is already correct — the staged contribution was discarded, so the path is unregistered and dispatch returns `EXIT_USAGE` (`2`).
+  - **Why:** It is already correct — the staged contribution was discarded, so the path is unregistered and dispatch returns `EXIT_USAGE` (`2`) whenever no registered command is a prefix of the invocation.
   - **Alternatives considered:** A dedicated "plugin failed to provide this command" path was rejected as duplicated dispatch logic for no observable gain.
 - **Decision:** `EXIT_FAILURE` stays exported from `src/commands.ts`.
   - **Why:** Handler failures still return it; only `src/cli.ts` stops importing it.
 
 ### Non-Goals
 
-- An opt-in strict mode such as `TX_STRICT_PLUGINS` or any equivalent flag or config key.
+- An opt-in strict mode such as `TX_STRICT_PLUGINS` or any equivalent flag or config key, per Decisions.
 - Escalating the exit code on the help path, or for any subset of invocations.
 - Introducing a new exit code value or changing `EXIT_SUCCESS`, `EXIT_FAILURE`, or `EXIT_USAGE`.
 - Changing the wording, ordering, or stream of the `Error loading plugin …` diagnostics.
@@ -88,6 +88,7 @@ No change is required in `src/commands.ts`, `src/plugins.ts`, `src/context.ts`, 
 ## Open Questions
 
 - [ ] An opt-in strict mode (for example `TX_STRICT_PLUGINS=1`) that makes any plugin initialization failure non-zero MAY be specified later if a concrete consumer requires it, per the demand-driven rule in [Plugin System: Open Questions](../specs/plugin-system/index.md#open-questions).
+- [ ] A command path that a failed plugin would have owned but that a registered command is a prefix of silently dispatches the prefix command and exits `0`; before this change the escalation masked that case with exit `1`. Whether [Command Resolution](../specs/architecture/index.md#command-resolution) SHOULD prefer an exact match or report a shadowed path is pre-existing longest-prefix behavior, and any change to it belongs to a future change document.
 
 ## References
 

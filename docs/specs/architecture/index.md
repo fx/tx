@@ -12,7 +12,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 
 - Running `tx` without a command MUST show help.
 - Running an unknown command MUST fail with a non-zero exit code and show a useful error.
-- A plugin initialization failure MUST be reported on standard error and MUST NOT change the exit code of a successfully dispatched command.
+- A plugin initialization failure MUST be reported on standard error and MUST NOT change the process exit code; the exit code MUST be the result of the dispatched command alone.
 - Core and plugin commands MUST share one command tree.
 - Command paths MUST support one or more segments, such as `marketplace add` and `notes daily open`.
 - `--help` MUST work at the root and at every command node.
