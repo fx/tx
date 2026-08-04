@@ -51,7 +51,7 @@ Move default selection to a repository entry/composition module outside `src/`. 
 
 Generalize CLI, plugin initialization, contexts, commands, and public exports around plugin identity only. Keep React, Ink, tx version, and dependency versions injected by core. Delete marketplace-specific core dependencies and context fields.
 
-Amend boundary verification to inspect static and dynamic module edges semantically: plugin-owned nonliteral imports of discovered entry paths are valid, but any plugin import resolving into `src/` and any `src/` import resolving into a default plugin are invalid. Add a portability fixture that copies the marketplace plugin outside the repository-specific module graph and type-checks or executes it against only public `tx/plugin` types and standard Node.js/Bun APIs.
+Amend boundary verification to inspect static and dynamic module edges semantically: plugin-owned nonliteral imports of discovered entry paths are valid, but any plugin import resolving into `src/` and any `src/` import resolving into a default plugin are invalid. Add a portability fixture that copies the marketplace plugin outside the repository-specific module graph and type-checks or executes it against only public `@fx/tx/plugin` types and standard Node.js/Bun APIs.
 
 ### Decisions
 
@@ -83,11 +83,11 @@ Amend boundary verification to inspect static and dynamic module edges semantica
   - [x] Add a neutral repository composition root outside `src/` that supplies ordered default plugin definitions; remove all default-plugin imports and names from modules under `src/`.
   - [x] Move or delete every behavior in `src/marketplaces.ts`, leaving no marketplace storage, path, manifest, discovery, ordering, import, Git, installation, diagnostics, recovery, or command behavior in core.
   - [x] Move marketplace discovery, deterministic ordering, nonliteral dynamic imports, child-definition creation, and marketplace-aware failure/recovery orchestration into `plugins/marketplace/`.
-  - [x] Generalize CLI, plugin initialization, contexts, commands, and public `tx/plugin` types; remove marketplace-specific public DI/types/context while retaining React, Ink, tx version, and dependency-version DI.
+  - [x] Generalize CLI, plugin initialization, contexts, commands, and public `@fx/tx/plugin` types; remove marketplace-specific public DI/types/context while retaining React, Ink, tx version, and dependency-version DI.
   - [x] Make compiled marketplace dependency installation invoke `process.execPath` with `BUN_BE_BUN=1`, including cleanup and diagnostic mapping on failure.
   - [x] Update unit, integration, end-to-end, and compiled-executable tests for atomic staging, FIFO child initialization, isolation, recovery, add/list/remove, discovery/import failures, and self-installation.
   - [x] Update module-boundary tests to allow plugin-owned nonliteral dynamic imports while forbidding plugin-to-core and core-to-default-plugin implementation imports.
-  - [x] Add an externalizability fixture proving the marketplace plugin can be copied out and consume only public `tx/plugin` types plus standard Node.js/Bun APIs.
+  - [x] Add an externalizability fixture proving the marketplace plugin can be copied out and consume only public `@fx/tx/plugin` types plus standard Node.js/Bun APIs.
   - [x] Preserve 100% statement, function, and line coverage and pass formatting, linting, type checking, the full Bun test suite, boundary checks, and production build.
 
 ## Open Questions

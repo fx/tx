@@ -4,7 +4,7 @@ const inkDevExpression = "process.env['DEV']";
 
 const build = await Bun.build({
   entrypoints: ["cli.ts"],
-  compile: { outfile: "dist/tx" },
+  compile: { outfile: "dist/tx", target: "bun-linux-x64-baseline" },
   minify: true,
   plugins: [
     {

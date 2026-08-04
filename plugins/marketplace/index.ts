@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import type { Plugin, PluginDefinition, PluginIdentity } from "tx/plugin";
+import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
 
 import {
   MarketplaceManager,

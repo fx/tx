@@ -33,15 +33,24 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 ### Runtime and Distribution
 
 - The host MUST target Bun and TypeScript.
-- The host SHOULD compile to one executable for each supported platform.
+- The initial supported platform is Linux x64 with glibc and the Bun baseline CPU target.
+- The deterministic production build MUST create the standalone executable at `dist/tx` using `bun-linux-x64-baseline`.
 - A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage.
-- The initial supported platform MAY be the developer's current platform; additional targets MAY be added later.
+- The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist.
+- GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend.
+- `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
 
 #### Scenario: Standalone host
 
 - **GIVEN** a compiled `tx` executable
-- **WHEN** the user runs it on a supported platform
+- **WHEN** the user runs it on supported Linux x64 glibc
 - **THEN** the generic host starts without a separately installed Node.js or Bun runtime
+
+#### Scenario: Version without plugins
+
+- **GIVEN** plugin discovery or initialization would fail
+- **WHEN** the user runs `tx --version`
+- **THEN** the CLI prints the package version and exits successfully before plugin initialization
 
 ### State Ownership
 
@@ -95,6 +104,18 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - CI MUST run Biome formatting and lint checks, TypeScript checking, Bun tests with coverage, and the production build.
 - CI MUST fail when any command fails or any coverage category falls below 100%.
 - Required checks MUST NOT use failure suppression.
+- CI MUST also support explicit `workflow_dispatch` without changing the required `CI` job name.
+- Release Please MUST use the manifest/node release type and conventional commits; release PRs MUST be merged manually.
+- Release orchestration MUST run after successful push-to-`main` CI, dispatch CI for each Release Please PR head, and verify the dispatched run uses the exact head SHA.
+- A release created by Release Please MUST be built, checked, packaged, published to GitHub Packages, and uploaded to the existing GitHub Release in the same workflow invocation.
+- Release automation MUST use `GITHUB_TOKEN`, MUST NOT rely on token-created tag or release events to trigger publication, and MUST NOT use `pull_request_target` or weaken required CI.
+- Publishing MUST be idempotent: an existing package version MUST NOT be overwritten, while release assets MAY be replaced safely on retry.
+
+#### Scenario: Release PR CI
+
+- **GIVEN** Release Please creates or updates a release PR with `GITHUB_TOKEN`
+- **WHEN** release orchestration processes that PR
+- **THEN** it explicitly dispatches CI and waits for a successful `workflow_dispatch` run at the exact PR head SHA
 
 #### Scenario: Coverage regression
 
@@ -167,7 +188,7 @@ Commands are identified by arrays of path segments. Dispatch selects the longest
 
 ## Open Questions
 
-- Exact supported operating systems will be decided during implementation.
+- Additional supported operating systems and architectures may be decided in a future change.
 - The final command-line parser MAY be a small library or a local implementation; it MUST preserve the command behavior in this spec.
 - Automatic marketplace updates are out of scope initially.
 
@@ -186,3 +207,4 @@ Commands are identified by arrays of path segments. Dispatch selects the longest
 | 2026-08-02 | Required Biome, Bun tests, 100% coverage, and complete CI | [0001-bootstrap-core-cli](../../changes/0001-bootstrap-core-cli.md) |
 | 2026-08-02 | Separated bundled feature implementations from generic core runtime infrastructure | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-03 | Made repository composition neutral and limited `src/` to the generic plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
+| 2026-08-03 | Defined scoped package publishing, Linux x64 release assets, version invariants, manual Release Please approvals, and exact-head dispatched CI | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |

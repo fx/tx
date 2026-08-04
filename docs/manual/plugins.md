@@ -2,6 +2,8 @@
 
 Plugins extend `tx` with commands and other plugins. Install only code you trust: plugins are not sandboxed and run with the same permissions as `tx`. Git clones, plugin modules, dependencies, and package lifecycle scripts are trusted execution surfaces; there is no signing, provenance, permissions, rollback, catalog, or automatic-update layer.
 
+Install the Linux x64 standalone release with `mise use -g github:fx/tx`. Plugin authors who install `@fx/tx` from GitHub Packages for its public types must configure `npm.pkg.github.com` with a classic PAT that has `read:packages`; GitHub requires this authentication even for public npm packages. See the [installation guide](../../README.md#install).
+
 ## Install and manage marketplaces
 
 A marketplace is a Git repository containing one or more plugins.
@@ -36,10 +38,10 @@ A marketplace needs no build step or package manifest. If `package.json` exists,
 
 ## Write a plugin
 
-A plugin entry is a TypeScript module with a default export. Import the public contract as types only; `tx/plugin` does not provide a runtime API.
+A plugin entry is a TypeScript module with a default export. Import the public contract as types only; `@fx/tx/plugin` does not provide a runtime API.
 
 ```ts
-import type { Plugin } from "tx/plugin";
+import type { Plugin } from "@fx/tx/plugin";
 
 const plugin: Plugin = ({ command }) => {
   command("hello", (_args, context) => {
@@ -60,7 +62,7 @@ Commands and child definitions registered during initialization form one atomic 
 
 Bundled feature plugins live under `plugins/<name>/`, conventionally at `plugins/<name>/index.ts`. Only the root `cli.ts` composition root selects and orders defaults. Modules under `src/` must remain feature-neutral and must not import or name bundled plugins; a bundled plugin's complete module graph must not import private core implementation under `src/`.
 
-Use type-only imports from `tx/plugin`, standard Node.js or Bun APIs, and plugin-owned modules. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
+Use type-only imports from `@fx/tx/plugin`, standard Node.js or Bun APIs, and plugin-owned modules. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
 
 ## Validate changes
 

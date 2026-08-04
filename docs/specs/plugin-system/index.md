@@ -2,9 +2,9 @@
 
 ## Overview
 
-The plugin system is a generic host for trusted plugins. Core code under `src/` owns plugin identity, contribution staging, initialization, and command dispatch only. Marketplace behavior is owned entirely by the bundled marketplace plugin outside `src/`; that plugin could be copied to another repository and consume only public `tx/plugin` types plus standard Node.js and Bun APIs.
+The plugin system is a generic host for trusted plugins. Core code under `src/` owns plugin identity, contribution staging, initialization, and command dispatch only. Marketplace behavior is owned entirely by the bundled marketplace plugin outside `src/`; that plugin could be copied to another repository and consume only public `@fx/tx/plugin` types plus standard Node.js and Bun APIs.
 
-The approved target architecture is implemented: the core is generic, and the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md).
+The approved target architecture is implemented: the core is generic, the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md), and the canonical package API is scoped as specified in [Change 0004](../../changes/0004-automate-versioning-and-publishing.md).
 
 ## Requirements
 
@@ -40,7 +40,7 @@ The approved target architecture is implemented: the core is generic, and the ma
 
 ### Public Plugin Contract
 
-- The public package MUST expose the plugin contract through `tx/plugin`.
+- The public package MUST expose the plugin contract through `@fx/tx/plugin`.
 - The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, command registration, command context, and React, Ink, and version dependencies.
 - Public plugin types and initialization context MUST NOT contain marketplace names, paths, manifests, storage services, Git services, dependency installers, or marketplace-specific diagnostics.
 - Plugin identity MUST be assigned by the definition's owner and MUST NOT be mutable by the plugin during initialization.
@@ -77,7 +77,7 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 #### Scenario: Marketplace-agnostic consumer
 
-- **GIVEN** a plugin imports only public types from `tx/plugin`
+- **GIVEN** a plugin imports only public types from `@fx/tx/plugin`
 - **WHEN** it initializes under the host
 - **THEN** it can identify itself, register commands, contribute lazy children, and use injected React, Ink, and version dependencies without a marketplace-specific core API
 
@@ -164,7 +164,7 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 - No module under `src/` MAY import, identify by name, or otherwise select a default plugin.
 - No module under `src/` MAY import a marketplace plugin implementation module.
 - A default plugin's complete module graph MUST NOT import core implementation modules under `src/`.
-- Default plugins MAY import public `tx/plugin` types type-only and MAY use standard Node.js and Bun APIs directly.
+- Default plugins MAY import public `@fx/tx/plugin` types type-only and MAY use standard Node.js and Bun APIs directly.
 - Plugin-owned nonliteral dynamic imports of plugin entry paths MUST be allowed.
 - Boundary enforcement MUST continue to forbid any static or dynamic import from a plugin into core implementation and any import from core implementation into a default plugin.
 - Copying the marketplace plugin to another repository MUST NOT require private core modules, repository-local aliases, or injected marketplace services.
@@ -173,7 +173,7 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 
 - **GIVEN** the marketplace plugin's complete module graph
 - **WHEN** its imports and runtime dependencies are inspected
-- **THEN** it relies only on public `tx/plugin` types, standard Node.js and Bun APIs, and its own modules, including its owned nonliteral dynamic imports
+- **THEN** it relies only on public `@fx/tx/plugin` types, standard Node.js and Bun APIs, and its own modules, including its owned nonliteral dynamic imports
 
 ## Design
 
@@ -185,7 +185,7 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 
 ### Package API
 
-`tx/plugin` is the only core contract available to a portable plugin. Imports from that path SHOULD be type-only unless a future public runtime API is explicitly specified. React, Ink, and versions remain dependency-injected runtime values.
+`@fx/tx/plugin` is the only core contract available to a portable plugin. Imports from that path SHOULD be type-only unless a future public runtime API is explicitly specified. React, Ink, and versions remain dependency-injected runtime values.
 
 ## Constraints
 
@@ -203,6 +203,7 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 
 - [Architecture](../architecture/)
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
+- [Change 0004: Automate Versioning and Publishing](../../changes/0004-automate-versioning-and-publishing.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -215,3 +216,4 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 | 2026-08-02 | Added broken-plugin recovery and stricter name and command validation | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-02 | Required bundled first-party plugins to remain standalone from core implementation modules | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-03 | Assigned all marketplace orchestration to an externalizable default plugin and reduced core to a generic transactional plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
+| 2026-08-03 | Renamed the canonical public plugin type contract to `@fx/tx/plugin` | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
