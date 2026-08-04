@@ -39,22 +39,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ### Functional Requirements
 
-The [Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) and [Composition and Boundaries](../specs/plugin-system/index.md#composition-and-boundaries) sections own the current marketplace behavior and architectural boundary. This approved change owns the delta; the same implementation PR MUST move the approved standing behavior and acceptance scenarios into those owning spec sections rather than leave duplicate normative contracts here.
-
-- Each configured plugin MAY declare an OPTIONAL `package` field containing a repository-relative path to the exact `package.json` selected for that plugin.
-- Without `package`, the selected candidate MUST be `package.json` in the directory containing the plugin's real, fully resolved entry path. A root entry therefore selects the root candidate naturally; a nested entry MUST NOT search parent directories or fall back to the marketplace root.
-- A `package` value MUST be a non-empty string, MUST be repository-relative, MUST resolve within the real marketplace checkout, and MUST name `package.json` exactly. Absolute paths, lexical escapes, directories, other filenames, and symbolic links resolving outside the checkout MUST be rejected.
-- A syntactically valid, repository-contained explicit `package` path whose file is absent MUST skip dependency installation for that plugin. This exception MUST NOT turn any syntactically or security-invalid override into a skip.
-- A selected package candidate that exists MUST resolve to a regular `package.json` file contained by the real marketplace checkout. Invalid existing candidates MUST be rejected before installation.
-- The marketplace manifest, every plugin entry, and every selected package candidate MUST be validated before the first dependency installation starts.
-- Existing selected manifests MUST be canonicalized by real path and installed at most once. Installation order MUST follow the first plugin occurrence selecting each real manifest.
-- Each installation MUST run in the selected manifest's containing directory.
-- Dependency installation and lifecycle scripts MUST remain trusted, unsandboxed execution with the same permissions as `tx`.
-- Marketplace addition MUST retain staging cleanup on validation or installation failure and MUST publish no partially prepared checkout.
-- Compiled standalone installation MUST continue to invoke the running executable in Bun mode and MUST NOT require a separate `bun` executable on `PATH`.
-- All package-selection, validation, deduplication, ordering, installation, and recovery behavior MUST remain owned by `plugins/marketplace/`. This change MUST NOT add package-selection vocabulary to `src/` or the public `@fx/tx/plugin` API.
-- The implementation MUST update the plugin-system specification and plugin manual in the same PR. Completed historical change documents MUST remain unchanged.
-- The implementation PR MUST add the exact `.claude/worktrees/` entry to `.gitignore` without replacing or broadening existing ignore entries.
+The approved standing behavior and acceptance scenarios are owned by [Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership), while [Composition and Boundaries](../specs/plugin-system/index.md#composition-and-boundaries) owns the architectural boundary. The implementation PR must satisfy those authoritative sections and the delivery tasks below; this change record does not duplicate their normative contract.
 
 ## Acceptance Scenarios
 
