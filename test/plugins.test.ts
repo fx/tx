@@ -43,6 +43,10 @@ function outputContext(): CommandProcessContext & { stdoutText(): string } {
 }
 
 describe("public plugin contract", () => {
+  test("cannot be imported at runtime", async () => {
+    await expect(import("@fx/tx/plugin")).rejects.toThrow();
+  });
+
   test("injects shared frozen dependencies for the type-only contract", () => {
     expect(coreDependencies.react).toBe(react);
     expect(coreDependencies.ink).toBe(ink);
