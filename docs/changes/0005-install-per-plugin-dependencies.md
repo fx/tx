@@ -5,7 +5,7 @@
 Install marketplace dependencies from the package manifest selected for each configured plugin rather than from one marketplace-root manifest. This approved contract records the required safety distinction for missing explicit overrides.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** 0004
 
 ## Approval Gate
@@ -87,13 +87,13 @@ The implementation PR is intentionally cross-cutting but atomic: it updates mark
 
 ## Tasks
 
-- [ ] Implement and document per-plugin dependency manifests in one PR after explicit approval
+- [x] Implement and document per-plugin dependency manifests in one PR after explicit approval (PR #16)
   - [x] Record approval, set this change to `in-progress`, and preserve the one-PR scope.
   - [x] Extend marketplace-owned manifest validation and preparation with default and explicit package selection, strict containment/type/file validation, intentional missing-file skips, real-path deduplication, first-occurrence ordering, and validation-before-install.
   - [x] Preserve marketplace staging cleanup, trusted lifecycle execution, marketplace diagnostics, compiled standalone Bun re-entry, and generic core/public API boundaries.
   - [x] Add Bun unit, integration, failure, ordering, symlink-safety, staging-cleanup, and standalone executable coverage for every acceptance scenario while preserving required coverage.
   - [x] Update the active plugin-system specification and plugin manual, add the exact `.claude/worktrees/` ignore entry, and leave completed historical change documents unchanged.
-  - [ ] Run `bun run check` and all targeted standalone and boundary tests, then mark this change complete with the implementing PR number only after every gate passes.
+  - [x] Run `bun run check` and all targeted standalone and boundary tests, then mark this change complete with the implementing PR number only after every gate passes.
 
 ## Open Questions
 
