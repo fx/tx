@@ -43,3 +43,11 @@ changes:
     status: complete
     depends_on:
       - "0003"
+  - id: "0005"
+    name: install-per-plugin-dependencies
+    path: changes/0005-install-per-plugin-dependencies.md
+    description: Select, validate, deduplicate, and install dependency manifests per configured marketplace plugin.
+    spec: plugin-system
+    status: draft
+    depends_on:
+      - "0004"

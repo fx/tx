@@ -1,0 +1,175 @@
+# 0005: Install Per-Plugin Dependencies
+
+## Summary
+
+Install marketplace dependencies from the package manifest selected for each configured plugin rather than from one marketplace-root manifest. This draft records the proposed contract and MUST remain unimplemented until the user approves the safety distinction for missing explicit overrides.
+
+**Spec:** [Plugin System](../specs/plugin-system/)
+**Status:** draft
+**Depends On:** 0004
+
+## Approval Gate
+
+This change MUST NOT move to `in-progress`, and implementation MUST NOT begin, until the user explicitly approves this contract. Approval MUST include the distinction that an explicit `package` override which is a syntactically valid, repository-contained path to an absent `package.json` skips dependency installation, while a wrong-type, empty, absolute, escaping, directory, wrong-filename, or externally resolving path remains an error.
+
+After approval, the implementation PR MUST update this section with the approval date and MUST change the status to `in-progress`. Completion still requires every task and acceptance scenario below.
+
+## Motivation
+
+The marketplace plugin currently validates all configured entries and then runs one dependency installation from the marketplace root only when the root `package.json` exists. A marketplace containing independently located plugins cannot install each plugin from its own package boundary, and a nested plugin can accidentally depend on a root-level installation model that does not match its entry location.
+
+This change establishes deterministic per-plugin package selection while retaining the existing trusted-code model, atomic staging cleanup, compiled-executable installation path, and marketplace-only ownership boundary.
+
+## Requirements
+
+### Testing Requirements
+
+This change MUST satisfy the project's standing testing rules in [Architecture: Development Conventions](../specs/architecture/index.md#development-conventions). CI enforces these as merge gates:
+
+- Biome formatting and lint checks MUST pass.
+- TypeScript checking MUST pass with no errors.
+- Bun tests MUST pass with 100% statement, function, and line coverage across production source files.
+- Every new observable package-selection, validation, ordering, deduplication, skip, failure, cleanup, and standalone behavior MUST have automated tests.
+- The compiled-executable dependency-install path MUST be exercised without relying on a separate Bun executable on `PATH`.
+- Committed tests MUST NOT contain unjustified focused or skipped cases.
+
+Skipping or weakening any of these rules to land the PR MUST be treated as a bug in the PR, not in the rule.
+
+### Functional Requirements
+
+The [Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) and [Composition and Boundaries](../specs/plugin-system/index.md#composition-and-boundaries) sections own the current marketplace behavior and architectural boundary. Pending approval, this draft owns the proposed delta; the same implementation PR MUST move the approved standing behavior and acceptance scenarios into those owning spec sections rather than leave duplicate normative contracts here.
+
+- Each configured plugin MAY declare an OPTIONAL `package` field containing a repository-relative path to the exact `package.json` selected for that plugin.
+- Without `package`, the selected candidate MUST be `package.json` in the directory containing the plugin's real, fully resolved entry path. A root entry therefore selects the root candidate naturally; a nested entry MUST NOT search parent directories or fall back to the marketplace root.
+- A `package` value MUST be a non-empty string, MUST be repository-relative, MUST resolve within the real marketplace checkout, and MUST name `package.json` exactly. Absolute paths, lexical escapes, directories, other filenames, and symbolic links resolving outside the checkout MUST be rejected.
+- A syntactically valid, repository-contained explicit `package` path whose file is absent MUST skip dependency installation for that plugin. This exception MUST NOT turn any syntactically or security-invalid override into a skip.
+- A selected package candidate that exists MUST resolve to a regular `package.json` file contained by the real marketplace checkout. Invalid existing candidates MUST be rejected before installation.
+- The marketplace manifest, every plugin entry, and every selected package candidate MUST be validated before the first dependency installation starts.
+- Existing selected manifests MUST be canonicalized by real path and installed at most once. Installation order MUST follow the first plugin occurrence selecting each real manifest.
+- Each installation MUST run in the selected manifest's containing directory.
+- Dependency installation and lifecycle scripts MUST remain trusted, unsandboxed execution with the same permissions as `tx`.
+- Marketplace addition MUST retain staging cleanup on validation or installation failure and MUST publish no partially prepared checkout.
+- Compiled standalone installation MUST continue to invoke the running executable in Bun mode and MUST NOT require a separate `bun` executable on `PATH`.
+- All package-selection, validation, deduplication, ordering, installation, and recovery behavior MUST remain owned by `plugins/marketplace/`. This change MUST NOT add package-selection vocabulary to `src/` or the public `@fx/tx/plugin` API.
+- The implementation MUST update the plugin-system specification and plugin manual in the same PR. Completed historical change documents MUST remain unchanged.
+- The implementation PR MUST add the exact `.claude/worktrees/` entry to `.gitignore` without replacing or broadening existing ignore entries.
+
+## Acceptance Scenarios
+
+These scenarios define the proposed behavior for approval. Once approved, the implementation PR MUST move them to the owning plugin-system specification and replace this section with a link to those authoritative scenarios.
+
+### Default root package
+
+- **GIVEN** a plugin entry resolves to a file in the marketplace root and no `package` override is declared
+- **WHEN** the marketplace is prepared
+- **THEN** the root `package.json` is selected if present
+
+### Nested default does not search upward
+
+- **GIVEN** a plugin entry resolves under `plugins/notes/`, no `package` override is declared, and only the marketplace-root `package.json` exists
+- **WHEN** the marketplace is prepared
+- **THEN** dependency installation is skipped for that plugin without searching upward or falling back to the root manifest
+
+### Exact explicit override
+
+- **GIVEN** a nested plugin declares a repository-relative `package` path to a contained regular `package.json`
+- **WHEN** the marketplace is prepared
+- **THEN** dependencies are installed from that manifest's directory
+
+### Missing explicit override
+
+- **GIVEN** a plugin declares a syntactically valid repository-contained path ending in `package.json` and that file is absent
+- **WHEN** the marketplace is prepared
+- **THEN** dependency installation is skipped for that plugin
+
+### Invalid explicit override
+
+- **GIVEN** a plugin's `package` value has the wrong type, is empty or absolute, escapes the marketplace, names a directory or a filename other than `package.json`, or resolves through a symbolic link outside the marketplace
+- **WHEN** the marketplace manifest is validated
+- **THEN** preparation is rejected before any dependency installation starts
+
+### Deduplicated first-occurrence order
+
+- **GIVEN** multiple plugins select package manifests and more than one selection resolves to the same real manifest
+- **WHEN** the marketplace is prepared
+- **THEN** each real manifest is installed once in the order of the first plugin that selected it
+
+### Validate before install
+
+- **GIVEN** an earlier plugin selects a valid package manifest and a later plugin has an invalid entry or package selection
+- **WHEN** the marketplace is prepared
+- **THEN** validation fails before the earlier plugin's dependency installation can run
+
+### Failed trusted lifecycle
+
+- **GIVEN** a selected manifest's trusted dependency installation or lifecycle script fails in marketplace staging
+- **WHEN** marketplace addition aborts
+- **THEN** the staging checkout is removed, no installed checkout is published, and the failure is reported through marketplace-owned diagnostics
+
+### Standalone installation
+
+- **GIVEN** the compiled `tx` executable runs without a separate Bun executable on `PATH`
+- **WHEN** a selected per-plugin manifest requires dependency installation
+- **THEN** installation runs through the current executable in Bun mode from the selected manifest's directory
+
+## Design
+
+### Approach
+
+Extend the marketplace-owned manifest entry model with the optional `package` path. During preparation, resolve the real checkout, parse the selected marketplace manifest, resolve every entry, derive or resolve each package candidate, and classify each candidate as installable or intentionally absent. Reject the complete plan before side effects if any manifest, entry, or package candidate is invalid.
+
+Build an ordered installation plan keyed by each existing manifest's real path. Iterate plugins in manifest order, retain the first occurrence of each real manifest, and invoke the existing Bun runner from that manifest's directory. Keep this planning and execution inside the marketplace plugin's storage/preparation implementation; generic plugin definitions and public plugin types remain unchanged.
+
+The implementation PR is intentionally cross-cutting but atomic: it updates marketplace implementation and tests, the plugin-system specification, the plugin authoring manual, this change's approval/status/task state, and the exact `.gitignore` entry together.
+
+### Decisions
+
+- **Decision:** The default candidate is `dirname(real resolved entryPath)/package.json`.
+  - **Why:** Package ownership follows the actual plugin module location and remains stable across contained entry symlinks.
+  - **Alternatives considered:** Searching upward or falling back to the marketplace root was rejected because nested entries would acquire implicit dependencies from unrelated package boundaries.
+- **Decision:** `package` points to the exact `package.json`, not a directory.
+  - **Why:** Exact file paths make selection and validation unambiguous.
+  - **Alternatives considered:** Directory overrides were rejected because they introduce filename inference and a second path form.
+- **Decision:** A valid contained explicit override to an absent file skips installation, but malformed or unsafe overrides fail validation.
+  - **Why:** This is the user's selected absence policy without allowing security errors or authoring mistakes to masquerade as optional dependencies.
+  - **Alternatives considered:** Rejecting every missing override was not selected; skipping every invalid override was rejected as unsafe. This decision requires explicit user approval before implementation.
+- **Decision:** Installations are deduplicated by real manifest path in first plugin occurrence order.
+  - **Why:** Aliases and contained symlinks cannot trigger duplicate lifecycle execution, while manifest order remains deterministic.
+  - **Alternatives considered:** Deduplicating lexical paths would miss aliases; sorting manifests would discard author-controlled first-use order.
+- **Decision:** Resolve the complete plan before running any installation.
+  - **Why:** An invalid later entry cannot leave earlier dependency side effects in an otherwise rejected staging checkout.
+- **Decision:** The marketplace plugin exclusively owns the feature.
+  - **Why:** Package manifests are marketplace orchestration vocabulary and do not belong in the generic host or public plugin contract.
+
+### Non-Goals
+
+- Searching parent directories for package manifests or falling back from nested entries to the marketplace root.
+- Installing dependencies after marketplace installation, lazily at plugin load time, or separately for every plugin when manifests are shared.
+- Introducing workspaces, lockfile policy, package-manager selection, dependency version solving, isolated dependency environments, or parallel installation.
+- Sandboxing or disabling trusted dependency lifecycle scripts.
+- Adding package-selection fields to generic host types, command context, or the public `@fx/tx/plugin` API.
+- Changing marketplace command syntax, storage layout, discovery ordering, plugin initialization ordering, or failure isolation.
+- Modifying completed historical change documents.
+- Splitting this contract across multiple implementation PRs.
+
+## Tasks
+
+- [ ] Implement and document per-plugin dependency manifests in one PR after explicit approval
+  - [ ] Record approval, set this change to `in-progress`, and preserve the one-PR scope.
+  - [ ] Extend marketplace-owned manifest validation and preparation with default and explicit package selection, strict containment/type/file validation, intentional missing-file skips, real-path deduplication, first-occurrence ordering, and validation-before-install.
+  - [ ] Preserve marketplace staging cleanup, trusted lifecycle execution, marketplace diagnostics, compiled standalone Bun re-entry, and generic core/public API boundaries.
+  - [ ] Add Bun unit, integration, failure, ordering, symlink-safety, staging-cleanup, and standalone executable coverage for every acceptance scenario while preserving required coverage.
+  - [ ] Update the active plugin-system specification and plugin manual, add the exact `.claude/worktrees/` ignore entry, and leave completed historical change documents unchanged.
+  - [ ] Run `bun run check` and all targeted standalone and boundary tests, then mark this change complete with the implementing PR number only after every gate passes.
+
+## Open Questions
+
+- [ ] **Approval required:** Does the user approve the explicit missing-override safety distinction and the complete contract above for implementation in one PR?
+
+## References
+
+- Spec: [Plugin System](../specs/plugin-system/)
+- Testing conventions: [Architecture: Development Conventions](../specs/architecture/index.md#development-conventions)
+- Depends on: [0004 Automate Versioning and Publishing](./0004-automate-versioning-and-publishing.md)
+- Architectural predecessor: [0003 Externalize Marketplace Plugin](./0003-externalize-marketplace-plugin.md)
+- Practical guidance to update during implementation: [Plugin Manual](../manual/plugins.md)

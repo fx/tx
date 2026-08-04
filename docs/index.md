@@ -15,3 +15,4 @@
 | 0002 | [Add Plugin Marketplaces](changes/0002-add-plugin-marketplaces.md) | [Plugin System](specs/plugin-system/) | complete | 0001 |
 | 0003 | [Externalize Marketplace Plugin](changes/0003-externalize-marketplace-plugin.md) | [Plugin System](specs/plugin-system/) | complete | 0002 |
 | 0004 | [Automate Versioning and Publishing](changes/0004-automate-versioning-and-publishing.md) | [Architecture](specs/architecture/) | complete | 0003 |
+| 0005 | [Install Per-Plugin Dependencies](changes/0005-install-per-plugin-dependencies.md) | [Plugin System](specs/plugin-system/) | draft | 0004 |
