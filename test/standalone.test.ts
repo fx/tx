@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { initializeGitRepository } from "./helpers.ts";
+import { createGitRepository, initializeGitRepository } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
 
@@ -254,16 +254,16 @@ test("the production build is a standalone executable", async () => {
     });
     expect(nested.stderr).toBe("");
 
-    const brokenMarketplace = join(temporaryRoot, "broken-marketplace");
-    await mkdir(join(brokenMarketplace, ".tx"), { recursive: true });
-    await Promise.all([
-      writeFile(
-        join(brokenMarketplace, ".tx/config.json"),
-        JSON.stringify({ plugins: [{ name: "broken", entry: "broken.ts" }] }),
-      ),
-      writeFile(join(brokenMarketplace, "broken.ts"), "export default 42;\n"),
-    ]);
-    initializeGitRepository(brokenMarketplace);
+    const brokenMarketplace = await createGitRepository(
+      temporaryRoot,
+      "broken-marketplace",
+      {
+        ".tx/config.json": JSON.stringify({
+          plugins: [{ name: "broken", entry: "broken.ts" }],
+        }),
+        "broken.ts": "export default 42;\n",
+      },
+    );
 
     expect(
       runStandalone([
@@ -281,26 +281,19 @@ test("the production build is a standalone executable", async () => {
 
     const withBroken = runStandalone(["top", "one", "two"]);
     expect(withBroken.exitCode).toBe(0);
-    expect(JSON.parse(withBroken.stdout)).toEqual({
-      args: ["one", "two"],
-      plugin: {
-        name: "top",
-        parent: {
-          name: "fixture",
-          parent: { name: "installed", parent: { name: "marketplace" } },
-        },
-      },
-    });
+    expect(withBroken.stdout).toBe(top.stdout);
     expect(withBroken.stderr).toContain(
       "Error loading plugin marketplace/installed/broken/broken",
     );
 
     const removeBroken = runStandalone(["marketplace", "remove", "broken"]);
-    expect(removeBroken.exitCode).toBe(0);
-    expect(removeBroken.stdout).toBe('Removed marketplace "broken".\n');
-    expect(removeBroken.stderr).toContain(
-      "Error loading plugin marketplace/installed/broken/broken",
-    );
+    expect(removeBroken).toEqual({
+      exitCode: 0,
+      stdout: 'Removed marketplace "broken".\n',
+      stderr: expect.stringContaining(
+        "Error loading plugin marketplace/installed/broken/broken",
+      ),
+    });
 
     const remove = runStandalone(["marketplace", "remove", "fixture"]);
     expect(remove).toEqual({

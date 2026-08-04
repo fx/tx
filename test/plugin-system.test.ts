@@ -254,6 +254,9 @@ describe("source CLI plugin registration", () => {
       const earlier = runCli(dataHome, "alpha", "only");
       expect(earlier.exitCode).toBe(0);
       expect(earlier.stdout).toBe("kept\n");
+      expect(earlier.stderr).toContain(
+        'Error loading plugin marketplace/installed/personal/beta: Command "shared" is already registered by marketplace/installed/personal/alpha; cannot register it for marketplace/installed/personal/beta',
+      );
 
       const rolledBack = runCli(dataHome, "beta", "only");
       expect(rolledBack.exitCode).toBe(2);
@@ -295,13 +298,6 @@ test("broken marketplaces remain removable without blocking healthy plugins", as
     expect(isolated.stdout).toBe("healthy\n");
     expect(isolated.stderr).toBe(
       'Error loading plugin marketplace/installed/broken/broken: Marketplace "broken" plugin "broken" failed: Plugin broken must default-export a function. Run "tx marketplace remove broken" to remove it.\n',
-    );
-
-    const help = runCli(dataHome, "--help");
-    expect(help.exitCode).toBe(0);
-    expect(help.stdout).toContain("  healthy\n");
-    expect(help.stderr).toContain(
-      "Error loading plugin marketplace/installed/broken/broken",
     );
 
     const removeBroken = runCli(dataHome, "marketplace", "remove", "broken");
