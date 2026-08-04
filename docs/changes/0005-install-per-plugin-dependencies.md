@@ -58,61 +58,7 @@ The [Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-p
 
 ## Acceptance Scenarios
 
-These scenarios define the approved behavior. The implementation PR MUST move them to the owning plugin-system specification and replace this section with a link to those authoritative scenarios.
-
-### Default root package
-
-- **GIVEN** a plugin entry resolves to a file in the marketplace root and no `package` override is declared
-- **WHEN** the marketplace is prepared
-- **THEN** the root `package.json` is selected if present
-
-### Nested default does not search upward
-
-- **GIVEN** a plugin entry resolves under `plugins/notes/`, no `package` override is declared, and only the marketplace-root `package.json` exists
-- **WHEN** the marketplace is prepared
-- **THEN** dependency installation is skipped for that plugin without searching upward or falling back to the root manifest
-
-### Exact explicit override
-
-- **GIVEN** a nested plugin declares a repository-relative `package` path to a contained regular `package.json`
-- **WHEN** the marketplace is prepared
-- **THEN** dependencies are installed from that manifest's directory
-
-### Missing explicit override
-
-- **GIVEN** a plugin declares a syntactically valid repository-contained path ending in `package.json` and that file is absent
-- **WHEN** the marketplace is prepared
-- **THEN** dependency installation is skipped for that plugin
-
-### Invalid explicit override
-
-- **GIVEN** a plugin's `package` value has the wrong type, is empty or absolute, escapes the marketplace, names a directory or a filename other than `package.json`, or resolves through a symbolic link outside the marketplace
-- **WHEN** the marketplace manifest is validated
-- **THEN** preparation is rejected before any dependency installation starts
-
-### Deduplicated first-occurrence order
-
-- **GIVEN** multiple plugins select package manifests and more than one selection resolves to the same real manifest
-- **WHEN** the marketplace is prepared
-- **THEN** each real manifest is installed once in the order of the first plugin that selected it
-
-### Validate before install
-
-- **GIVEN** an earlier plugin selects a valid package manifest and a later plugin has an invalid entry or package selection
-- **WHEN** the marketplace is prepared
-- **THEN** validation fails before the earlier plugin's dependency installation can run
-
-### Failed trusted lifecycle
-
-- **GIVEN** a selected manifest's trusted dependency installation or lifecycle script fails in marketplace staging
-- **WHEN** marketplace addition aborts
-- **THEN** the staging checkout is removed, no installed checkout is published, and the failure is reported through marketplace-owned diagnostics
-
-### Standalone installation
-
-- **GIVEN** the compiled `tx` executable runs without a separate Bun executable on `PATH`
-- **WHEN** a selected per-plugin manifest requires dependency installation
-- **THEN** installation runs through the current executable in Bun mode from the selected manifest's directory
+The authoritative acceptance scenarios are now owned by [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership).
 
 ## Design
 

@@ -140,9 +140,14 @@ export interface CommandContext {
 - The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
 - Marketplace discovery, import, or initialization failures MUST be mapped by the marketplace plugin into marketplace-aware diagnostics while preserving generic host failure isolation.
 - Removing a broken marketplace MUST remain possible because the marketplace management commands are committed independently of discovered child failures.
-- A marketplace MAY contain a `package.json`; when present, the marketplace plugin MUST install its dependencies from the marketplace root before plugin loading.
+- Each configured plugin entry MAY declare an optional `package` field containing a repository-relative path to the exact `package.json` selected for that plugin.
+- Without `package`, the selected candidate MUST be `package.json` in the directory containing the plugin's real, fully resolved entry path. A nested entry MUST NOT search parent directories or fall back to the marketplace root.
+- An explicit `package` value MUST be a non-empty string, MUST be repository-relative, MUST remain within the real marketplace checkout, and MUST name `package.json` exactly. Absolute paths, lexical escapes, directories, other filenames, and symbolic links resolving outside the checkout MUST be rejected.
+- A syntactically valid, repository-contained explicit `package` path whose file is genuinely absent MUST skip dependency installation. Before classifying it as absent, the deepest existing ancestor MUST resolve within the real checkout so a symbolic-link escape cannot become a skip.
+- Every selected package candidate that exists MUST resolve to a contained regular file. Existing manifests MUST be canonicalized by real path, installed at most once, and installed sequentially in the order of the first configured plugin selecting each manifest.
+- The marketplace manifest, every plugin entry, and every selected package candidate MUST be validated before the first installation starts. Each installation MUST run with the selected real manifest's containing directory as its working directory.
+- Marketplace addition MUST remove staging and publish no checkout when validation or trusted dependency installation fails.
 - In a compiled executable, the marketplace plugin MUST invoke Bun dependency installation through the running executable (`process.execPath`) with `BUN_BE_BUN=1` so installation does not depend on a separate `bun` executable on `PATH`.
-- A marketplace without `package.json` MUST skip dependency installation.
 
 The marketplace plugin owns the detailed marketplace command, manifest, path-safety, installation, and recovery contracts. Core consumes only the generic child definitions it contributes.
 
@@ -152,11 +157,59 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 - **WHEN** initialization completes
 - **THEN** the marketplace plugin reports marketplace-aware recovery information while its management commands and healthy children remain available
 
+#### Scenario: Default root package
+
+- **GIVEN** a plugin entry resolves to a file in the marketplace root and no `package` override is declared
+- **WHEN** the marketplace is prepared
+- **THEN** the root `package.json` is selected if present
+
+#### Scenario: Nested default does not search upward
+
+- **GIVEN** a plugin entry resolves under `plugins/notes/`, no `package` override is declared, and only the marketplace-root `package.json` exists
+- **WHEN** the marketplace is prepared
+- **THEN** dependency installation is skipped for that plugin without searching upward or falling back to the root manifest
+
+#### Scenario: Exact explicit override
+
+- **GIVEN** a nested plugin declares a repository-relative `package` path to a contained regular `package.json`
+- **WHEN** the marketplace is prepared
+- **THEN** dependencies are installed from that manifest's directory
+
+#### Scenario: Missing explicit override
+
+- **GIVEN** a plugin declares a syntactically valid repository-contained path ending in `package.json` and that file is genuinely absent
+- **WHEN** the marketplace is prepared
+- **THEN** dependency installation is skipped for that plugin
+
+#### Scenario: Invalid explicit override
+
+- **GIVEN** a plugin's `package` value has the wrong type, is empty or absolute, escapes the marketplace, names a directory or a filename other than `package.json`, or resolves through a symbolic link outside the marketplace
+- **WHEN** the marketplace manifest is validated
+- **THEN** preparation is rejected before any dependency installation starts
+
+#### Scenario: Deduplicated first-occurrence order
+
+- **GIVEN** multiple plugins select package manifests and more than one selection resolves to the same real manifest
+- **WHEN** the marketplace is prepared
+- **THEN** each real manifest is installed once, sequentially, in the order of the first plugin that selected it
+
+#### Scenario: Validate before install
+
+- **GIVEN** an earlier plugin selects a valid package manifest and a later plugin has an invalid entry or package selection
+- **WHEN** the marketplace is prepared
+- **THEN** validation fails before the earlier plugin's dependency installation can run
+
+#### Scenario: Failed trusted lifecycle
+
+- **GIVEN** a selected manifest's trusted dependency installation or lifecycle script fails in marketplace staging
+- **WHEN** marketplace addition aborts
+- **THEN** the staging checkout is removed, no installed checkout is published, and the failure is reported through marketplace-owned diagnostics
+
 #### Scenario: Compiled self-install
 
 - **GIVEN** the compiled `tx` executable is running without a separate Bun executable on `PATH`
-- **WHEN** a marketplace with `package.json` is added
-- **THEN** dependency installation runs through the current executable in Bun mode and the marketplace can load
+- **WHEN** a selected per-plugin manifest requires dependency installation
+- **THEN** installation runs through the current executable in Bun mode from the selected manifest's directory and the marketplace can load
 
 ### Composition and Boundaries
 
@@ -191,7 +244,7 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 
 - Plugin sandboxing, signing, provenance, rollback, catalogs, and automatic updates are out of scope.
 - One installed checkout represents a marketplace's current version.
-- Per-plugin dependency environments within one marketplace are not required.
+- Dependency environment isolation between plugins is not required.
 - Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
 
 ## Open Questions
@@ -204,6 +257,7 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 - [Architecture](../architecture/)
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Change 0004: Automate Versioning and Publishing](../../changes/0004-automate-versioning-and-publishing.md)
+- [Change 0005: Install Per-Plugin Dependencies](../../changes/0005-install-per-plugin-dependencies.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -217,3 +271,4 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 | 2026-08-02 | Required bundled first-party plugins to remain standalone from core implementation modules | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-03 | Assigned all marketplace orchestration to an externalizable default plugin and reduced core to a generic transactional plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
 | 2026-08-03 | Renamed the canonical public plugin type contract to `@fx/tx/plugin` | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
+| 2026-08-04 | Added safe, ordered, deduplicated per-plugin dependency manifest installation | [0005-install-per-plugin-dependencies](../../changes/0005-install-per-plugin-dependencies.md) |
