@@ -2,7 +2,6 @@ import packageMetadata from "../package.json" with { type: "json" };
 import {
   CommandRegistry,
   dispatch,
-  EXIT_FAILURE,
   EXIT_SUCCESS,
   identityName,
 } from "./commands.ts";
@@ -31,7 +30,5 @@ export async function main(
   }
 
   const result = await dispatch(registry, argv, context);
-  return result.exitCode === EXIT_SUCCESS && failures.length > 0
-    ? EXIT_FAILURE
-    : result.exitCode;
+  return result.exitCode;
 }

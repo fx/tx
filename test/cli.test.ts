@@ -10,6 +10,7 @@ import {
   type CommandProcessContext,
   createProcessContext,
 } from "../src/context.ts";
+import type { PluginDefinition } from "../src/plugin.ts";
 
 function quietContext(): CommandProcessContext {
   return {
@@ -47,6 +48,15 @@ function capturedContext(env: Record<string, string | undefined> = {}): {
     },
     stdoutText: () => stdout,
     stderrText: () => stderr,
+  };
+}
+
+function failingDefinition(): PluginDefinition {
+  return {
+    identity: { name: "broken" },
+    load() {
+      throw new Error("boom");
+    },
   };
 }
 
@@ -113,7 +123,7 @@ test("main bootstraps bundled plugins only for its default registry", async () =
   expect(stdout).toBe("Usage: tx <command>\n");
 });
 
-test("default startup dispatches healthy plugins but returns failure for ordered load errors", async () => {
+test("default startup dispatches healthy plugins and reports ordered load errors without changing the exit code", async () => {
   const dataHome = await mkdtemp(join(tmpdir(), "tx-cli-plugins-"));
   const marketplaceRoot = join(dataHome, "tx", "marketplaces");
   try {
@@ -155,7 +165,7 @@ test("default startup dispatches healthy plugins but returns failure for ordered
         new CommandRegistry(),
         output.context,
       ),
-    ).toBe(1);
+    ).toBe(0);
     expect(output.stdoutText()).toBe("dispatched\n");
     expect(output.stderrText()).toBe(
       [
@@ -192,7 +202,7 @@ test("first-party commands survive later external collisions", async () => {
         new CommandRegistry(),
         output.context,
       ),
-    ).toBe(1);
+    ).toBe(0);
     expect(output.stdoutText()).toContain("  list\n");
     expect(output.stderrText()).toContain(
       'Error loading plugin marketplace/installed/personal/collision: Command "marketplace list" is already registered by marketplace',
@@ -200,6 +210,83 @@ test("first-party commands survive later external collisions", async () => {
   } finally {
     await rm(dataHome, { recursive: true, force: true });
   }
+});
+
+test("a plugin load failure preserves a failing handler's exit code", async () => {
+  const output = capturedContext();
+
+  expect(
+    await main(
+      ["fail"],
+      [
+        {
+          identity: { name: "healthy" },
+          load: () => (api) => {
+            api.command(["fail"], () => {
+              throw new Error("handler failed");
+            });
+          },
+        },
+        failingDefinition(),
+      ],
+      new CommandRegistry(),
+      output.context,
+    ),
+  ).toBe(1);
+  expect(output.stdoutText()).toBe("");
+  expect(output.stderrText()).toBe(
+    "Error loading plugin broken: boom\nError: handler failed\n",
+  );
+});
+
+test("a plugin load failure preserves the unknown-command exit code", async () => {
+  const output = capturedContext();
+
+  expect(
+    await main(
+      ["missing"],
+      [failingDefinition()],
+      new CommandRegistry(),
+      output.context,
+    ),
+  ).toBe(2);
+  expect(output.stdoutText()).toBe("");
+  expect(output.stderrText()).toBe(
+    [
+      "Error loading plugin broken: boom",
+      'Error: Unknown command "missing". Run "tx --help" for usage.',
+      "",
+    ].join("\n"),
+  );
+});
+
+test("longest-prefix resolution dispatches a registered parent when a failed plugin owned the deeper path", async () => {
+  // Dispatch selects the longest registered command path matching the start of
+  // argv (docs/specs/architecture/index.md, Command Resolution), so "top sub"
+  // resolves to the committed "top" command and the load failure of the plugin
+  // that would have owned "top sub" cannot turn the invocation into an error.
+  const output = capturedContext();
+
+  expect(
+    await main(
+      ["top", "sub"],
+      [
+        {
+          identity: { name: "healthy" },
+          load: () => (api) => {
+            api.command(["top"], (args, context) => {
+              context.stdout.write(`top ${JSON.stringify(args)}\n`);
+            });
+          },
+        },
+        failingDefinition(),
+      ],
+      new CommandRegistry(),
+      output.context,
+    ),
+  ).toBe(0);
+  expect(output.stdoutText()).toBe('top ["sub"]\n');
+  expect(output.stderrText()).toBe("Error loading plugin broken: boom\n");
 });
 
 test("the default process context reflects the current process", () => {

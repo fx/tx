@@ -15,8 +15,10 @@ The approved target architecture is implemented: the core is generic, the market
 - The host MUST initialize root and child plugin definitions in deterministic FIFO order.
 - Commands and child plugin definitions contributed during one plugin initialization MUST be staged atomically.
 - If initialization succeeds, the host MUST commit all staged contributions together.
-- If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure against its generic identity, and continue initializing unrelated plugins.
+- If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure on standard error against its generic identity, and continue initializing unrelated plugins.
 - A failed plugin MUST NOT prevent commands committed by healthy plugins from dispatching.
+- A failed plugin MUST NOT change the process exit code; the exit code MUST be the result of the dispatched command alone.
+- Because a failed plugin's staged commands are never committed, invoking a command owned only by that plugin MUST NOT run that plugin's handler; the invocation MUST resolve against the committed command tree like any unregistered path, so it MUST fail as an unknown command unless a committed command is a prefix of it.
 - Command collisions MUST reject the later plugin's staged contribution without modifying previously committed commands.
 - Plugins are trusted code and execute with the same process permissions as `tx`.
 
@@ -37,6 +39,12 @@ The approved target architecture is implemented: the core is generic, the market
 - **GIVEN** one plugin fails and another plugin initializes successfully
 - **WHEN** command dispatch begins
 - **THEN** the healthy plugin's commands remain available and the failed plugin's diagnostic identifies only its generic plugin identity
+
+#### Scenario: Failure exit code isolation
+
+- **GIVEN** one plugin fails to initialize and the invocation resolves to a committed command
+- **WHEN** dispatch produces that command's exit code
+- **THEN** the host reports the failure on standard error and exits with that exit code, whatever it is
 
 ### Public Plugin Contract
 
@@ -258,6 +266,7 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Change 0004: Automate Versioning and Publishing](../../changes/0004-automate-versioning-and-publishing.md)
 - [Change 0005: Install Per-Plugin Dependencies](../../changes/0005-install-per-plugin-dependencies.md)
+- [Change 0006: Isolate Plugin Failure Exit Codes](../../changes/0006-isolate-plugin-failure-exit-codes.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -272,3 +281,4 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 | 2026-08-03 | Assigned all marketplace orchestration to an externalizable default plugin and reduced core to a generic transactional plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
 | 2026-08-03 | Renamed the canonical public plugin type contract to `@fx/tx/plugin` | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
 | 2026-08-04 | Added safe, ordered, deduplicated per-plugin dependency manifest installation | [0005-install-per-plugin-dependencies](../../changes/0005-install-per-plugin-dependencies.md) |
+| 2026-08-04 | Extended plugin failure isolation to the process exit code | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |

@@ -51,3 +51,11 @@ changes:
     status: complete
     depends_on:
       - "0004"
+  - id: "0006"
+    name: isolate-plugin-failure-exit-codes
+    path: changes/0006-isolate-plugin-failure-exit-codes.md
+    description: Report plugin initialization failures as diagnostics without changing a dispatched command's exit code.
+    spec: plugin-system
+    status: complete
+    depends_on:
+      - "0005"
