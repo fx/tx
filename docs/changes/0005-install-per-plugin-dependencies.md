@@ -88,7 +88,7 @@ The implementation PR is intentionally cross-cutting but atomic: it updates mark
 ## Tasks
 
 - [ ] Implement and document per-plugin dependency manifests in one PR after explicit approval
-  - [ ] Record approval, set this change to `in-progress`, and preserve the one-PR scope.
+  - [x] Record approval, set this change to `in-progress`, and preserve the one-PR scope.
   - [ ] Extend marketplace-owned manifest validation and preparation with default and explicit package selection, strict containment/type/file validation, intentional missing-file skips, real-path deduplication, first-occurrence ordering, and validation-before-install.
   - [ ] Preserve marketplace staging cleanup, trusted lifecycle execution, marketplace diagnostics, compiled standalone Bun re-entry, and generic core/public API boundaries.
   - [ ] Add Bun unit, integration, failure, ordering, symlink-safety, staging-cleanup, and standalone executable coverage for every acceptance scenario while preserving required coverage.
