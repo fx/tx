@@ -113,7 +113,7 @@ test("main bootstraps bundled plugins only for its default registry", async () =
   expect(stdout).toBe("Usage: tx <command>\n");
 });
 
-test("default startup dispatches healthy plugins but returns failure for ordered load errors", async () => {
+test("default startup dispatches healthy plugins and reports ordered load errors without changing the exit code", async () => {
   const dataHome = await mkdtemp(join(tmpdir(), "tx-cli-plugins-"));
   const marketplaceRoot = join(dataHome, "tx", "marketplaces");
   try {
@@ -155,7 +155,7 @@ test("default startup dispatches healthy plugins but returns failure for ordered
         new CommandRegistry(),
         output.context,
       ),
-    ).toBe(1);
+    ).toBe(0);
     expect(output.stdoutText()).toBe("dispatched\n");
     expect(output.stderrText()).toBe(
       [
@@ -192,7 +192,7 @@ test("first-party commands survive later external collisions", async () => {
         new CommandRegistry(),
         output.context,
       ),
-    ).toBe(1);
+    ).toBe(0);
     expect(output.stdoutText()).toContain("  list\n");
     expect(output.stderrText()).toContain(
       'Error loading plugin marketplace/installed/personal/collision: Command "marketplace list" is already registered by marketplace',

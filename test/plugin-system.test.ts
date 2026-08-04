@@ -200,7 +200,7 @@ describe("source CLI plugin registration", () => {
       ).toBe(0);
 
       const list = runCli(dataHome, "marketplace", "list");
-      expect(list.exitCode).toBe(1);
+      expect(list.exitCode).toBe(0);
       expect(list.stdout).toContain(`external\t${source}\n`);
       expect(list.stderr).toContain(
         'Error loading plugin marketplace/installed/external/collision: Command "marketplace list" is already registered by marketplace; cannot register it for marketplace/installed/external/collision',
@@ -245,14 +245,14 @@ describe("source CLI plugin registration", () => {
       ).toBe(0);
 
       const shared = runCli(dataHome, "shared");
-      expect(shared.exitCode).toBe(1);
+      expect(shared.exitCode).toBe(0);
       expect(shared.stdout).toBe("alpha\n");
       expect(shared.stderr).toContain(
         'Error loading plugin marketplace/installed/personal/beta: Command "shared" is already registered by marketplace/installed/personal/alpha; cannot register it for marketplace/installed/personal/beta',
       );
 
       const earlier = runCli(dataHome, "alpha", "only");
-      expect(earlier.exitCode).toBe(1);
+      expect(earlier.exitCode).toBe(0);
       expect(earlier.stdout).toBe("kept\n");
 
       const rolledBack = runCli(dataHome, "beta", "only");
@@ -291,14 +291,21 @@ test("broken marketplaces remain removable without blocking healthy plugins", as
     ).toBe(0);
 
     const isolated = runCli(dataHome, "healthy", "run");
-    expect(isolated.exitCode).toBe(1);
+    expect(isolated.exitCode).toBe(0);
     expect(isolated.stdout).toBe("healthy\n");
     expect(isolated.stderr).toBe(
       'Error loading plugin marketplace/installed/broken/broken: Marketplace "broken" plugin "broken" failed: Plugin broken must default-export a function. Run "tx marketplace remove broken" to remove it.\n',
     );
 
+    const help = runCli(dataHome, "--help");
+    expect(help.exitCode).toBe(0);
+    expect(help.stdout).toContain("  healthy\n");
+    expect(help.stderr).toContain(
+      "Error loading plugin marketplace/installed/broken/broken",
+    );
+
     const removeBroken = runCli(dataHome, "marketplace", "remove", "broken");
-    expect(removeBroken.exitCode).toBe(1);
+    expect(removeBroken.exitCode).toBe(0);
     expect(removeBroken.stdout).toBe('Removed marketplace "broken".\n');
     expect(removeBroken.stderr).toContain(
       "Error loading plugin marketplace/installed/broken/broken",
