@@ -70,7 +70,7 @@ test("the production build is a standalone executable", async () => {
     expect(result.stderr.toString()).toBe("");
 
     const marketplace = join(temporaryRoot, "marketplace");
-    const dependency = join(marketplace, "dependency");
+    const dependency = join(marketplace, "plugins", "dependency");
     const dataDirectory = join(temporaryRoot, "data");
     await Promise.all([
       mkdir(dependency, { recursive: true }),
@@ -83,12 +83,16 @@ test("the production build is a standalone executable", async () => {
         JSON.stringify({
           plugins: [
             { name: "top", entry: "top.ts" },
-            { name: "nested", entry: "plugins/nested.ts" },
+            {
+              name: "nested",
+              entry: "plugins/nested.ts",
+              package: "plugins/package.json",
+            },
           ],
         }),
       ),
       writeFile(
-        join(marketplace, "package.json"),
+        join(marketplace, "plugins", "package.json"),
         '{"type":"module","dependencies":{"fixture-dependency":"file:./dependency"}}',
       ),
       writeFile(

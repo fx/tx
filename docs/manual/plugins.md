@@ -27,14 +27,20 @@ The canonical manifest is `.tx/config.json` at the repository root:
 {
   "plugins": [
     { "name": "notes", "entry": "plugins/notes.ts" },
-    { "name": "reports", "entry": "plugins/reports.ts" }
+    {
+      "name": "reports",
+      "entry": "plugins/reports/index.ts",
+      "package": "plugins/reports/package.json"
+    }
   ]
 }
 ```
 
 The `plugins` array must be non-empty. Give every entry a unique name that is one safe path component, and use a non-empty repository-relative entry path. Entries must resolve to regular files contained by the repository, including after symbolic links are resolved. A root `tx.marketplace.json` remains supported for older marketplaces, but `.tx/config.json` takes precedence when both exist.
 
-A marketplace needs no build step or package manifest. If `package.json` exists, `tx` runs `bun install` from the marketplace root before loading plugins; dependencies and install lifecycle scripts execute unsandboxed with `tx`'s permissions.
+A plugin needs no build step or package manifest. Without `package`, `tx` looks only for `package.json` beside the entry's real, fully resolved file path. It does not search parent directories, so a nested entry does not inherit a marketplace-root manifest. Use the optional `package` field to select an exact repository-relative `package.json` elsewhere in the marketplace. If `package` is present, its value must be a string. A valid contained override may point to an absent file to skip installation; non-string, empty, absolute, escaping, non-`package.json`, directory, broken-link, looping-link, and externally resolving values are errors that cause marketplace addition to fail.
+
+Before installing anything, `tx` validates all entries and selected package candidates. Existing manifests are resolved to regular contained files, deduplicated by real path, and installed sequentially in first plugin occurrence order with `bun install` running from each manifest's directory. Dependencies and install lifecycle scripts execute unsandboxed with `tx`'s permissions.
 
 ## Write a plugin
 
