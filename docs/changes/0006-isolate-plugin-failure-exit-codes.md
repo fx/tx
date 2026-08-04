@@ -5,7 +5,7 @@
 Report a plugin initialization failure as a standard-error diagnostic only, so it never changes the exit code of a command the CLI dispatched successfully. A command owned only by a failed plugin was never registered and therefore still fails as an unknown command with exit code `2`.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** 0005
 
 ## Approval Gate
@@ -77,13 +77,13 @@ No change is required in `src/commands.ts`, `src/plugins.ts`, `src/context.ts`, 
 
 ## Tasks
 
-- [ ] Isolate plugin initialization failures from the dispatched exit code in one PR
-  - [ ] Record approval, set this change to `in-progress`, and register it in `docs/index.yml` and `docs/index.md`.
-  - [ ] Return the dispatcher's exit code verbatim from `main` and drop the now-unused `EXIT_FAILURE` import in `src/cli.ts`.
-  - [ ] Flip every test that encodes the old escalation, keep the unknown-command, handler-failure, and marketplace-add failure guards unchanged, and add healthy-command, broken-marketplace removal, help-path, and standalone-executable coverage.
-  - [ ] Update the plugin-system and architecture specifications with the normative bullets, the new acceptance scenario, and both changelog rows.
-  - [ ] Rewrite the plugin manual's exit-code sentence.
-  - [ ] Run `bun run check`, then mark this change complete with the implementing PR number and sync both indexes.
+- [x] Isolate plugin initialization failures from the dispatched exit code in one PR
+  - [x] Record approval, set this change to `in-progress`, and register it in `docs/index.yml` and `docs/index.md`.
+  - [x] Return the dispatcher's exit code verbatim from `main` and drop the now-unused `EXIT_FAILURE` import in `src/cli.ts`.
+  - [x] Flip every test that encodes the old escalation, keep the unknown-command, handler-failure, and marketplace-add failure guards unchanged, and add healthy-command, broken-marketplace removal, help-path, and standalone-executable coverage.
+  - [x] Update the plugin-system and architecture specifications with the normative bullets, the new acceptance scenario, and both changelog rows.
+  - [x] Rewrite the plugin manual's exit-code sentence.
+  - [x] Run `bun run check`, then mark this change complete with the implementing PR number and sync both indexes.
 
 ## Open Questions
 

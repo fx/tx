@@ -12,6 +12,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 
 - Running `tx` without a command MUST show help.
 - Running an unknown command MUST fail with a non-zero exit code and show a useful error.
+- A plugin initialization failure MUST be reported on standard error and MUST NOT change the exit code of a successfully dispatched command.
 - Core and plugin commands MUST share one command tree.
 - Command paths MUST support one or more segments, such as `marketplace add` and `notes daily open`.
 - `--help` MUST work at the root and at every command node.
@@ -208,3 +209,4 @@ Commands are identified by arrays of path segments. Dispatch selects the longest
 | 2026-08-02 | Separated bundled feature implementations from generic core runtime infrastructure | [0002-add-plugin-marketplaces](../../changes/0002-add-plugin-marketplaces.md) |
 | 2026-08-03 | Made repository composition neutral and limited `src/` to the generic plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
 | 2026-08-03 | Defined scoped package publishing, Linux x64 release assets, version invariants, manual Release Please approvals, and exact-head dispatched CI | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
+| 2026-08-04 | Limited plugin initialization failures to standard-error diagnostics without changing dispatched exit codes | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |

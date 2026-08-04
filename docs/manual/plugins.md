@@ -62,7 +62,7 @@ The initialization API provides an immutable `identity`, read-only `env`, shared
 
 Use the initialization API's `dependencies.react` and `dependencies.ink` instead of importing separate runtime copies; the injected values share the host's React and Ink instances and include tx and dependency version metadata.
 
-Commands and child definitions registered during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed, and the invocation exits nonzero if any plugin failed.
+Commands and child definitions registered during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed on standard error and do not change the exit code of the command you ran, so a healthy command still exits `0` while a broken plugin is reported. Because a failed plugin registers nothing, invoking a command it would have owned fails as an unknown command with exit code `2`.
 
 ## Bundled plugins
 
