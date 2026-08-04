@@ -16,3 +16,4 @@
 | 0003 | [Externalize Marketplace Plugin](changes/0003-externalize-marketplace-plugin.md) | [Plugin System](specs/plugin-system/) | complete | 0002 |
 | 0004 | [Automate Versioning and Publishing](changes/0004-automate-versioning-and-publishing.md) | [Architecture](specs/architecture/) | complete | 0003 |
 | 0005 | [Install Per-Plugin Dependencies](changes/0005-install-per-plugin-dependencies.md) | [Plugin System](specs/plugin-system/) | complete | 0004 |
+| 0006 | [Isolate Plugin Failure Exit Codes](changes/0006-isolate-plugin-failure-exit-codes.md) | [Plugin System](specs/plugin-system/) | in-progress | 0005 |
