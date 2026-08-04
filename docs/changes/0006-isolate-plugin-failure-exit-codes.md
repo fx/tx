@@ -77,7 +77,7 @@ No change is required in `src/commands.ts`, `src/plugins.ts`, `src/context.ts`, 
 
 ## Tasks
 
-- [x] Isolate plugin initialization failures from the dispatched exit code in one PR
+- [x] Isolate plugin initialization failures from the dispatched exit code in one PR (PR #17)
   - [x] Record approval, set this change to `in-progress`, and register it in `docs/index.yml` and `docs/index.md`.
   - [x] Return the dispatcher's exit code verbatim from `main` and drop the now-unused `EXIT_FAILURE` import in `src/cli.ts`.
   - [x] Flip every test that encodes the old escalation, keep the unknown-command, handler-failure, and marketplace-add failure guards unchanged, and add healthy-command, broken-marketplace removal, help-path, and standalone-executable coverage.
