@@ -2,7 +2,16 @@ import { execFile } from "node:child_process";
 import type { Dirent, Stats } from "node:fs";
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  posix,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from "node:path";
 import { promisify } from "node:util";
 
 const executeFile = promisify(execFile);
@@ -22,10 +31,16 @@ export interface MarketplacePluginEntry {
   readonly name: string;
   readonly entry: string;
   readonly entryPath: string;
+  readonly package?: string;
 }
 
 export interface MarketplaceManifest {
   readonly plugins: readonly MarketplacePluginEntry[];
+}
+
+interface ResolvedMarketplaceManifest {
+  readonly manifest: MarketplaceManifest;
+  readonly packagePaths: readonly (string | undefined)[];
 }
 
 export type RunBun = (
@@ -170,9 +185,83 @@ async function resolvePluginEntry(
   return resolvedEntry;
 }
 
-export async function readMarketplaceManifest(
+async function deepestExistingAncestor(path: string): Promise<string> {
+  try {
+    await lstat(path);
+    return path;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return deepestExistingAncestor(dirname(path));
+  }
+}
+
+async function resolvePackageCandidate(
+  checkoutPath: string,
+  pluginName: string,
+  entryPath: string,
+  packageValue: unknown,
+  hasPackageOverride: boolean,
+): Promise<string | undefined> {
+  let candidate: string;
+  if (hasPackageOverride) {
+    if (
+      typeof packageValue !== "string" ||
+      !packageValue ||
+      isAbsolute(packageValue)
+    ) {
+      throw new Error(
+        `Plugin "${pluginName}" package must be a repository-relative path to package.json`,
+      );
+    }
+    candidate = resolve(checkoutPath, packageValue);
+    if (!isContainedPath(checkoutPath, candidate)) {
+      throw new Error(`Plugin "${pluginName}" package escapes the marketplace`);
+    }
+    if (basename(candidate) !== "package.json") {
+      throw new Error(
+        `Plugin "${pluginName}" package must name package.json exactly`,
+      );
+    }
+  } else {
+    candidate = resolve(dirname(entryPath), "package.json");
+  }
+
+  let metadata: Stats;
+  let resolvedPackage: string;
+  try {
+    [metadata, resolvedPackage] = await Promise.all([
+      stat(candidate),
+      realpath(candidate),
+    ]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const existingAncestor = await deepestExistingAncestor(candidate);
+    const resolvedAncestor = await realpath(existingAncestor);
+    if (!isContainedPath(checkoutPath, resolvedAncestor)) {
+      throw new Error(`Plugin "${pluginName}" package escapes the marketplace`);
+    }
+    return undefined;
+  }
+
+  if (!metadata.isFile()) {
+    throw new Error(
+      `Plugin "${pluginName}" package is not a regular file: ${hasPackageOverride ? packageValue : candidate}`,
+    );
+  }
+  if (!isContainedPath(checkoutPath, resolvedPackage)) {
+    throw new Error(`Plugin "${pluginName}" package escapes the marketplace`);
+  }
+  if (basename(resolvedPackage) !== "package.json") {
+    throw new Error(
+      `Plugin "${pluginName}" package must resolve to package.json`,
+    );
+  }
+  return resolvedPackage;
+}
+
+async function resolveMarketplaceManifest(
   checkout: string,
-): Promise<MarketplaceManifest> {
+): Promise<ResolvedMarketplaceManifest> {
   let checkoutPath: string;
   let selectedManifestFilename = manifestFilename;
   let document: unknown;
@@ -221,13 +310,18 @@ export async function readMarketplaceManifest(
 
   const names = new Set<string>();
   const plugins: MarketplacePluginEntry[] = [];
+  const packagePaths: (string | undefined)[] = [];
   for (const [index, value] of pluginValues.entries()) {
     if (!isRecord(value)) {
       throw new Error(
         `${selectedManifestFilename} plugin ${index + 1} must be an object`,
       );
     }
-    const candidate = value as { name?: unknown; entry?: unknown };
+    const candidate = value as {
+      name?: unknown;
+      entry?: unknown;
+      package?: unknown;
+    };
     if (
       typeof candidate.name !== "string" ||
       !isSafeMarketplaceName(candidate.name)
@@ -243,21 +337,45 @@ export async function readMarketplaceManifest(
       throw new Error(`Plugin "${candidate.name}" entry must be a string`);
     }
 
+    const hasPackageOverride = Object.hasOwn(value, "package");
+    if (hasPackageOverride && typeof candidate.package !== "string") {
+      throw new Error(`Plugin "${candidate.name}" package must be a string`);
+    }
+    const entryPath = await resolvePluginEntry(
+      checkoutPath,
+      candidate.name,
+      candidate.entry,
+    );
+    const packagePath = await resolvePackageCandidate(
+      checkoutPath,
+      candidate.name,
+      entryPath,
+      candidate.package,
+      hasPackageOverride,
+    );
+
     names.add(candidate.name);
     plugins.push(
       Object.freeze({
         name: candidate.name,
         entry: candidate.entry,
-        entryPath: await resolvePluginEntry(
-          checkoutPath,
-          candidate.name,
-          candidate.entry,
-        ),
+        entryPath,
+        ...(hasPackageOverride ? { package: candidate.package as string } : {}),
       }),
     );
+    packagePaths.push(packagePath);
   }
 
-  return Object.freeze({ plugins: Object.freeze(plugins) });
+  return Object.freeze({
+    manifest: Object.freeze({ plugins: Object.freeze(plugins) }),
+    packagePaths: Object.freeze(packagePaths),
+  });
+}
+
+export async function readMarketplaceManifest(
+  checkout: string,
+): Promise<MarketplaceManifest> {
+  return (await resolveMarketplaceManifest(checkout)).manifest;
 }
 
 export async function runBun(
@@ -287,10 +405,13 @@ export async function prepareMarketplace(
   checkout: string,
   options: PrepareMarketplaceOptions = {},
 ): Promise<void> {
-  await readMarketplaceManifest(checkout);
-  if (await pathExists(resolve(checkout, "package.json"))) {
+  const { packagePaths } = await resolveMarketplaceManifest(checkout);
+  const installed = new Set<string>();
+  for (const packagePath of packagePaths) {
+    if (packagePath === undefined || installed.has(packagePath)) continue;
+    installed.add(packagePath);
     await (options.runBun ?? runBun)(["install"], {
-      cwd: checkout,
+      cwd: dirname(packagePath),
       env: options.env ?? process.env,
     });
   }
