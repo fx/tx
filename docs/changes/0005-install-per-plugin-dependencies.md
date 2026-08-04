@@ -2,17 +2,19 @@
 
 ## Summary
 
-Install marketplace dependencies from the package manifest selected for each configured plugin rather than from one marketplace-root manifest. This draft records the proposed contract and MUST remain unimplemented until the user approves the safety distinction for missing explicit overrides.
+Install marketplace dependencies from the package manifest selected for each configured plugin rather than from one marketplace-root manifest. This approved contract records the required safety distinction for missing explicit overrides.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** in-progress
 **Depends On:** 0004
 
 ## Approval Gate
 
-This change MUST NOT move to `in-progress`, and implementation MUST NOT begin, until the user explicitly approves this contract. Approval MUST include the distinction that an explicit `package` override which is a syntactically valid, repository-contained path to an absent `package.json` skips dependency installation, while a wrong-type, empty, absolute, escaping, directory, wrong-filename, or externally resolving path remains an error.
+**Approved:** 2026-08-04
 
-After approval, the implementation PR MUST update this section with the approval date and MUST change the status to `in-progress`. Completion still requires every task and acceptance scenario below.
+The user explicitly approved the full contract and the distinction that an explicit `package` override which is a syntactically valid, repository-contained path to an absent `package.json` skips dependency installation, while a wrong-type, empty, absolute, escaping, directory, wrong-filename, or externally resolving path remains an error.
+
+Completion still requires every task and acceptance scenario below.
 
 ## Motivation
 
@@ -37,7 +39,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ### Functional Requirements
 
-The [Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) and [Composition and Boundaries](../specs/plugin-system/index.md#composition-and-boundaries) sections own the current marketplace behavior and architectural boundary. Pending approval, this draft owns the proposed delta; the same implementation PR MUST move the approved standing behavior and acceptance scenarios into those owning spec sections rather than leave duplicate normative contracts here.
+The [Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) and [Composition and Boundaries](../specs/plugin-system/index.md#composition-and-boundaries) sections own the current marketplace behavior and architectural boundary. This approved change owns the delta; the same implementation PR MUST move the approved standing behavior and acceptance scenarios into those owning spec sections rather than leave duplicate normative contracts here.
 
 - Each configured plugin MAY declare an OPTIONAL `package` field containing a repository-relative path to the exact `package.json` selected for that plugin.
 - Without `package`, the selected candidate MUST be `package.json` in the directory containing the plugin's real, fully resolved entry path. A root entry therefore selects the root candidate naturally; a nested entry MUST NOT search parent directories or fall back to the marketplace root.
@@ -56,7 +58,7 @@ The [Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-p
 
 ## Acceptance Scenarios
 
-These scenarios define the proposed behavior for approval. Once approved, the implementation PR MUST move them to the owning plugin-system specification and replace this section with a link to those authoritative scenarios.
+These scenarios define the approved behavior. The implementation PR MUST move them to the owning plugin-system specification and replace this section with a link to those authoritative scenarios.
 
 ### Default root package
 
@@ -132,7 +134,7 @@ The implementation PR is intentionally cross-cutting but atomic: it updates mark
   - **Alternatives considered:** Directory overrides were rejected because they introduce filename inference and a second path form.
 - **Decision:** A valid contained explicit override to an absent file skips installation, but malformed or unsafe overrides fail validation.
   - **Why:** This is the user's selected absence policy without allowing security errors or authoring mistakes to masquerade as optional dependencies.
-  - **Alternatives considered:** Rejecting every missing override was not selected; skipping every invalid override was rejected as unsafe. This decision requires explicit user approval before implementation.
+  - **Alternatives considered:** Rejecting every missing override was not selected; skipping every invalid override was rejected as unsafe. The user explicitly approved this decision on 2026-08-04.
 - **Decision:** Installations are deduplicated by real manifest path in first plugin occurrence order.
   - **Why:** Aliases and contained symlinks cannot trigger duplicate lifecycle execution, while manifest order remains deterministic.
   - **Alternatives considered:** Deduplicating lexical paths would miss aliases; sorting manifests would discard author-controlled first-use order.
@@ -164,7 +166,7 @@ The implementation PR is intentionally cross-cutting but atomic: it updates mark
 
 ## Open Questions
 
-- [ ] **Approval required:** Does the user approve the explicit missing-override safety distinction and the complete contract above for implementation in one PR?
+- [x] **Approved 2026-08-04:** The user approved the explicit missing-override safety distinction and the complete contract above for implementation in one PR.
 
 ## References
 
