@@ -193,6 +193,25 @@ describe("initializePlugins", () => {
     expect(retainedAPI?.dependencies).toBe(coreDependencies);
   });
 
+  test("gives the command context the injected environment", async () => {
+    const env = { TX_INJECTED: "yes" };
+    let retainedAPI: PluginAPI | undefined;
+
+    const { failures } = await initializePlugins(
+      [
+        definition("ambient", (api) => {
+          retainedAPI = api;
+        }),
+      ],
+      { env },
+    );
+
+    expect(failures).toEqual([]);
+    expect(retainedAPI?.env).toBe(env);
+    expect(retainedAPI?.context.env).toBe(env);
+    expect(retainedAPI?.context.cwd).toBe(process.cwd());
+  });
+
   test("accumulates repeated registration calls onto one namespace", async () => {
     const { namespaces, failures } = await initializePlugins([
       definition("notes", ({ command }) => {
@@ -237,6 +256,52 @@ describe("initializePlugins", () => {
 
     await Promise.resolve();
     expect(landed).toBe(true);
+  });
+
+  test("rejects a thenable builder even when the plugin swallows the error", async () => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("swallowing", ({ command }) => {
+        try {
+          command(async (namespace) => {
+            namespace.command("staged-before-await");
+            await Promise.resolve();
+          });
+        } catch {
+          // A plugin cannot catch its way past a registration violation.
+        }
+      }),
+    ]);
+
+    expect(
+      failures.map(({ identity, message }) => [identity.name, message]),
+    ).toEqual([
+      [
+        "swallowing",
+        "Plugin swallowing must build its namespace synchronously; the builder returned a promise",
+      ],
+    ]);
+    expect(namespaces).toEqual([]);
+  });
+
+  test("keeps a rejected builder's promise from faulting the host", async () => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("rejecting", ({ command }) => {
+        command(async () => {
+          await Promise.resolve();
+          throw new Error("builder rejected after the host moved on");
+        });
+      }),
+      definition("healthy", ({ command }) => command(() => {})),
+    ]);
+
+    expect(failures.map((failure) => failure.identity.name)).toEqual([
+      "rejecting",
+    ]);
+    expect(namespaceNames(namespaces)).toEqual(["healthy"]);
+
+    // Flush the builder's own rejection; an unobserved one would fault the
+    // process rather than staying isolated to the plugin that caused it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   test.each([

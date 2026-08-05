@@ -93,7 +93,12 @@ export async function initializePlugins(
   options: InitializePluginsOptions = {},
 ): Promise<InitializedPlugins> {
   const processContext = options.context ?? createProcessContext();
-  const env = options.env ?? processContext.env;
+  // One environment for both `PluginAPI.env` and the command context, so an
+  // injected environment cannot reach one and miss the other.
+  const env = (options.env ?? processContext.env) as Record<
+    string,
+    string | undefined
+  >;
   const dependencies = options.dependencies ?? coreDependencies;
   const namespaces: PluginNamespace[] = [];
   const claimed = new Map<string, PluginNamespace>();
@@ -117,11 +122,12 @@ export async function initializePlugins(
 
     let staging = true;
     let namespace: Command | undefined;
+    let violation: Error | undefined;
     const children: PluginDefinition[] = [];
     const api: PluginAPI = Object.freeze({
       identity,
       env,
-      context: { ...processContext, plugin: identity },
+      context: { ...processContext, env, plugin: identity },
       dependencies,
       command(build: (namespace: Command) => void) {
         if (!staging) {
@@ -132,9 +138,15 @@ export async function initializePlugins(
         namespace ??= claimNamespace(identity, dependencies);
         const result: unknown = build(namespace);
         if (isThenable(result)) {
-          throw new Error(
+          // The builder's own promise stays the plugin's business, but an
+          // unobserved rejection would fault the host, so its outcome is
+          // swallowed here. The violation is remembered as well as thrown,
+          // so catching the throw cannot commit the contribution anyway.
+          void Promise.resolve(result).catch(() => {});
+          violation ??= new Error(
             `Plugin ${identity.name} must build its namespace synchronously; the builder returned a promise`,
           );
+          throw violation;
         }
       },
       plugin(child: PluginDefinition) {
@@ -154,6 +166,7 @@ export async function initializePlugins(
       }
       await plugin(api);
       staging = false;
+      if (violation) throw violation;
 
       if (namespace) {
         verifyNamespaceName(namespace, identity);
