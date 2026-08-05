@@ -117,7 +117,7 @@ Neither check can catch a synchronous builder that schedules work and returns cl
   - [x] Add tests asserting the injected module is the host instance and that the version metadata matches the manifest
   - [x] Confirm `test/plugin-consumer.test.ts` still type-checks an external consumer with no parser dependency of its own
 
-- [x] Delegate dispatch to plugin namespaces
+- [x] Delegate dispatch to plugin namespaces (PR #20)
   - [x] Replace the trie in `src/commands.ts` with root-program construction, first-argument validation, recursive tree hardening, and exit-code mapping
   - [x] Test that an unrecognized first argument reports the error and fails even when a root option follows it, covering both root options in both forms
   - [x] Delete `CommandRegistry`, `normalizeCommandPath`, and `EXIT_USAGE`
