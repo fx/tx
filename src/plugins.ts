@@ -57,16 +57,12 @@ function isThenable(value: unknown): boolean {
   );
 }
 
-function claimNamespace(
-  identity: PluginIdentity,
-  dependencies: CoreDependencies,
-): Command {
-  if (!namespaceNamePattern.test(identity.name)) {
-    throw new Error(
-      `Plugin ${identityName(identity)} cannot claim namespace "${identity.name}"; a namespace name must not be empty, contain whitespace, or begin with "-"`,
-    );
-  }
-  return new dependencies.commander.Command(identity.name);
+function namespaceClaimError(identity: PluginIdentity): Error | undefined {
+  return namespaceNamePattern.test(identity.name)
+    ? undefined
+    : new Error(
+        `Plugin ${identityName(identity)} cannot claim namespace "${identity.name}"; a namespace name must not be empty, contain whitespace, or begin with "-"`,
+      );
 }
 
 /**
@@ -124,6 +120,14 @@ export async function initializePlugins(
     let namespace: Command | undefined;
     let violation: Error | undefined;
     const children: PluginDefinition[] = [];
+    /**
+     * Remember a registration violation as well as raising it. A plugin that
+     * catches the throw must still fail rather than commit what it staged.
+     */
+    const reject = (error: Error): never => {
+      violation ??= error;
+      throw violation;
+    };
     const api: PluginAPI = Object.freeze({
       identity,
       env,
@@ -135,18 +139,22 @@ export async function initializePlugins(
             `Plugin ${identity.name} cannot register commands after initialization`,
           );
         }
-        namespace ??= claimNamespace(identity, dependencies);
+        if (!namespace) {
+          const claimError = namespaceClaimError(identity);
+          if (claimError) reject(claimError);
+          namespace = new dependencies.commander.Command(identity.name);
+        }
         const result: unknown = build(namespace);
         if (isThenable(result)) {
           // The builder's own promise stays the plugin's business, but an
           // unobserved rejection would fault the host, so its outcome is
-          // swallowed here. The violation is remembered as well as thrown,
-          // so catching the throw cannot commit the contribution anyway.
+          // swallowed here.
           void Promise.resolve(result).catch(() => {});
-          violation ??= new Error(
-            `Plugin ${identity.name} must build its namespace synchronously; the builder returned a promise`,
+          reject(
+            new Error(
+              `Plugin ${identity.name} must build its namespace synchronously; the builder returned a promise`,
+            ),
           );
-          throw violation;
         }
       },
       plugin(child: PluginDefinition) {

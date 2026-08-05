@@ -258,6 +258,33 @@ describe("initializePlugins", () => {
     expect(landed).toBe(true);
   });
 
+  test("rejects an unusable namespace name even when the plugin swallows the error", async () => {
+    let childLoaded = false;
+
+    const { namespaces, failures } = await initializePlugins([
+      definition("two words", ({ command, plugin, identity }) => {
+        try {
+          command(() => {});
+        } catch {
+          // A plugin cannot catch its way past a registration violation.
+        }
+        plugin({
+          identity: { name: "ghost-child", parent: identity },
+          load: () => {
+            childLoaded = true;
+            return () => {};
+          },
+        });
+      }),
+    ]);
+
+    expect(failures.map((failure) => failure.message)).toEqual([
+      'Plugin two words cannot claim namespace "two words"; a namespace name must not be empty, contain whitespace, or begin with "-"',
+    ]);
+    expect(namespaces).toEqual([]);
+    expect(childLoaded).toBe(false);
+  });
+
   test("rejects a thenable builder even when the plugin swallows the error", async () => {
     const { namespaces, failures } = await initializePlugins([
       definition("swallowing", ({ command }) => {

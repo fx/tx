@@ -1,4 +1,4 @@
-import type { Command } from "commander";
+import type { Command, CommanderError } from "commander";
 import type { CommandProcessContext } from "./context.ts";
 import type { CoreDependencies, PluginIdentity } from "./plugin.ts";
 
@@ -15,19 +15,26 @@ const rootOptions = new Set(["--help", "-h", "--version", "-V"]);
  * Parser outcomes that answer a help request. The parser reports the same code
  * whether it printed help because the user asked for it or because it could not
  * make sense of the arguments, so the code alone does not settle the exit
- * status; `helpDestination` does. Everything the parser reports outside these
- * codes and `commander.version` is a failure. Mapping by code keeps the CLI's
- * contract independent of the parser's own exit numbers.
+ * status; the stream it printed on does. Everything the parser reports outside
+ * these codes and `commander.version` is a failure. Mapping by code keeps the
+ * CLI's contract independent of the parser's own exit numbers.
  */
 const helpParserCodes = new Set(["commander.help", "commander.helpDisplayed"]);
 
-/**
- * Where the parser sent the help it printed last. It answers a request on
- * standard output and rejects arguments it could not use on standard error,
- * which is the signal the shared code lacks.
- */
-interface HelpDestination {
-  standardError: boolean;
+/** What the parser reported during one dispatch. */
+interface ParserSignals {
+  /**
+   * The exits the parser raised in place of terminating the process. Only
+   * these are parser outcomes; an error a command threw is a command failure
+   * however closely it resembles one.
+   */
+  readonly exits: WeakSet<object>;
+  /**
+   * Whether the parser sent the help it printed last to standard error. It
+   * answers a request on standard output and rejects arguments it could not
+   * use on standard error, which is the signal the shared code lacks.
+   */
+  helpOnStandardError: boolean;
 }
 
 export interface PluginNamespace {
@@ -86,9 +93,15 @@ export function createRootProgram(
 function hardenCommandTree(
   command: Command,
   context: CommandProcessContext,
-  help: HelpDestination,
+  signals: ParserSignals,
 ): void {
-  command.exitOverride();
+  command.exitOverride((exit: CommanderError) => {
+    signals.exits.add(exit);
+    // The parser reports a spawned executable subcommand's failure from an
+    // event handler, where throwing would have nowhere to land; the default
+    // override skips it and so does this one.
+    if (exit.code !== "commander.executeSubCommandAsync") throw exit;
+  });
   command.configureOutput({
     writeOut(value: string) {
       context.stdout.write(value);
@@ -98,19 +111,20 @@ function hardenCommandTree(
     },
   });
   command.addHelpText("before", ({ error }) => {
-    help.standardError = error;
+    signals.helpOnStandardError = error;
     return "";
   });
   for (const child of command.commands) {
-    hardenCommandTree(child, context, help);
+    hardenCommandTree(child, context, signals);
   }
 }
 
-function parserErrorCode(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined;
-  const { code } = error as Error & { code?: unknown };
-  return typeof code === "string" && code.startsWith("commander.")
-    ? code
+function parserExit(
+  error: unknown,
+  signals: ParserSignals,
+): CommanderError | undefined {
+  return typeof error === "object" && error !== null && signals.exits.has(error)
+    ? (error as CommanderError)
     : undefined;
 }
 
@@ -124,8 +138,11 @@ export async function dispatch(
   argv: readonly string[],
   context: CommandProcessContext,
 ): Promise<DispatchResult> {
-  const help: HelpDestination = { standardError: false };
-  hardenCommandTree(program, context, help);
+  const signals: ParserSignals = {
+    exits: new WeakSet(),
+    helpOnStandardError: false,
+  };
+  hardenCommandTree(program, context, signals);
 
   const first = argv[0];
   if (first === undefined) {
@@ -147,13 +164,13 @@ export async function dispatch(
     await program.parseAsync(argv, { from: "user" });
     return { exitCode: EXIT_SUCCESS };
   } catch (error) {
-    const code = parserErrorCode(error);
-    if (code === undefined) {
+    const exit = parserExit(error, signals);
+    if (!exit) {
       writeError(context.stderr, error);
       return { exitCode: EXIT_FAILURE };
     }
-    if (code === "commander.version") return { exitCode: EXIT_SUCCESS };
-    if (helpParserCodes.has(code) && !help.standardError) {
+    if (exit.code === "commander.version") return { exitCode: EXIT_SUCCESS };
+    if (helpParserCodes.has(exit.code) && !signals.helpOnStandardError) {
       return { exitCode: EXIT_SUCCESS };
     }
     return { exitCode: EXIT_FAILURE };

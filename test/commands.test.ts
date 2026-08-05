@@ -442,20 +442,25 @@ describe("exit-code mapping", () => {
     expect(context.stderrText()).toContain("Usage: tx [options] [command]");
   });
 
-  test("does not mistake a command's own error code for a parser outcome", async () => {
-    const context = captureContext();
-    const program = createRootProgram(coreDependencies, [
-      namespace("notes", (command) =>
-        command.action(() => {
-          throw Object.assign(new Error("disk missing"), { code: "ENOENT" });
-        }),
-      ),
-    ]);
+  // A command's error is a command failure however closely it resembles one
+  // of the parser's own exits, which only the host's override can raise.
+  test.each(["ENOENT", "commander.version", "commander.helpDisplayed"])(
+    "does not mistake a command's own error code %p for a parser outcome",
+    async (code) => {
+      const context = captureContext();
+      const program = createRootProgram(coreDependencies, [
+        namespace("notes", (command) =>
+          command.action(() => {
+            throw Object.assign(new Error("disk missing"), { code });
+          }),
+        ),
+      ]);
 
-    expect(await dispatch(program, ["notes"], context)).toEqual({
-      exitCode: EXIT_FAILURE,
-    });
-    expect(context.stdoutText()).toBe("");
-    expect(context.stderrText()).toBe("Error: disk missing\n");
-  });
+      expect(await dispatch(program, ["notes"], context)).toEqual({
+        exitCode: EXIT_FAILURE,
+      });
+      expect(context.stdoutText()).toBe("");
+      expect(context.stderrText()).toBe("Error: disk missing\n");
+    },
+  );
 });
