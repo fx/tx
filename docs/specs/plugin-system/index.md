@@ -20,7 +20,7 @@ The namespace ownership model below — one namespace per plugin, named after it
 - If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure on standard error against its generic identity, and continue initializing unrelated plugins.
 - A failed plugin MUST NOT prevent commands committed by healthy plugins from dispatching.
 - A failed plugin MUST NOT change the process exit code; the exit code MUST be the result of the dispatched command alone.
-- Because a failed plugin's namespace is never committed, invoking it MUST NOT run any of that plugin's code; the invocation MUST fail as an unrecognized namespace with a non-zero exit code.
+- Because a failed plugin's namespace is never committed, invoking it MUST NOT run any command that plugin staged; the invocation MUST resolve as an unrecognized namespace.
 - Namespace collisions MUST reject the later plugin's staged contribution without modifying previously committed namespaces.
 - Plugins are trusted code and execute with the same process permissions as `tx`.
 
@@ -116,10 +116,9 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 What a user can type and what the CLI does with it — argument delegation, help, output routing, and exit codes — is owned by [Architecture: Core CLI](../architecture/index.md#core-cli) and is not restated here. This section owns only how a namespace comes to exist and who holds it.
 
-- All committed namespaces MUST live in one root program.
 - A namespace MUST become reachable only when the plugin that claims it is committed.
 - Claiming an already committed namespace MUST fail and identify both generic plugin owners.
-- The description shown for a namespace in root help MUST be the one its owner supplied.
+- A plugin MAY supply a description for its namespace.
 
 #### Scenario: Namespace collision
 

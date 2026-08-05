@@ -2,7 +2,7 @@
 
 ## Summary
 
-Replace the core command trie with a Commander-based root program that resolves only the first argument to a plugin namespace and hands every remaining argument to that plugin, including options and help requests. Each plugin owns exactly one namespace named after its identity, builds its own command tree, and receives the parser both pre-built and injected.
+Replace the core command trie with a Commander-based root program that resolves only the first argument to a plugin namespace and hands every remaining argument to that plugin, including options and help requests. Each plugin that defines commands owns one namespace named after its identity, builds its own command tree, and receives the parser both pre-built and injected.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
 **Status:** draft
@@ -58,7 +58,7 @@ What implementing them requires of this change:
 
 ### Approach
 
-`src/commands.ts` loses `CommandRegistry`, `normalizeCommandPath`, and the trie entirely. In its place, core builds one root program, collects one namespace command per successfully initialized plugin, and parses.
+`src/commands.ts` loses `CommandRegistry`, `normalizeCommandPath`, and the trie entirely. In its place, core builds one root program, collects a namespace command from each successfully initialized plugin that staged commands, validates the first argument, and parses. Plugins that stage no commands — the marketplace's intermediate discovery definitions among them — contribute nothing to the root and MUST NOT surface as empty namespaces.
 
 Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a plugin's namespace command is built into a staged object and only attached to the root program if initialization succeeds. The queue, FIFO ordering, failure isolation, and diagnostics are untouched.
 
@@ -73,8 +73,12 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
   - **Alternatives considered:** Extending the existing trie was rejected — descriptions, typed options, variadic arguments, and per-level help are exactly the surface a parser library exists to provide, and the manual said as much. `citty` and `cac` were considered and rejected for weaker nested-subcommand help and smaller ecosystems.
 
 - **Decision:** The root program enables positional-option scoping, and each plugin namespace enables pass-through.
-  - **Why:** This is what makes "everything after the plugin name belongs to the plugin" literally true. Verified experimentally: without positional scoping, `tx notes --version` prints tx's version and the plugin never sees the flag; with it, the plugin receives `--version` as its own argument.
+  - **Why:** This is what makes "everything after the plugin name belongs to the plugin" literally true. Verified experimentally: without positional scoping, `tx notes --version` prints tx's version and the plugin never sees the flag; with it, the flag reaches the plugin's own parser, which accepts or rejects it on the plugin's terms.
   - **Alternatives considered:** Slicing `argv` at the namespace and calling the plugin's parser directly was rejected because the root then cannot generate a namespace listing with descriptions, and every plugin has to re-derive its own program name for usage lines.
+
+- **Decision:** Core validates the first argument itself, before handing the vector to the parser.
+  - **Why:** Positional scoping engages only after a *recognized* namespace, so it does not cover an unrecognized one. Verified experimentally: with scoping enabled but no first-argument check, `tx missing --version` prints the version and exits `0`, and `tx missing --help` prints root help and exits `0`, instead of reporting that `missing` is not a namespace. Only `tx missing` on its own reports the error. A first-argument check closes the gap without weakening delegation, because it inspects exactly one token and never the remainder.
+  - **Alternatives considered:** Root pass-through was rejected because it also suppresses root help and version in the positions where they must work. Accepting the behavior was rejected: a typo'd namespace silently succeeding is worse than the bug this change removes.
 
 - **Decision:** Core hardens the entire assembled command tree — output routing and termination override — immediately before parsing, recursively.
   - **Why:** Attaching a pre-built command does **not** propagate these settings to it or to subcommands it already created. Verified experimentally: an un-hardened plugin subcommand printing help calls `process.exit()` directly, killing the host mid-parse and bypassing the injected streams entirely. A single recursive pass after all plugins have registered is the only point where the full tree is known.
@@ -94,7 +98,7 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
 
 ### Non-Goals
 
-- Lazy plugin initialization. Every plugin still initializes on every invocation to build the root listing; making that lazy is deferred to a future change and recorded as an open question.
+- Lazy plugin initialization. Every plugin still initializes on every invocation that reaches dispatch, in order to build the root listing; the root version fast path continues to return before initialization. Making initialization lazy is deferred to a future change and recorded as an open question.
 - Removing `PluginAPI.env` even though `PluginAPI.context.env` now overlaps it. It is public, harmless, and its removal is unrelated churn.
 - Shell completion, colored help, and help-text theming. All become reachable once the parser is in place; none are specified here.
 - Changing the marketplace plugin's storage, discovery, installation, or recovery behavior. This change touches only how its commands are declared and parsed.
@@ -110,7 +114,8 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
   - [ ] Confirm `test/plugin-consumer.test.ts` still type-checks an external consumer with no parser dependency of its own
 
 - [ ] Delegate dispatch to plugin namespaces
-  - [ ] Replace the trie in `src/commands.ts` with root-program construction, recursive tree hardening, and exit-code mapping
+  - [ ] Replace the trie in `src/commands.ts` with root-program construction, first-argument validation, recursive tree hardening, and exit-code mapping
+  - [ ] Test that an unrecognized first argument reports the error and fails even when a root option follows it, covering both root options in both forms
   - [ ] Delete `CommandRegistry`, `normalizeCommandPath`, and `EXIT_USAGE`
   - [ ] Change `PluginAPI.command` to the namespace builder and add `PluginAPI.context` in `src/plugin.ts`
   - [ ] Derive each namespace from the plugin's own identity name in `src/plugins.ts`, reject identity names the spec disallows, claim a namespace only for plugins that define commands, and keep staging atomic
@@ -127,7 +132,7 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
 
 ## Open Questions
 
-- [ ] Should plugin initialization become lazy once the root listing can be cached? Every plugin currently loads on every invocation solely to contribute its namespace and description. Deferring this keeps the change focused, but startup cost grows linearly with installed plugins.
+- [ ] Should plugin initialization become lazy once the root listing can be cached? Every plugin currently loads on every invocation that reaches dispatch, solely to contribute its namespace and description. Deferring this keeps the change focused, but startup cost grows linearly with installed plugins.
 - [ ] Should the host offer a shared convention for plugins that expose a single action at their namespace root (`tx notes` doing work with no subcommand)? Reachable today without host support; worth revisiting if several plugins hand-roll it.
 
 ## References

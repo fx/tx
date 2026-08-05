@@ -221,7 +221,7 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 ## Open Questions
 
 - Additional supported operating systems and architectures may be decided in a future change.
-- Plugin initialization is eager: every installed plugin loads on every invocation to contribute its namespace and description. Making it lazy is worth revisiting if startup cost comes to justify the added caching contract.
+- Plugin initialization is eager: on every invocation that reaches dispatch, every installed plugin loads to contribute its namespace and description. Making it lazy is worth revisiting if startup cost comes to justify the added caching contract.
 - Automatic marketplace updates are out of scope initially.
 
 ## References
