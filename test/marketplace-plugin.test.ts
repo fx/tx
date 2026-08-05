@@ -5,10 +5,15 @@ import {
   createMarketplacePlugin,
   type MarketplaceOperations,
 } from "../plugins/marketplace/index.ts";
-import { CommandRegistry, dispatch } from "../src/commands.ts";
+import {
+  createRootProgram,
+  dispatch,
+  EXIT_FAILURE,
+  EXIT_SUCCESS,
+} from "../src/commands.ts";
 import type { CommandProcessContext } from "../src/context.ts";
-import { initializePlugins } from "../src/plugins.ts";
-import { temporaryDirectory } from "./helpers.ts";
+import { coreDependencies, initializePlugins } from "../src/plugins.ts";
+import { captureContext, temporaryDirectory } from "./helpers.ts";
 
 class RecordingManager implements MarketplaceOperations {
   readonly calls: unknown[][] = [];
@@ -32,113 +37,151 @@ class RecordingManager implements MarketplaceOperations {
   }
 }
 
-function outputContext(): CommandProcessContext & {
-  stdoutText(): string;
-  stderrText(): string;
-} {
-  let stdout = "";
-  let stderr = "";
+async function setup(
+  context: CommandProcessContext,
+  manager = new RecordingManager(),
+) {
+  const { namespaces, failures } = await initializePlugins(
+    [createMarketplacePlugin({ manager })],
+    { context },
+  );
+  expect(failures).toEqual([]);
   return {
-    cwd: "/work",
-    env: {},
-    stdin: {} as NodeJS.ReadStream,
-    stdout: {
-      write(value: string) {
-        stdout += value;
-        return true;
-      },
-    } as NodeJS.WriteStream,
-    stderr: {
-      write(value: string) {
-        stderr += value;
-        return true;
-      },
-    } as NodeJS.WriteStream,
-    stdoutText: () => stdout,
-    stderrText: () => stderr,
+    manager,
+    program: createRootProgram(coreDependencies, namespaces),
   };
 }
 
-async function setup(manager = new RecordingManager()) {
-  const registry = new CommandRegistry();
-  expect(
-    await initializePlugins(registry, [createMarketplacePlugin({ manager })]),
-  ).toEqual([]);
-  return { manager, registry };
-}
-
 describe("first-party marketplace plugin", () => {
-  test("registers all commands through the normal scoped plugin API", async () => {
-    const { registry } = await setup();
+  test("declares its namespace, subcommands, arguments, and options", async () => {
+    const context = captureContext();
+    const { program } = await setup(context);
 
-    for (const command of ["add", "list", "remove"]) {
-      expect(registry.resolve(["marketplace", command])?.owner).toEqual({
-        name: "marketplace",
-      });
-    }
-    expect(registry.help()).toBe(
-      "Usage: tx <command>\n\nCommands:\n  marketplace\n",
+    expect(await dispatch(program, ["--help"], context)).toEqual({
+      exitCode: EXIT_SUCCESS,
+    });
+    expect(context.stdoutText()).toMatch(
+      /^ +marketplace +Manage installed plugin marketplaces$/m,
     );
-    expect(registry.help(["marketplace"])).toBe(
-      "Usage: tx marketplace <command>\n\nCommands:\n  add\n  list\n  remove\n",
+
+    const namespaceHelp = captureContext();
+    expect(
+      await dispatch(program, ["marketplace", "--help"], namespaceHelp),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(namespaceHelp.stdoutText()).toContain(
+      "Usage: tx marketplace [options] [command]",
     );
+    expect(namespaceHelp.stdoutText()).toContain("add [options] <repository>");
+    expect(namespaceHelp.stdoutText()).toContain("list ");
+    expect(namespaceHelp.stdoutText()).toContain("remove <name>");
+    expect(namespaceHelp.stderrText()).toBe("");
+
+    const addHelp = captureContext();
+    expect(
+      await dispatch(program, ["marketplace", "add", "--help"], addHelp),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(addHelp.stdoutText()).toContain(
+      "Usage: tx marketplace add [options] <repository>",
+    );
+    expect(addHelp.stdoutText()).toContain("--name <name>");
+    expect(addHelp.stderrText()).toBe("");
   });
 
-  test("adds with strict parsing and reports the installed name", async () => {
-    const { manager, registry } = await setup();
-    const context = outputContext();
-
-    const result = await dispatch(
-      registry,
-      ["marketplace", "add", "repository", "--name", "personal"],
-      context,
-    );
-    expect(context.stderrText()).toBe("");
-    expect(result).toMatchObject({ exitCode: 0 });
-    expect(manager.calls).toEqual([["add", "repository", "personal"]]);
-    expect(context.stdoutText()).toBe('Added marketplace "personal".\n');
-    expect(context.stderrText()).toBe("");
-  });
-
-  test("lists sorted manager results including unknown sources", async () => {
-    const { manager, registry } = await setup();
-    const context = outputContext();
+  test.each([
+    ["a derived name", ["repository"], ["add", "repository", undefined]],
+    [
+      "an explicit name before the repository",
+      ["--name", "personal", "repository"],
+      ["add", "repository", "personal"],
+    ],
+    [
+      "an explicit name after the repository",
+      ["repository", "--name", "personal"],
+      ["add", "repository", "personal"],
+    ],
+  ])("adds with %s", async (_label, args, call) => {
+    const context = captureContext();
+    const { manager, program } = await setup(context);
 
     expect(
-      await dispatch(registry, ["marketplace", "list"], context),
-    ).toMatchObject({ exitCode: 0 });
+      await dispatch(program, ["marketplace", "add", ...args], context),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(manager.calls).toEqual([call]);
+    expect(context.stdoutText()).toBe(
+      `Added marketplace "${call[2] ?? "derived"}".\n`,
+    );
+    expect(context.stderrText()).toBe("");
+  });
+
+  test("lists manager results including unknown sources", async () => {
+    const context = captureContext();
+    const { manager, program } = await setup(context);
+
+    expect(await dispatch(program, ["marketplace", "list"], context)).toEqual({
+      exitCode: EXIT_SUCCESS,
+    });
     expect(manager.calls).toEqual([["list"]]);
     expect(context.stdoutText()).toBe(
       "alpha\tssh://example/alpha.git\nbroken\t<unknown>\n",
     );
+    expect(context.stderrText()).toBe("");
   });
 
   test("removes through the manager and reports success", async () => {
-    const { manager, registry } = await setup();
-    const context = outputContext();
+    const context = captureContext();
+    const { manager, program } = await setup(context);
 
     expect(
-      await dispatch(registry, ["marketplace", "remove", "personal"], context),
-    ).toMatchObject({ exitCode: 0 });
+      await dispatch(program, ["marketplace", "remove", "personal"], context),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
     expect(manager.calls).toEqual([["remove", "personal"]]);
     expect(context.stdoutText()).toBe('Removed marketplace "personal".\n');
+    expect(context.stderrText()).toBe("");
   });
 
   test.each([
-    ["add", []],
-    ["list", ["extra"]],
-    ["remove", []],
-  ])("reports strict %s usage errors", async (command, args) => {
-    const { manager, registry } = await setup();
-    const context = outputContext();
+    ["add", [], "missing required argument 'repository'"],
+    ["add", ["one", "two"], "too many arguments"],
+    [
+      "add",
+      ["repository", "--name"],
+      "option '--name <name>' argument missing",
+    ],
+    ["add", ["repository", "--unknown"], "unknown option '--unknown'"],
+    ["list", ["extra"], "too many arguments"],
+    ["remove", [], "missing required argument 'name'"],
+    ["remove", ["one", "two"], "too many arguments"],
+  ])("reports declared %s usage errors", async (command, args, message) => {
+    const context = captureContext();
+    const { manager, program } = await setup(context);
 
     expect(
-      await dispatch(registry, ["marketplace", command, ...args], context),
-    ).toMatchObject({ exitCode: 1 });
+      await dispatch(program, ["marketplace", command, ...args], context),
+    ).toEqual({ exitCode: EXIT_FAILURE });
     expect(manager.calls).toEqual([]);
     expect(context.stdoutText()).toBe("");
-    expect(context.stderrText()).toStartWith("Error: Usage:");
+    expect(context.stderrText()).toContain(message);
   });
+
+  test.each([
+    ["add", ["repository", "--name", "../escape"]],
+    ["remove", ["../escape"]],
+  ])(
+    "keeps rejecting unsafe %s names through its own namespace",
+    async (command, args) => {
+      const context = captureContext();
+      const { manager, program } = await setup(context);
+
+      expect(
+        await dispatch(program, ["marketplace", command, ...args], context),
+      ).toEqual({ exitCode: EXIT_FAILURE });
+      expect(manager.calls).toEqual([]);
+      expect(context.stdoutText()).toBe("");
+      expect(context.stderrText()).toBe(
+        'Error: Invalid marketplace name "../escape"; expected one safe path component\n',
+      );
+    },
+  );
 
   test("maps discovery storage failures without disabling management commands", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplace-discovery-");
@@ -147,12 +190,11 @@ describe("first-party marketplace plugin", () => {
     try {
       await mkdir(join(dataHome, "tx"), { recursive: true });
       await writeFile(storage, "not a directory");
-      const registry = new CommandRegistry();
+      const context = captureContext({ XDG_DATA_HOME: dataHome });
 
-      const failures = await initializePlugins(
-        registry,
+      const { namespaces, failures } = await initializePlugins(
         [createMarketplacePlugin({ manager: new RecordingManager() })],
-        { env: { XDG_DATA_HOME: dataHome } },
+        { context },
       );
 
       expect(failures).toHaveLength(1);
@@ -167,39 +209,41 @@ describe("first-party marketplace plugin", () => {
         `Check that marketplace storage at "${storage}" is readable, then retry.`,
       );
       expect(failures[0]?.message).not.toContain("marketplace remove");
-      for (const command of ["add", "list", "remove"]) {
-        expect(registry.resolve(["marketplace", command])?.owner).toEqual({
-          name: "marketplace",
-        });
-      }
+
+      expect(
+        await dispatch(
+          createRootProgram(coreDependencies, namespaces),
+          ["marketplace", "list"],
+          context,
+        ),
+      ).toEqual({ exitCode: EXIT_SUCCESS });
+      expect(context.stdoutText()).toBe(
+        "alpha\tssh://example/alpha.git\nbroken\t<unknown>\n",
+      );
+      expect(context.stderrText()).toBe("");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
 
-  test("resolves marketplace storage from each command context", async () => {
-    const registry = new CommandRegistry();
-    expect(
-      await initializePlugins(registry, [createMarketplacePlugin()], {
-        env: { XDG_DATA_HOME: "/definitely/missing/tx-test-data" },
-      }),
-    ).toEqual([]);
-
-    const helpContext = outputContext();
-    expect(await dispatch(registry, [], helpContext)).toMatchObject({
-      exitCode: 0,
+  test("resolves marketplace storage from its initialization context", async () => {
+    const context = captureContext({
+      XDG_DATA_HOME: "/definitely/missing/tx-test-data",
     });
-    expect(helpContext.stdoutText()).toContain("  marketplace\n");
-    expect(helpContext.stderrText()).toBe("");
+    const { namespaces, failures } = await initializePlugins(
+      [createMarketplacePlugin()],
+      { context },
+    );
 
-    const operationContext = {
-      ...outputContext(),
-      env: { XDG_DATA_HOME: "/definitely/missing/tx-test-data" },
-    };
+    expect(failures).toEqual([]);
     expect(
-      await dispatch(registry, ["marketplace", "list"], operationContext),
-    ).toMatchObject({ exitCode: 0 });
-    expect(operationContext.stdoutText()).toBe("");
-    expect(operationContext.stderrText()).toBe("");
+      await dispatch(
+        createRootProgram(coreDependencies, namespaces),
+        ["marketplace", "list"],
+        context,
+      ),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(context.stdoutText()).toBe("");
+    expect(context.stderrText()).toBe("");
   });
 });

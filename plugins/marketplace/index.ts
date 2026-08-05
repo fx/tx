@@ -1,18 +1,13 @@
 import { pathToFileURL } from "node:url";
 import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
 
-import {
-  MarketplaceManager,
-  type MarketplaceOperations,
-  parseAddMarketplaceArguments,
-  parseListMarketplaceArguments,
-  parseRemoveMarketplaceArguments,
-} from "./manager.ts";
+import { MarketplaceManager, type MarketplaceOperations } from "./manager.ts";
 import {
   discoverInstalledMarketplaces,
   type MarketplaceCheckout,
   readMarketplaceManifest,
   resolveMarketplaceDirectory,
+  validateMarketplaceName,
 } from "./storage.ts";
 
 export type { MarketplaceOperations } from "./manager.ts";
@@ -144,30 +139,53 @@ export function createMarketplacePlugin(
   return Object.freeze({
     identity,
     load(): Plugin {
-      return ({ command, env, plugin }) => {
+      return ({ command, context, env, plugin }) => {
         const root = resolveMarketplaceDirectory({ env });
         const manager =
           options.manager ?? new MarketplaceManager(root, { env });
 
-        command("marketplace add", async (args, context) => {
-          const parsed = parseAddMarketplaceArguments(args);
-          const name = await manager.add(parsed.repository, parsed.name);
-          context.stdout.write(`Added marketplace "${name}".\n`);
-        });
+        command((namespace) => {
+          namespace.description("Manage installed plugin marketplaces");
 
-        command("marketplace list", async (args, context) => {
-          parseListMarketplaceArguments(args);
-          for (const marketplace of await manager.list()) {
-            context.stdout.write(
-              `${marketplace.name}\t${marketplace.source}\n`,
-            );
-          }
-        });
+          namespace
+            .command("add")
+            .description("Install a marketplace from a Git repository")
+            .argument(
+              "<repository>",
+              "Git clone source, or bare owner/repository GitHub shorthand",
+            )
+            .option(
+              "--name <name>",
+              "Local marketplace name, instead of one derived from the repository",
+            )
+            .action(async (repository: string, flags: { name?: string }) => {
+              const requested =
+                flags.name === undefined
+                  ? undefined
+                  : validateMarketplaceName(flags.name);
+              const name = await manager.add(repository, requested);
+              context.stdout.write(`Added marketplace "${name}".\n`);
+            });
 
-        command("marketplace remove", async (args, context) => {
-          const name = parseRemoveMarketplaceArguments(args);
-          await manager.remove(name);
-          context.stdout.write(`Removed marketplace "${name}".\n`);
+          namespace
+            .command("list")
+            .description("List installed marketplaces and their sources")
+            .action(async () => {
+              for (const marketplace of await manager.list()) {
+                context.stdout.write(
+                  `${marketplace.name}\t${marketplace.source}\n`,
+                );
+              }
+            });
+
+          namespace
+            .command("remove")
+            .description("Remove an installed marketplace")
+            .argument("<name>", "Local marketplace name")
+            .action(async (name: string) => {
+              await manager.remove(validateMarketplaceName(name));
+              context.stdout.write(`Removed marketplace "${name}".\n`);
+            });
         });
 
         plugin(discoveryDefinition(root, identity));

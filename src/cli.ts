@@ -1,27 +1,31 @@
 import packageMetadata from "../package.json" with { type: "json" };
 import {
-  CommandRegistry,
+  createRootProgram,
   dispatch,
   EXIT_SUCCESS,
   identityName,
 } from "./commands.ts";
 import { type CommandProcessContext, createProcessContext } from "./context.ts";
-import type { PluginDefinition } from "./plugin.ts";
-import { initializePlugins } from "./plugins.ts";
+import type { CoreDependencies, PluginDefinition } from "./plugin.ts";
+import { coreDependencies, initializePlugins } from "./plugins.ts";
+
+const versionOptions = new Set(["--version", "-V"]);
 
 export async function main(
   argv: readonly string[] = Bun.argv.slice(2),
   definitions: readonly PluginDefinition[] = [],
-  registry = new CommandRegistry(),
   context: CommandProcessContext = createProcessContext(),
+  dependencies: CoreDependencies = coreDependencies,
 ): Promise<number> {
-  if (argv.length === 1 && argv[0] === "--version") {
+  const first = argv[0];
+  if (first !== undefined && versionOptions.has(first)) {
     context.stdout.write(`${packageMetadata.version}\n`);
     return EXIT_SUCCESS;
   }
 
-  const failures = await initializePlugins(registry, definitions, {
-    env: context.env,
+  const { namespaces, failures } = await initializePlugins(definitions, {
+    context,
+    dependencies,
   });
   for (const failure of failures) {
     context.stderr.write(
@@ -29,6 +33,10 @@ export async function main(
     );
   }
 
-  const result = await dispatch(registry, argv, context);
+  const result = await dispatch(
+    createRootProgram(dependencies, namespaces),
+    argv,
+    context,
+  );
   return result.exitCode;
 }

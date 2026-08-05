@@ -3,8 +3,7 @@ import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
 
-import { CommandRegistry, dispatch } from "../src/commands.ts";
-import type { CommandProcessContext } from "../src/context.ts";
+import { createRootProgram, dispatch, EXIT_SUCCESS } from "../src/commands.ts";
 import type {
   CoreDependencies,
   Plugin,
@@ -13,6 +12,7 @@ import type {
   PluginIdentity,
 } from "../src/plugin.ts";
 import { coreDependencies, initializePlugins } from "../src/plugins.ts";
+import { captureContext } from "./helpers.ts";
 
 function definition(
   name: string,
@@ -25,21 +25,10 @@ function definition(
   };
 }
 
-function outputContext(): CommandProcessContext & { stdoutText(): string } {
-  let stdout = "";
-  return {
-    cwd: "/work",
-    env: {},
-    stdin: {} as NodeJS.ReadStream,
-    stdout: {
-      write(value: string) {
-        stdout += value;
-        return true;
-      },
-    } as NodeJS.WriteStream,
-    stderr: { write: () => true } as unknown as NodeJS.WriteStream,
-    stdoutText: () => stdout,
-  };
+function namespaceNames(
+  namespaces: readonly { readonly command: { name(): string } }[],
+): string[] {
+  return namespaces.map((namespace) => namespace.command.name());
 }
 
 describe("public plugin contract", () => {
@@ -66,7 +55,6 @@ describe("public plugin contract", () => {
 
 describe("initializePlugins", () => {
   test("initializes roots and committed children in deterministic FIFO order", async () => {
-    const registry = new CommandRegistry();
     const order: string[] = [];
     const child = (name: string, parent: PluginIdentity): PluginDefinition => ({
       identity: { name, parent },
@@ -74,7 +62,7 @@ describe("initializePlugins", () => {
         order.push(`load:${name}`);
         return ({ command }) => {
           order.push(`init:${name}`);
-          command(name, () => {});
+          command((namespace) => namespace.description(name));
         };
       },
     });
@@ -93,7 +81,9 @@ describe("initializePlugins", () => {
       },
     };
 
-    expect(await initializePlugins(registry, [alpha, beta])).toEqual([]);
+    const { namespaces, failures } = await initializePlugins([alpha, beta]);
+
+    expect(failures).toEqual([]);
     expect(order).toEqual([
       "init:alpha",
       "init:beta",
@@ -102,56 +92,221 @@ describe("initializePlugins", () => {
       "load:beta-child",
       "init:beta-child",
     ]);
-    expect(registry.resolve(["alpha-child"])?.owner).toEqual({
+    expect(namespaceNames(namespaces)).toEqual(["alpha-child", "beta-child"]);
+    expect(namespaces[0]?.identity).toEqual({
       name: "alpha-child",
       parent: { name: "alpha" },
     });
   });
 
+  test("names each namespace after the plugin's own identity, not its parents", async () => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("journal", ({ command }) => command(() => {}), {
+        name: "personal",
+        parent: { name: "marketplace" },
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(namespaceNames(namespaces)).toEqual(["journal"]);
+    expect(namespaces[0]?.identity).toEqual({
+      name: "journal",
+      parent: { name: "personal", parent: { name: "marketplace" } },
+    });
+    expect(Object.isFrozen(namespaces[0])).toBe(true);
+  });
+
+  test("claims no namespace for a plugin that defines no commands", async () => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("quiet", () => {}),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(namespaces).toEqual([]);
+  });
+
   test("exposes immutable identity, env, dependencies, and generic command context", async () => {
-    const registry = new CommandRegistry();
     const env = { TEST_VALUE: "yes" };
+    const context = captureContext(env);
     const customDependencies = { ...coreDependencies } as CoreDependencies;
     let retainedAPI: PluginAPI | undefined;
     const identity = { name: "leaf", parent: { name: "root" } };
-    const plugin: Plugin = (api) => {
-      retainedAPI = api;
-      api.command("inspect", (_args, context) => {
-        context.stdout.write(
-          `${context.plugin.parent?.name}/${context.plugin.name}`,
-        );
-      });
-    };
 
-    expect(
-      await initializePlugins(
-        registry,
-        [definition("leaf", plugin, identity.parent)],
-        {
-          env,
-          dependencies: customDependencies,
-        },
-      ),
-    ).toEqual([]);
+    const { namespaces, failures } = await initializePlugins(
+      [
+        definition(
+          "leaf",
+          (api) => {
+            retainedAPI = api;
+            api.command((namespace) =>
+              namespace.action(() => {
+                api.context.stdout.write(
+                  `${api.context.plugin.parent?.name}/${api.context.plugin.name} in ${api.context.cwd}\n`,
+                );
+              }),
+            );
+          },
+          identity.parent,
+        ),
+      ],
+      { env, context, dependencies: customDependencies },
+    );
+
+    expect(failures).toEqual([]);
     expect(retainedAPI?.env).toBe(env);
     expect(retainedAPI?.dependencies).toBe(customDependencies);
     expect(retainedAPI?.identity).toEqual(identity);
+    expect(retainedAPI?.context.plugin).toBe(retainedAPI?.identity);
+    expect(retainedAPI?.context.stdout).toBe(context.stdout);
+    expect(retainedAPI?.context.stderr).toBe(context.stderr);
+    expect(retainedAPI?.context.stdin).toBe(context.stdin);
+    expect(retainedAPI?.context.env).toBe(env);
     expect(Object.isFrozen(retainedAPI)).toBe(true);
     expect(Object.isFrozen(retainedAPI?.identity)).toBe(true);
     expect(Object.isFrozen(retainedAPI?.identity.parent)).toBe(true);
-    const context = outputContext();
-    expect(await dispatch(registry, ["inspect"], context)).toMatchObject({
-      exitCode: 0,
-    });
-    expect(context.stdoutText()).toBe("root/leaf");
+
+    expect(
+      await dispatch(
+        createRootProgram(coreDependencies, namespaces),
+        ["leaf"],
+        context,
+      ),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(context.stdoutText()).toBe("root/leaf in /work\n");
+    expect(context.stderrText()).toBe("");
   });
 
-  test("atomically discards commands and children after initialization failure", async () => {
-    const registry = new CommandRegistry();
+  test("falls back to the current process context and its environment", async () => {
+    let retainedAPI: PluginAPI | undefined;
+
+    const { failures } = await initializePlugins([
+      definition("ambient", (api) => {
+        retainedAPI = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(retainedAPI?.env).toBe(process.env);
+    expect(retainedAPI?.context.env).toBe(process.env);
+    expect(retainedAPI?.context.cwd).toBe(process.cwd());
+    expect(retainedAPI?.context.stdout).toBe(process.stdout);
+    expect(retainedAPI?.dependencies).toBe(coreDependencies);
+  });
+
+  test("accumulates repeated registration calls onto one namespace", async () => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("notes", ({ command }) => {
+        command((namespace) => {
+          namespace.description("Take notes");
+          namespace.command("daily");
+        });
+        command((namespace) => namespace.command("weekly"));
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(namespaces).toHaveLength(1);
+    expect(namespaces[0]?.command.description()).toBe("Take notes");
+    expect(
+      namespaces[0]?.command.commands.map((child) => child.name()),
+    ).toEqual(["daily", "weekly"]);
+  });
+
+  test("rejects a builder that returns a thenable instead of letting its work land late", async () => {
+    let landed = false;
+
+    const { namespaces, failures } = await initializePlugins([
+      definition("late", ({ command }) => {
+        command(async (namespace) => {
+          await Promise.resolve();
+          namespace.command("ghost");
+          landed = true;
+        });
+      }),
+    ]);
+
+    expect(
+      failures.map(({ identity, message }) => [identity.name, message]),
+    ).toEqual([
+      [
+        "late",
+        "Plugin late must build its namespace synchronously; the builder returned a promise",
+      ],
+    ]);
+    expect(namespaces).toEqual([]);
+
+    await Promise.resolve();
+    expect(landed).toBe(true);
+  });
+
+  test.each([
+    [
+      "renames its namespace",
+      (namespace: { name(name: string): unknown }) => namespace.name("other"),
+      'Plugin notes renamed its namespace to "other"; a namespace must stay reachable as "notes"',
+    ],
+    [
+      "aliases its namespace",
+      (namespace: { alias(alias: string): unknown }) => namespace.alias("n"),
+      'Plugin notes aliased its namespace as "n"; a namespace must stay reachable only as "notes"',
+    ],
+  ])("fails a plugin that %s", async (_label, mutate, message) => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("notes", ({ command }) =>
+        command((namespace) => {
+          namespace.command("daily");
+          mutate(namespace);
+        }),
+      ),
+    ]);
+
+    expect(failures.map((failure) => failure.message)).toEqual([message]);
+    expect(namespaces).toEqual([]);
+  });
+
+  test.each(["two words", "trailing ", "-flag", "-"])(
+    "rejects the namespace name %p without reshaping it",
+    async (name) => {
+      const { namespaces, failures } = await initializePlugins([
+        definition(name, ({ command }) => command(() => {})),
+      ]);
+
+      expect(namespaces).toEqual([]);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]?.message).toBe(
+        `Plugin ${name} cannot claim namespace "${name}"; a namespace name must not be empty, contain whitespace, or begin with "-"`,
+      );
+    },
+  );
+
+  test("rejects a second plugin claiming a committed namespace", async () => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("notes", ({ command }) => command(() => {}), {
+        name: "first",
+      }),
+      definition("notes", ({ command }) => command(() => {}), {
+        name: "second",
+      }),
+    ]);
+
+    expect(namespaceNames(namespaces)).toEqual(["notes"]);
+    expect(namespaces[0]?.identity.parent).toEqual({ name: "first" });
+    expect(
+      failures.map(({ identity, message }) => [identity.name, message]),
+    ).toEqual([
+      [
+        "notes",
+        'Namespace "notes" is already claimed by first/notes; cannot claim it for second/notes',
+      ],
+    ]);
+  });
+
+  test("atomically discards the namespace and children after an initialization failure", async () => {
     let childLoaded = false;
-    const failures = await initializePlugins(registry, [
+
+    const { namespaces, failures } = await initializePlugins([
       definition("broken", ({ command, plugin, identity }) => {
-        command("ghost", () => {});
+        command((namespace) => namespace.command("ghost"));
         plugin({
           identity: { name: "ghost-child", parent: identity },
           load: () => {
@@ -161,21 +316,19 @@ describe("initializePlugins", () => {
         });
         throw new Error("initialization failed");
       }),
-      definition("healthy", ({ command }) => command("healthy", () => {})),
+      definition("healthy", ({ command }) => command(() => {})),
     ]);
 
     expect(failures).toEqual([
       { identity: { name: "broken" }, message: "initialization failed" },
     ]);
     expect(childLoaded).toBe(false);
-    expect(registry.resolve(["ghost"])).toBeUndefined();
-    expect(registry.resolve(["healthy"])).toBeDefined();
+    expect(namespaceNames(namespaces)).toEqual(["healthy"]);
   });
 
-  test("isolates load, shape, identity, and collision failures", async () => {
-    const registry = new CommandRegistry();
-    const failures = await initializePlugins(registry, [
-      definition("first", ({ command }) => command("shared", () => {})),
+  test("isolates load, shape, and identity failures", async () => {
+    const { namespaces, failures } = await initializePlugins([
+      definition("first", ({ command }) => command(() => {})),
       {
         identity: { name: "throwing" },
         load: async () => {
@@ -184,11 +337,7 @@ describe("initializePlugins", () => {
       },
       { identity: { name: "shape" }, load: () => 42 as unknown as Plugin },
       { identity: { name: " " }, load: () => () => {} },
-      definition("collision", ({ command, plugin }) => {
-        command("rolled-back", () => {});
-        command("shared", () => {});
-        plugin(definition("never", () => {}));
-      }),
+      definition("last", ({ command }) => command(() => {})),
     ]);
 
     expect(
@@ -197,28 +346,22 @@ describe("initializePlugins", () => {
       ["throwing", "load failed"],
       ["shape", "Plugin definition must load a function"],
       ["<invalid>", "Plugin identity name must not be empty"],
-      [
-        "collision",
-        'Command "shared" is already registered by first; cannot register it for collision',
-      ],
     ]);
-    expect(registry.resolve(["shared"])?.owner).toEqual({ name: "first" });
-    expect(registry.resolve(["rolled-back"])).toBeUndefined();
+    expect(namespaceNames(namespaces)).toEqual(["first", "last"]);
   });
 
   test("closes command and child contribution after initialization", async () => {
-    const registry = new CommandRegistry();
     let retainedAPI: PluginAPI | undefined;
-    expect(
-      await initializePlugins(registry, [
-        definition("retained", (api) => {
-          retainedAPI = api;
-          api.command("current", () => {});
-        }),
-      ]),
-    ).toEqual([]);
 
-    expect(() => retainedAPI?.command("late", () => {})).toThrow(
+    const { failures } = await initializePlugins([
+      definition("retained", (api) => {
+        retainedAPI = api;
+        api.command((namespace) => namespace.command("current"));
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(() => retainedAPI?.command(() => {})).toThrow(
       "Plugin retained cannot register commands after initialization",
     );
     expect(() => retainedAPI?.plugin(definition("late", () => {}))).toThrow(
@@ -226,12 +369,10 @@ describe("initializePlugins", () => {
     );
   });
 
-  test("supports empty defaults and plugins without contributions", async () => {
-    const registry = new CommandRegistry();
-    expect(await initializePlugins(registry)).toEqual([]);
-    expect(
-      await initializePlugins(registry, [definition("empty", () => {})]),
-    ).toEqual([]);
-    expect(registry.help()).toBe("Usage: tx <command>\n");
+  test("supports empty defaults", async () => {
+    expect(await initializePlugins()).toEqual({
+      namespaces: [],
+      failures: [],
+    });
   });
 });

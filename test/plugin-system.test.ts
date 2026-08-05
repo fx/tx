@@ -154,45 +154,50 @@ describe("source CLI marketplace installation failures", () => {
   });
 });
 
-describe("source CLI plugin registration", () => {
-  test("rolls back every command when a plugin registers an empty segment", async () => {
-    const root = await temporaryDirectory("tx-plugin-system-segment-");
+describe("source CLI namespace ownership", () => {
+  test("rejects a plugin that renames the namespace it was handed", async () => {
+    const root = await temporaryDirectory("tx-plugin-system-rename-");
     try {
       const dataHome = join(root, "data");
       const source = await createGitRepository(root, "source", {
-        "plugin.ts": `export default ({ command }) => {
-          command("ghost valid", (_args, context) => context.stdout.write("ghost\\n"));
-          command(["ghost", "   "], () => {});
+        "plugin.ts": `export default ({ command, context }) => {
+          command((namespace) => {
+            namespace.command("valid").action(() => context.stdout.write("ghost\\n"));
+            namespace.name("other");
+          });
         };\n`,
-        ".tx/config.json": manifest("invalid-path"),
+        ".tx/config.json": manifest("renamer"),
       });
       expect(
-        runCli(dataHome, "marketplace", "add", source, "--name", "invalid-path")
+        runCli(dataHome, "marketplace", "add", source, "--name", "renaming")
           .exitCode,
       ).toBe(0);
 
-      const result = runCli(dataHome, "ghost", "valid");
-      expect(result.exitCode).toBe(2);
-      expect(result.stdout).toBe("");
-      expect(result.stderr).toContain(
-        "Error loading plugin marketplace/installed/invalid-path/invalid-path: Command path must contain one or more non-empty segments",
-      );
-      expect(result.stderr).toContain('Unknown command "ghost valid"');
+      for (const namespace of ["renamer", "other"]) {
+        const result = runCli(dataHome, namespace, "valid");
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout).toBe("");
+        expect(result.stderr).toContain(
+          'Error loading plugin marketplace/installed/renaming/renamer: Plugin marketplace/installed/renaming/renamer renamed its namespace to "other"; a namespace must stay reachable as "renamer"',
+        );
+        expect(result.stderr).toContain(
+          `Error: Unknown command "${namespace}". Run "tx --help" for usage.`,
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("keeps bundled commands and diagnoses an external collision", async () => {
+  test("keeps the bundled namespace and diagnoses an external claim on it", async () => {
     const root = await temporaryDirectory("tx-plugin-system-core-collision-");
     try {
       const dataHome = join(root, "data");
       const source = await createGitRepository(root, "source", {
         "plugin.ts": `export default ({ command }) => {
-          command("ghost bundled-collision", () => {});
-          command("marketplace list", () => {});
+          command((namespace) => namespace.command("list"));
         };\n`,
-        ".tx/config.json": manifest("collision"),
+        ".tx/config.json": manifest("marketplace"),
       });
       expect(
         runCli(dataHome, "marketplace", "add", source, "--name", "external")
@@ -203,65 +208,47 @@ describe("source CLI plugin registration", () => {
       expect(list.exitCode).toBe(0);
       expect(list.stdout).toContain(`external\t${source}\n`);
       expect(list.stderr).toContain(
-        'Error loading plugin marketplace/installed/external/collision: Command "marketplace list" is already registered by marketplace; cannot register it for marketplace/installed/external/collision',
-      );
-
-      const rolledBack = runCli(dataHome, "ghost", "bundled-collision");
-      expect(rolledBack.exitCode).toBe(2);
-      expect(rolledBack.stdout).toBe("");
-      expect(rolledBack.stderr).toContain(
-        'Unknown command "ghost bundled-collision"',
+        'Error loading plugin marketplace/installed/external/marketplace: Namespace "marketplace" is already claimed by marketplace; cannot claim it for marketplace/installed/external/marketplace',
       );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("keeps earlier external commands and diagnoses a later collision", async () => {
+  test("keeps the first committed external namespace and diagnoses a later claim", async () => {
     const root = await temporaryDirectory(
       "tx-plugin-system-external-collision-",
     );
     try {
       const dataHome = join(root, "data");
-      const source = await createGitRepository(root, "source", {
-        "alpha.ts": `export default ({ command }) => {
-          command("shared", (_args, context) => context.stdout.write("alpha\\n"));
-          command("alpha only", (_args, context) => context.stdout.write("kept\\n"));
-        };\n`,
-        "beta.ts": `export default ({ command }) => {
-          command("beta only", () => {});
-          command("shared", () => {});
-        };\n`,
-        ".tx/config.json": JSON.stringify({
-          plugins: [
-            { name: "alpha", entry: "alpha.ts" },
-            { name: "beta", entry: "beta.ts" },
-          ],
+      const [alpha, beta] = await Promise.all([
+        createGitRepository(root, "alpha-source", {
+          "plugin.ts": `export default ({ command, context }) => {
+            command((namespace) => namespace.action(() => context.stdout.write("alpha\\n")));
+          };\n`,
+          ".tx/config.json": manifest("shared"),
         }),
-      });
+        createGitRepository(root, "beta-source", {
+          "plugin.ts": `export default ({ command, context }) => {
+            command((namespace) => namespace.action(() => context.stdout.write("beta\\n")));
+          };\n`,
+          ".tx/config.json": manifest("shared"),
+        }),
+      ]);
       expect(
-        runCli(dataHome, "marketplace", "add", source, "--name", "personal")
+        runCli(dataHome, "marketplace", "add", alpha, "--name", "alpha")
           .exitCode,
+      ).toBe(0);
+      expect(
+        runCli(dataHome, "marketplace", "add", beta, "--name", "beta").exitCode,
       ).toBe(0);
 
       const shared = runCli(dataHome, "shared");
       expect(shared.exitCode).toBe(0);
       expect(shared.stdout).toBe("alpha\n");
       expect(shared.stderr).toContain(
-        'Error loading plugin marketplace/installed/personal/beta: Command "shared" is already registered by marketplace/installed/personal/alpha; cannot register it for marketplace/installed/personal/beta',
+        'Error loading plugin marketplace/installed/beta/shared: Namespace "shared" is already claimed by marketplace/installed/alpha/shared; cannot claim it for marketplace/installed/beta/shared',
       );
-
-      const earlier = runCli(dataHome, "alpha", "only");
-      expect(earlier.exitCode).toBe(0);
-      expect(earlier.stdout).toBe("kept\n");
-      expect(earlier.stderr).toContain(
-        'Error loading plugin marketplace/installed/personal/beta: Command "shared" is already registered by marketplace/installed/personal/alpha; cannot register it for marketplace/installed/personal/beta',
-      );
-
-      const rolledBack = runCli(dataHome, "beta", "only");
-      expect(rolledBack.exitCode).toBe(2);
-      expect(rolledBack.stdout).toBe("");
-      expect(rolledBack.stderr).toContain('Unknown command "beta only"');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -274,8 +261,11 @@ test("broken marketplaces remain removable without blocking healthy plugins", as
     const dataHome = join(root, "data");
     const [healthy, broken] = await Promise.all([
       createGitRepository(root, "healthy-source", {
-        "plugin.ts":
-          'export default ({ command }) => command("healthy run", (_args, context) => context.stdout.write("healthy\\n"));\n',
+        "plugin.ts": `export default ({ command, context }) => {
+          command((namespace) => namespace
+            .command("run")
+            .action(() => context.stdout.write("healthy\\n")));
+        };\n`,
         ".tx/config.json": manifest("healthy"),
       }),
       createGitRepository(root, "broken-source", {
@@ -323,9 +313,11 @@ test("broken marketplaces remain removable without blocking healthy plugins", as
     });
 
     const unavailable = runCli(dataHome, "healthy", "run");
-    expect(unavailable.exitCode).toBe(2);
+    expect(unavailable.exitCode).toBe(1);
     expect(unavailable.stdout).toBe("");
-    expect(unavailable.stderr).toContain('Unknown command "healthy run"');
+    expect(unavailable.stderr).toContain(
+      'Error: Unknown command "healthy". Run "tx --help" for usage.',
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -14,11 +14,6 @@ import {
 
 const executeFile = promisify(execFile);
 
-export interface AddMarketplaceArguments {
-  readonly repository: string;
-  readonly name?: string;
-}
-
 export interface MarketplaceListing {
   readonly name: string;
   readonly source: string;
@@ -74,49 +69,6 @@ export function deriveMarketplaceName(repository: string): string {
     ? finalComponent.slice(0, -4)
     : finalComponent;
   return validateMarketplaceName(name);
-}
-
-export function parseAddMarketplaceArguments(
-  args: readonly string[],
-): AddMarketplaceArguments {
-  let repository: string | undefined;
-  let name: string | undefined;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index] as string;
-    if (argument === "--name") {
-      if (name !== undefined)
-        throw new Error("--name may only be specified once");
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith("--")) {
-        throw new Error("--name requires a value");
-      }
-      name = validateMarketplaceName(value);
-      index += 1;
-    } else if (argument.startsWith("-")) {
-      throw new Error(`Unknown option "${argument}"`);
-    } else if (repository === undefined) {
-      repository = argument;
-    } else {
-      throw new Error("marketplace add accepts exactly one repository");
-    }
-  }
-
-  if (repository === undefined) {
-    throw new Error("Usage: tx marketplace add <repository> [--name <name>]");
-  }
-  return name === undefined ? { repository } : { repository, name };
-}
-
-export function parseListMarketplaceArguments(args: readonly string[]): void {
-  if (args.length !== 0) throw new Error("Usage: tx marketplace list");
-}
-
-export function parseRemoveMarketplaceArguments(
-  args: readonly string[],
-): string {
-  if (args.length !== 1) throw new Error("Usage: tx marketplace remove <name>");
-  return validateMarketplaceName(args[0] as string);
 }
 
 export async function runGit(

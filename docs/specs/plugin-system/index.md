@@ -6,8 +6,6 @@ The plugin system is a generic host for trusted plugins. Core code under `src/` 
 
 The approved target architecture is implemented: the core is generic, the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md), and the canonical package API is scoped as specified in [Change 0004](../../changes/0004-automate-versioning-and-publishing.md).
 
-The namespace ownership model below — one namespace per plugin, named after its identity, with the plugin owning every argument inside it — is specified but **not yet implemented**. It is planned in [Change 0007](../../changes/0007-delegate-dispatch-to-plugins.md). Until that change lands, a plugin registers arbitrary whitespace-separated command paths and the host interprets help itself.
-
 ## Requirements
 
 ### Generic Plugin Host
@@ -315,4 +313,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-03 | Renamed the canonical public plugin type contract to `@fx/tx/plugin` | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
 | 2026-08-04 | Added safe, ordered, deduplicated per-plugin dependency manifest installation | [0005-install-per-plugin-dependencies](../../changes/0005-install-per-plugin-dependencies.md) |
 | 2026-08-04 | Extended plugin failure isolation to the process exit code | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
-| 2026-08-05 | Specified one identity-named namespace per plugin, a host-supplied command builder in place of path registration, and command-parser injection — planned, not yet implemented | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
+| 2026-08-05 | Gave each plugin one identity-named namespace, replaced path registration with a host-supplied command builder, and injected the command parser | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |

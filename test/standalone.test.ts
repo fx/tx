@@ -63,11 +63,10 @@ test("the production build is a standalone executable", async () => {
       env: { ...process.env, DEV: "true", PATH: runtimeDirectory },
     });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout.toString()).toBe(
-      "Usage: tx <command>\n\nCommands:\n  marketplace\n",
-    );
-    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout.toString()).toBe("");
+    expect(result.stderr.toString()).toContain("Usage: tx [options] [command]");
+    expect(result.stderr.toString()).toContain("marketplace");
 
     const marketplace = join(temporaryRoot, "marketplace");
     const dependency = join(marketplace, "plugins", "dependency");
@@ -105,55 +104,67 @@ test("the production build is a standalone executable", async () => {
       ),
       writeFile(
         join(marketplace, "top.ts"),
-        `export default ({ command, dependencies }) => {
+        `export default ({ command, context, dependencies }) => {
           globalThis[Symbol.for("tx.standalone.injected")] = {
             react: dependencies.react,
             ink: dependencies.ink,
           };
-          command("top", (args, context) => context.stdout.write(JSON.stringify({
-            args,
-            plugin: context.plugin,
-          }) + "\\n"));
+          command((namespace) => {
+            namespace
+              .description("Top fixture plugin")
+              .argument("[args...]")
+              .action((args) => context.stdout.write(JSON.stringify({
+                args,
+                plugin: context.plugin,
+              }) + "\\n"));
+          });
         };`,
       ),
       writeFile(
         join(marketplace, "plugins", "nested.ts"),
         `import { PassThrough } from "node:stream";
         import { message } from "fixture-dependency";
-        export default ({ command, dependencies }) => {
+        export default ({ command, context, dependencies }) => {
           const injected = globalThis[Symbol.for("tx.standalone.injected")];
           const sameInstances = injected?.react === dependencies.react &&
             injected?.ink === dependencies.ink;
-          command(["nested", "run"], async (args, context) => {
-            const element = dependencies.react.createElement(
-              dependencies.ink.Text,
-              null,
-              message,
-            );
-            const output = new PassThrough();
-            let renderedOutput = "";
-            output.on("data", (chunk) => {
-              renderedOutput += chunk.toString();
-            });
-            const instance = dependencies.ink.render(element, {
-              stdout: output,
-              interactive: false,
-              patchConsole: false,
-            });
-            instance.unmount();
-            const exitResult = await instance.waitUntilExit();
-            output.destroy();
-            context.stdout.write(JSON.stringify({
-              args,
-              plugin: context.plugin,
-              cwd: context.cwd,
-              dependency: message,
-              sameInstances,
-              elementWorks: element.type === dependencies.ink.Text &&
-                element.props.children === message,
-              renderedOutput,
-              instanceExited: exitResult === undefined,
-            }) + "\\n");
+          command((namespace) => {
+            namespace.description("Nested fixture plugin");
+            namespace
+              .command("run")
+              .description("Render through the injected dependencies")
+              .argument("[args...]")
+              .action(async (args) => {
+                const element = dependencies.react.createElement(
+                  dependencies.ink.Text,
+                  null,
+                  message,
+                );
+                const output = new PassThrough();
+                let renderedOutput = "";
+                output.on("data", (chunk) => {
+                  renderedOutput += chunk.toString();
+                });
+                const instance = dependencies.ink.render(element, {
+                  stdout: output,
+                  interactive: false,
+                  patchConsole: false,
+                });
+                instance.unmount();
+                const exitResult = await instance.waitUntilExit();
+                output.destroy();
+                context.stdout.write(JSON.stringify({
+                  args,
+                  plugin: context.plugin,
+                  cwd: context.cwd,
+                  dependency: message,
+                  sameInstances,
+                  elementWorks: element.type === dependencies.ink.Text &&
+                    element.props.children === message,
+                  renderedOutput,
+                  instanceExited: exitResult === undefined,
+                }) + "\\n");
+              });
           });
         };`,
       ),
@@ -203,19 +214,26 @@ test("the production build is a standalone executable", async () => {
     });
 
     const rootHelp = runStandalone(["--help"]);
-    expect(rootHelp).toEqual({
-      exitCode: 0,
-      stdout:
-        "Usage: tx <command>\n\nCommands:\n  marketplace\n  nested\n  top\n",
-      stderr: "",
-    });
+    expect(rootHelp.exitCode).toBe(0);
+    expect(rootHelp.stdout).toContain("Usage: tx [options] [command]");
+    for (const [term, description] of [
+      ["marketplace", "Manage installed plugin marketplaces"],
+      ["top \\[args\\.\\.\\.\\]", "Top fixture plugin"],
+      ["nested", "Nested fixture plugin"],
+    ]) {
+      expect(rootHelp.stdout).toMatch(
+        new RegExp(`^ +${term} +${description}$`, "m"),
+      );
+    }
+    expect(rootHelp.stderr).toBe("");
 
     const nestedHelp = runStandalone(["nested", "--help"]);
-    expect(nestedHelp).toEqual({
-      exitCode: 0,
-      stdout: "Usage: tx nested <command>\n\nCommands:\n  run\n",
-      stderr: "",
-    });
+    expect(nestedHelp.exitCode).toBe(0);
+    expect(nestedHelp.stdout).toContain("Usage: tx nested [options] [command]");
+    expect(nestedHelp.stdout).toContain(
+      "Render through the injected dependencies",
+    );
+    expect(nestedHelp.stderr).toBe("");
 
     const top = runStandalone(["top", "one", "two"]);
     expect(top.exitCode).toBe(0);
@@ -304,10 +322,9 @@ test("the production build is a standalone executable", async () => {
 
     const unavailable = runStandalone(["nested", "run"]);
     expect(unavailable).toEqual({
-      exitCode: 2,
+      exitCode: 1,
       stdout: "",
-      stderr:
-        'Error: Unknown command "nested run". Run "tx --help" for usage.\n',
+      stderr: 'Error: Unknown command "nested". Run "tx --help" for usage.\n',
     });
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
