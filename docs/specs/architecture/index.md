@@ -13,6 +13,7 @@ The Core CLI dispatch model below — one namespace per plugin, with every argum
 ### Core CLI
 
 - The host MUST define exactly two root options — help, spelled `--help` and `-h`, and version, spelled `--version` and `-V` — and MUST recognize them only as the first argument. Both forms of each MUST behave identically.
+- When a root option is the first argument, core MUST produce that option's output, ignore every remaining argument, and exit successfully. `tx --version extra` and `tx -h notes` behave exactly as `tx --version` and `tx -h`.
 - Any first argument that is not a root option MUST select a plugin namespace. Every argument after that namespace, including options and help requests, MUST be interpreted by the owning plugin.
 - Core MUST NOT interpret, reserve, consume, or reorder any argument that follows the plugin namespace.
 - Core MUST NOT reserve a top-level word for help; a plugin MAY reserve one inside its own namespace.
