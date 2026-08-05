@@ -189,7 +189,7 @@ jobs:
 
           published=$(npm view "@fx/tx@${RELEASE_VERSION}" version --registry https://npm.pkg.github.com 2>/dev/null || true)
           if [[ -z "$published" ]]; then
-            npm publish "package/${archive}" --registry https://npm.pkg.github.com
+            npm publish "./package/${archive}" --registry https://npm.pkg.github.com
           else
             [[ "$published" == "$RELEASE_VERSION" ]]
             echo "@fx/tx@${RELEASE_VERSION} is already published; refusing to overwrite it."
