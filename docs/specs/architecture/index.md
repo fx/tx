@@ -12,7 +12,7 @@ The Core CLI dispatch model below — one namespace per plugin, with every argum
 
 ### Core CLI
 
-- The host MUST define exactly two root options, help and version, and MUST recognize them only as the first argument.
+- The host MUST define exactly two root options — help, spelled `--help` and `-h`, and version, spelled `--version` and `-V` — and MUST recognize them only as the first argument. Both forms of each MUST behave identically.
 - Any first argument that is not a root option MUST select a plugin namespace. Every argument after that namespace, including options and help requests, MUST be interpreted by the owning plugin.
 - Core MUST NOT interpret, reserve, consume, or reorder any argument that follows the plugin namespace.
 - Core MUST NOT reserve a top-level word for help; a plugin MAY reserve one inside its own namespace.
@@ -22,7 +22,7 @@ The Core CLI dispatch model below — one namespace per plugin, with every argum
 - An unrecognized first argument MUST report a useful error on standard error and exit non-zero.
 - Any failure — unrecognized namespace, usage rejected by a plugin, or a command that throws — MUST exit non-zero. Core MUST NOT distinguish usage failures from runtime failures by exit code.
 - Help and version requests MUST exit successfully.
-- `--version` and `-V` MUST print the version and exit successfully before plugin initialization, and only when no plugin namespace precedes them.
+- Either version form MUST print the version and exit successfully before plugin initialization, and only when no plugin namespace precedes it.
 - A plugin initialization failure MUST be reported on standard error and MUST NOT change the process exit code; the exit code MUST be the result of the dispatched command alone.
 - Nesting below a plugin namespace MUST support arbitrary depth and MUST be defined by the owning plugin.
 - Every byte a command writes MUST go through the injected process context streams.
