@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,7 @@ import packageMetadata from "../package.json" with { type: "json" };
 import { main } from "../src/cli.ts";
 import { createProcessContext } from "../src/context.ts";
 import type { PluginDefinition } from "../src/plugin.ts";
-import { captureContext } from "./helpers.ts";
+import { captureContext, temporaryDirectory } from "./helpers.ts";
 
 function failingDefinition(): PluginDefinition {
   return {
@@ -269,6 +269,24 @@ describe("main", () => {
 });
 
 describe("entrypoint", () => {
+  // These spawns run the real CLI, which discovers marketplaces from the
+  // ambient data directory. Pointing it at an empty one keeps the exact
+  // stream assertions below about the entrypoint rather than about whatever
+  // the machine running the suite happens to have installed.
+  let dataHome = "";
+  const isolatedEnvironment = () => ({
+    ...process.env,
+    XDG_DATA_HOME: dataHome,
+  });
+
+  beforeAll(async () => {
+    dataHome = await temporaryDirectory("tx-cli-entrypoint-");
+  });
+
+  afterAll(async () => {
+    await rm(dataHome, { recursive: true, force: true });
+  });
+
   test("reflects the current process in the default context", () => {
     const context = createProcessContext();
 
@@ -286,7 +304,7 @@ describe("entrypoint", () => {
         "--eval",
         'Bun.argv.slice = () => { throw new Error("main invoked during import"); }; await import("./cli.ts");',
       ],
-      { cwd: `${import.meta.dir}/..` },
+      { cwd: `${import.meta.dir}/..`, env: isolatedEnvironment() },
     );
 
     expect(result.exitCode).toBe(0);
@@ -297,7 +315,7 @@ describe("entrypoint", () => {
   test("retains import.meta.main wiring for root help", () => {
     const result = Bun.spawnSync(
       [process.execPath, "run", "cli.ts", "--help"],
-      { cwd: `${import.meta.dir}/..` },
+      { cwd: `${import.meta.dir}/..`, env: isolatedEnvironment() },
     );
 
     expect(result.exitCode).toBe(0);
@@ -309,7 +327,7 @@ describe("entrypoint", () => {
   test("exposes usage failures as process exit codes", () => {
     const result = Bun.spawnSync(
       [process.execPath, "run", "cli.ts", "unknown"],
-      { cwd: `${import.meta.dir}/..` },
+      { cwd: `${import.meta.dir}/..`, env: isolatedEnvironment() },
     );
 
     expect(result.exitCode).toBe(1);
