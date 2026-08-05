@@ -6,6 +6,8 @@ The plugin system is a generic host for trusted plugins. Core code under `src/` 
 
 The approved target architecture is implemented: the core is generic, the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md), and the canonical package API is scoped as specified in [Change 0004](../../changes/0004-automate-versioning-and-publishing.md).
 
+The namespace ownership model below — one namespace per plugin, named after its identity, with the plugin owning every argument inside it — is specified but **not yet implemented**. It is planned in [Change 0007](../../changes/0007-delegate-dispatch-to-plugins.md). Until that change lands, a plugin registers arbitrary whitespace-separated command paths and the host interprets help itself.
+
 ## Requirements
 
 ### Generic Plugin Host
@@ -18,8 +20,8 @@ The approved target architecture is implemented: the core is generic, the market
 - If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure on standard error against its generic identity, and continue initializing unrelated plugins.
 - A failed plugin MUST NOT prevent commands committed by healthy plugins from dispatching.
 - A failed plugin MUST NOT change the process exit code; the exit code MUST be the result of the dispatched command alone.
-- Because a failed plugin's staged commands are never committed, invoking a command owned only by that plugin MUST NOT run that plugin's handler; the invocation MUST resolve against the committed command tree like any unregistered path, so it MUST fail as an unknown command unless a committed command is a prefix of it.
-- Command collisions MUST reject the later plugin's staged contribution without modifying previously committed commands.
+- Because a failed plugin's namespace is never committed, invoking it MUST NOT run any of that plugin's code; the invocation MUST fail as an unrecognized namespace with a non-zero exit code.
+- Namespace collisions MUST reject the later plugin's staged contribution without modifying previously committed namespaces.
 - Plugins are trusted code and execute with the same process permissions as `tx`.
 
 #### Scenario: Atomic initialization
@@ -49,11 +51,17 @@ The approved target architecture is implemented: the core is generic, the market
 ### Public Plugin Contract
 
 - The public package MUST expose the plugin contract through `@fx/tx/plugin`.
-- The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, command registration, command context, and React, Ink, and version dependencies.
+- The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, namespace registration, command context, and React, Ink, command-parser, and version dependencies.
 - Public plugin types and initialization context MUST NOT contain marketplace names, paths, manifests, storage services, Git services, dependency installers, or marketplace-specific diagnostics.
 - Plugin identity MUST be assigned by the definition's owner and MUST NOT be mutable by the plugin during initialization.
 - Initialization context MUST expose only generic host capabilities.
-- A plugin MAY register any number of top-level or nested commands and MAY contribute any number of lazy child plugin definitions.
+- A plugin MUST own exactly one namespace, and that namespace MUST be the plugin's own identity name. A plugin MUST NOT choose, alias, or add a second namespace, and a nested plugin's namespace MUST come from its own name rather than its parent chain.
+- A plugin MAY define commands, subcommands of arbitrary depth, arguments, options, aliases, and descriptions inside its namespace, and MAY contribute any number of lazy child plugin definitions.
+- A plugin that defines no commands MUST NOT claim a namespace.
+- A plugin that defines commands MUST have an identity name usable as a single command name; an identity name that is not MUST be rejected as a plugin failure rather than silently reshaped.
+- The host MUST give a plugin its namespace already constructed, so defining commands, options, arguments, and help MUST NOT require the plugin to import, install, or construct the command parser.
+- A plugin that wants direct parser access MUST obtain it from injected dependencies, so it shares the host's instance.
+- The initialization context MUST expose the command context to the plugin, so a command can reach process streams, environment, working directory, and owning identity without the host prescribing a handler signature.
 - Plugin initialization MAY be asynchronous.
 - A minimal plugin MUST NOT require a package manifest, build step, or additional source file.
 
@@ -73,13 +81,16 @@ export interface PluginDefinition {
 export interface PluginAPI {
   readonly identity: PluginIdentity
   readonly env: Readonly<Record<string, string | undefined>>
+  readonly context: CommandContext
   readonly dependencies: CoreDependencies
-  command(path: string | readonly string[], handler: CommandHandler): void
+  command(build: (namespace: Command) => void): void
   plugin(definition: PluginDefinition): void
 }
 
 export type Plugin = (api: PluginAPI) => void | Promise<void>
 ```
+
+`Command` is the injected parser's command type, re-exported from `@fx/tx/plugin` so a plugin can type its builder without declaring a parser dependency of its own. `build` MAY be called more than once; every call MUST receive the same namespace, so contributions accumulate rather than replace.
 
 The exact structural representation MAY vary, but it MUST preserve the owned contracts above.
 
@@ -87,29 +98,55 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 - **GIVEN** a plugin imports only public types from `@fx/tx/plugin`
 - **WHEN** it initializes under the host
-- **THEN** it can identify itself, register commands, contribute lazy children, and use injected React, Ink, and version dependencies without a marketplace-specific core API
+- **THEN** it can identify itself, define its namespace, contribute lazy children, and use injected React, Ink, parser, and version dependencies without a marketplace-specific core API
 
-### Command Registration and Dispatch
+#### Scenario: Namespace follows identity
 
-- Core and plugin commands MUST share one command tree.
-- A string command path MUST be split on whitespace; an array path MUST use each array value as one segment.
-- Command paths MUST contain at least one segment, and every segment MUST be non-empty after trimming.
-- Registering an already owned command path MUST fail and identify both generic plugin owners.
-- Dispatch MUST select the longest registered command path matching the start of the argument vector.
-- The selected handler MUST receive remaining arguments and a generic command context.
-- Root and nested help MUST include committed plugin commands.
+- **GIVEN** a marketplace contributes a child plugin whose identity name is `notes`
+- **WHEN** the host commits its contribution
+- **THEN** its commands are reachable under `tx notes` regardless of which marketplace or parent plugin produced it
 
-#### Scenario: Nested registration
+#### Scenario: Plugin authored without the parser
 
-- **GIVEN** a plugin registers `['notes', 'daily', 'open']`
+- **GIVEN** a plugin defines commands and options using only the namespace the host supplies
+- **WHEN** it is built and type-checked as an external consumer
+- **THEN** it needs no parser dependency, package manifest, or build step of its own
+
+### Namespace Ownership and Dispatch
+
+- All committed namespaces MUST live in one root program.
+- Dispatch MUST match only the first argument against committed namespaces.
+- Everything after the namespace MUST be interpreted by its owner, including options, help requests, and options the host defines at the root.
+- The host MUST NOT reserve any option or word inside a plugin's namespace.
+- Claiming an already committed namespace MUST fail and identify both generic plugin owners.
+- Root help MUST list every committed namespace with the description its owner supplied. Help below a namespace MUST be produced by its owner.
+- Every command's output MUST be written through the injected command context streams, including help and error text the parser generates on the plugin's behalf.
+- Dispatch MUST NOT terminate the process on the plugin's behalf; the host MUST convert termination requests into an exit code returned from dispatch.
+- Help and version requests MUST resolve to a successful exit code; every usage rejection and every command failure MUST resolve to a failing one.
+
+#### Scenario: Nested definition
+
+- **GIVEN** the plugin `notes` defines `daily open` inside its namespace
 - **WHEN** the user runs `tx notes daily open today`
-- **THEN** the registered handler receives `['today']`
+- **THEN** that command runs and receives `today`
 
-#### Scenario: Collision
+#### Scenario: Namespace collision
 
-- **GIVEN** two plugins register `notes list`
+- **GIVEN** two committed plugins have the identity name `notes`
 - **WHEN** the later plugin initializes
 - **THEN** its staged contributions are rejected with an error naming both generic plugin identities
+
+#### Scenario: Host options do not leak into a namespace
+
+- **GIVEN** the host defines a version option at the root
+- **WHEN** the user runs `tx notes --version`
+- **THEN** the plugin receives `--version` and the host does not act on it
+
+#### Scenario: Generated output stays on injected streams
+
+- **GIVEN** a plugin command prints its help or rejects its arguments
+- **WHEN** the host dispatches that invocation
+- **THEN** the text appears on the injected streams, the process is not terminated from inside the command, and dispatch returns the matching exit code
 
 ### Generic Context and Dependencies
 
@@ -126,8 +163,8 @@ export interface CommandContext {
 }
 ```
 
-- The core MUST expose React, Ink, tx version metadata, and dependency version metadata through injected dependencies.
-- Plugins using React or Ink MUST obtain the host instances from injected dependencies rather than importing separate runtime copies.
+- The core MUST expose React, Ink, the command parser, tx version metadata, and dependency version metadata through injected dependencies.
+- Plugins using React, Ink, or the command parser MUST obtain the host instances from injected dependencies rather than importing separate runtime copies.
 - Core MUST NOT publicly inject marketplace storage, paths, Git, manifests, discovery, installation, or recovery services.
 - The context and dependencies MAY gain backward-compatible generic fields later.
 
@@ -136,6 +173,12 @@ export interface CommandContext {
 - **GIVEN** a plugin obtains React and Ink from injected dependencies
 - **WHEN** its command renders a TUI
 - **THEN** it uses the same React and Ink module instances as the core
+
+#### Scenario: Shared parser
+
+- **GIVEN** a plugin obtains the command parser from injected dependencies and builds a command detached from its namespace
+- **WHEN** it attaches that command to its namespace
+- **THEN** the host recognizes it as its own parser's command and dispatches it like any other
 
 ### Marketplace Plugin Ownership
 
@@ -246,7 +289,9 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 
 ### Package API
 
-`@fx/tx/plugin` is the only core contract available to a portable plugin. Imports from that path SHOULD be type-only unless a future public runtime API is explicitly specified. React, Ink, and versions remain dependency-injected runtime values.
+`@fx/tx/plugin` is the only core contract available to a portable plugin. Imports from that path SHOULD be type-only unless a future public runtime API is explicitly specified. React, Ink, the command parser, and versions remain dependency-injected runtime values.
+
+The parser is deliberately exposed twice. A plugin that only wants a subcommand receives its namespace already built and never names the parser; a plugin that wants to compose commands, share option definitions, or reuse parser helpers takes the host's instance from injected dependencies. Neither path requires the plugin to install the parser itself.
 
 ## Constraints
 
@@ -257,8 +302,9 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 
 ## Open Questions
 
-- A future plugin API MAY add command descriptions, structured flags, aliases, or additional generic lifecycle hooks after concrete plugins require them.
+- A future plugin API MAY add generic lifecycle hooks beyond initialization and dispatch after concrete plugins require them.
 - Core dependency additions SHOULD be demand-driven and backward-compatible.
+- A convention for plugins that expose a single action at their namespace root, rather than subcommands, MAY be specified once several plugins hand-roll one.
 
 ## References
 
@@ -267,6 +313,7 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 - [Change 0004: Automate Versioning and Publishing](../../changes/0004-automate-versioning-and-publishing.md)
 - [Change 0005: Install Per-Plugin Dependencies](../../changes/0005-install-per-plugin-dependencies.md)
 - [Change 0006: Isolate Plugin Failure Exit Codes](../../changes/0006-isolate-plugin-failure-exit-codes.md)
+- [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -282,3 +329,4 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 | 2026-08-03 | Renamed the canonical public plugin type contract to `@fx/tx/plugin` | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
 | 2026-08-04 | Added safe, ordered, deduplicated per-plugin dependency manifest installation | [0005-install-per-plugin-dependencies](../../changes/0005-install-per-plugin-dependencies.md) |
 | 2026-08-04 | Extended plugin failure isolation to the process exit code | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
+| 2026-08-05 | Gave each plugin one identity-named namespace it fully owns, replaced path registration with a host-supplied command builder, and injected the command parser | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |

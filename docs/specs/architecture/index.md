@@ -6,30 +6,58 @@
 
 The generic core and fully plugin-owned marketplace boundary approved in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md) are implemented.
 
+The Core CLI dispatch model below — one namespace per plugin, with every argument after the namespace delegated to its owner — is specified but **not yet implemented**. It is planned in [Change 0007](../../changes/0007-delegate-dispatch-to-plugins.md). Until that change lands, the implementation resolves the longest matching multi-segment command path, intercepts help itself, and exits `2` on an unknown command.
+
 ## Requirements
 
 ### Core CLI
 
-- Running `tx` without a command MUST show help.
-- Running an unknown command MUST fail with a non-zero exit code and show a useful error.
+- The first argument MUST select a plugin namespace. Every argument after it, including options and help requests, MUST be interpreted by the owning plugin.
+- Core MUST NOT interpret, reserve, consume, or reorder any argument that follows the plugin namespace.
+- Core MUST NOT reserve a top-level word for help; a plugin MAY reserve one inside its own namespace.
+- Running `tx` without arguments MUST show root help on standard error and exit non-zero.
+- Root help MUST list every claimed plugin namespace with the description its owner supplied.
+- A root help request MUST print root help on standard output and exit successfully.
+- An unrecognized first argument MUST report a useful error on standard error and exit non-zero.
+- Any failure — unrecognized namespace, usage rejected by a plugin, or a command that throws — MUST exit non-zero. Core MUST NOT distinguish usage failures from runtime failures by exit code.
+- Help and version requests MUST exit successfully.
+- `--version` and `-V` MUST print the version and exit successfully before plugin initialization, and only when no plugin namespace precedes them.
 - A plugin initialization failure MUST be reported on standard error and MUST NOT change the process exit code; the exit code MUST be the result of the dispatched command alone.
-- Core and plugin commands MUST share one command tree.
-- Command paths MUST support one or more segments, such as `marketplace add` and `notes daily open`.
-- `--help` MUST work at the root and at every command node.
-- Core implementation under `src/` MUST own only generic plugin hosting, generic context and dependency injection, command-tree construction, and dispatch.
+- Nesting below a plugin namespace MUST support arbitrary depth and MUST be defined by the owning plugin.
+- Every byte a command writes MUST go through the injected process context streams.
+- Dispatch MUST NOT terminate the process. Requests to exit — including help, version, and usage errors — MUST resolve to an exit code returned to the composition root.
+- Core implementation under `src/` MUST own only generic plugin hosting, generic context and dependency injection, root program construction, namespace claiming, output routing, and exit-code mapping.
 - No module under `src/` MUST import, name, or select a default plugin.
 
 #### Scenario: Root help
 
 - **GIVEN** `tx` is installed
 - **WHEN** the user runs `tx`
-- **THEN** the CLI lists the available top-level commands
+- **THEN** the CLI lists the available plugin namespaces with their descriptions on standard error and exits non-zero
 
 #### Scenario: Nested command
 
-- **GIVEN** a command is registered at `notes daily open`
-- **WHEN** the user runs `tx notes daily open`
-- **THEN** that command receives the remaining arguments
+- **GIVEN** the plugin `notes` defines `daily open` inside its namespace
+- **WHEN** the user runs `tx notes daily open today`
+- **THEN** the plugin's `daily open` command runs and receives `today`
+
+#### Scenario: Options belong to the plugin
+
+- **GIVEN** the plugin `notes` accepts arbitrary options
+- **WHEN** the user runs `tx notes --version`
+- **THEN** the plugin receives `--version` as its own argument and the CLI does not print the tx version
+
+#### Scenario: Help belongs to the plugin
+
+- **GIVEN** the plugin `notes` defines a `daily` command with its own options
+- **WHEN** the user runs `tx notes daily --help`
+- **THEN** the plugin prints its own usage, including its options, on standard output and the CLI exits successfully
+
+#### Scenario: Host survives a plugin help request
+
+- **GIVEN** a plugin command prints help or rejects its arguments
+- **WHEN** dispatch handles that outcome
+- **THEN** the process is not terminated from inside the command, the text appears on the injected streams, and dispatch returns the corresponding exit code
 
 ### Runtime and Distribution
 
@@ -138,8 +166,8 @@ Generic core implementation in `src/` has four responsibilities:
 
 1. Initialize generic plugin definitions and isolate failures.
 2. Atomically commit commands and lazy child definitions contributed by each successful plugin.
-3. Build one command tree using immutable plugin identities and generic contexts.
-4. Dispatch the longest matching command.
+3. Build one root program in which each plugin owns a namespace named after its identity.
+4. Resolve the first argument to a namespace, delegate the rest to its owner, and map the outcome to an exit code.
 
 The repository composition root lives outside `src/` and supplies ordered default definitions. Feature implementations, including marketplace management, live outside `src/` and depend only on the public plugin contract plus standard runtime APIs.
 
@@ -179,7 +207,9 @@ CI uses non-writing commands and installs with the frozen Bun lockfile.
 
 ### Command Resolution
 
-Commands are identified by arrays of path segments. Dispatch selects the longest registered command path matching the start of `argv`; all remaining values are passed to the command handler.
+Resolution is one level deep. The first argument names a plugin namespace; everything after it is the owning plugin's input, parsed by the plugin's own command definitions. Core never inspects that remainder, which is why an option means whatever the plugin says it means — including options core itself defines at the root.
+
+Because a plugin's commands, options, and help are declared rather than hand-parsed, root help, namespace help, and per-command help are all generated from the same declarations, and no plugin has to hand-write a usage string.
 
 ## Constraints
 
@@ -190,13 +220,14 @@ Commands are identified by arrays of path segments. Dispatch selects the longest
 ## Open Questions
 
 - Additional supported operating systems and architectures may be decided in a future change.
-- The final command-line parser MAY be a small library or a local implementation; it MUST preserve the command behavior in this spec.
+- Plugin initialization is eager: every installed plugin loads on every invocation to contribute its namespace and description. Making that lazy MAY be specified once startup cost justifies the added caching contract.
 - Automatic marketplace updates are out of scope initially.
 
 ## References
 
 - [Plugin System](../plugin-system/)
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
+- [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
 
 ## Changelog
@@ -210,3 +241,4 @@ Commands are identified by arrays of path segments. Dispatch selects the longest
 | 2026-08-03 | Made repository composition neutral and limited `src/` to the generic plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
 | 2026-08-03 | Defined scoped package publishing, Linux x64 release assets, version invariants, manual Release Please approvals, and exact-head dispatched CI | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
 | 2026-08-04 | Limited plugin initialization failures to standard-error diagnostics without changing dispatched exit codes | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
+| 2026-08-05 | Delegated everything after the plugin namespace to its owner, settled the parser question, and collapsed usage and runtime failures onto one exit code | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
