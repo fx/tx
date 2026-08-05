@@ -60,7 +60,9 @@ The namespace ownership model below — one namespace per plugin, named after it
 - A plugin MAY define commands, subcommands of arbitrary depth, arguments, options, aliases, and descriptions inside its namespace, and MAY contribute any number of lazy child plugin definitions.
 - An identity name claiming a namespace MUST be non-empty after trimming, MUST NOT contain whitespace, and MUST NOT begin with `-`. A name that is not MUST be rejected as a plugin failure rather than trimmed, escaped, or otherwise reshaped.
 - The host MUST verify, before committing a contribution, that the staged namespace is still reachable under exactly the plugin's identity name and under no other name. A plugin that renames its namespace, gives it an alias, or otherwise makes it reachable under a second name MUST be rejected as a plugin failure. Supplying the namespace pre-built MUST NOT become a way to reclaim the naming decision the host owns.
-- A namespace builder MUST complete before the registration call returns. A builder that defers work — by returning a thenable or scheduling it for later — MUST be rejected as a plugin failure, because contributions that land after the host commits escape both atomic staging and whatever the host applies to the committed tree. Plugin initialization itself MAY still be asynchronous around the call.
+- A namespace builder MUST complete before the registration call returns, and a builder that returns a thenable MUST be rejected as a plugin failure. Plugin initialization itself MAY still be asynchronous around the call.
+- A staged namespace MUST be treated as final at the moment its builder returns. The host MUST commit what the namespace holds at that point; a plugin MUST NOT rely on mutations made afterwards, and the host is NOT required to detect them. Plugins are trusted in-process code, so a plugin that keeps a reference cannot be prevented from touching it later — the contract states what the host honours, not what a plugin is physically incapable of.
+- Whatever the host applies to the committed tree before dispatch MUST cover every command reachable at that moment, however late it was added. No command reachable when dispatch begins may escape it.
 - The host MUST give a plugin its namespace already constructed, so defining commands, options, arguments, and help MUST NOT require the plugin to import, install, or construct the command parser.
 - A plugin that wants direct parser access MUST obtain it from injected dependencies, so it shares the host's instance.
 - The initialization API MUST expose the command context to the plugin, so a command can reach process streams, environment, working directory, and owning identity without the host prescribing a signature for the plugin's own command implementations.
@@ -94,7 +96,9 @@ export type Plugin = (api: PluginAPI) => void | Promise<void>
 
 `Command` is the injected parser's command type, re-exported from `@fx/tx/plugin` so a plugin can type its builder without declaring a parser dependency of its own. A plugin MAY call `command` more than once; each call MUST receive that plugin's one namespace, so contributions accumulate rather than replace.
 
-The `void` return on `build` is a contract, not a formality: a language that accepts an asynchronous function wherever a void-returning one is expected will let a plugin's later mutations land after the host has committed and finalized the tree, so the host MUST reject a deferring builder rather than trust the signature.
+The `void` return on `build` is a contract, not a formality. A language that accepts an asynchronous function wherever a void-returning one is expected will happily let an `async` builder return at its first `await`, leaving the rest of its work to land after the host has moved on — so the host rejects a thenable return rather than trusting the signature.
+
+That check catches the accident, not every possibility: a synchronous builder can still schedule work and return cleanly, and no return-value inspection can see that. The guarantee therefore does not rest on detection. It rests on *when* the host reads the tree — finality at builder return, and a pre-dispatch pass that covers everything reachable by then, whenever it arrived.
 
 The exact structural representation MAY vary, but it MUST preserve the owned contracts above.
 
