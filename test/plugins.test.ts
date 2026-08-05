@@ -47,13 +47,15 @@ describe("public plugin contract", () => {
     await expect(import("@fx/tx/plugin")).rejects.toThrow();
   });
 
-  test("injects shared frozen dependencies for the type-only contract", () => {
+  test("injects shared frozen dependencies for the type-only contract", async () => {
     expect(coreDependencies.react).toBe(react);
     expect(coreDependencies.ink).toBe(ink);
+    expect(coreDependencies.commander).toBe(await import("commander"));
     expect(coreDependencies.tx.version).toBe(packageMetadata.version);
     expect(coreDependencies.versions).toEqual({
       react: packageMetadata.dependencies.react,
       ink: packageMetadata.dependencies.ink,
+      commander: packageMetadata.dependencies.commander,
     });
     expect(Object.isFrozen(coreDependencies)).toBe(true);
     expect(Object.isFrozen(coreDependencies.tx)).toBe(true);
