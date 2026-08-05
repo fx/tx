@@ -1,14 +1,15 @@
+import type { Command } from "commander";
 import * as commander from "commander";
 import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
 import {
-  type CommandRegistration,
-  type CommandRegistry,
   freezePluginIdentity,
+  identityName,
+  type PluginNamespace,
 } from "./commands.ts";
+import { type CommandProcessContext, createProcessContext } from "./context.ts";
 import type {
-  CommandHandler,
   CoreDependencies,
   PluginAPI,
   PluginDefinition,
@@ -34,18 +35,69 @@ export interface PluginLoadFailure {
 
 export interface InitializePluginsOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
+  readonly context?: CommandProcessContext;
   readonly dependencies?: CoreDependencies;
 }
+
+export interface InitializedPlugins {
+  readonly namespaces: readonly PluginNamespace[];
+  readonly failures: readonly PluginLoadFailure[];
+}
+
+/** Non-empty, whitespace-free, and never confusable with an option. */
+const namespaceNamePattern = /^[^\s-]\S*$/;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isThenable(value: unknown): boolean {
+  return (
+    typeof (value as { then?: unknown } | null | undefined)?.then === "function"
+  );
+}
+
+function namespaceClaimError(identity: PluginIdentity): Error | undefined {
+  return namespaceNamePattern.test(identity.name)
+    ? undefined
+    : new Error(
+        `Plugin ${identityName(identity)} cannot claim namespace "${identity.name}"; a namespace name must not be empty, contain whitespace, or begin with "-"`,
+      );
+}
+
+/**
+ * Verify the plugin left its namespace reachable under exactly its identity
+ * name. Handing the plugin a live command object would otherwise let it
+ * reclaim the naming decision the host owns.
+ */
+function verifyNamespaceName(namespace: Command, identity: PluginIdentity) {
+  if (namespace.name() !== identity.name) {
+    throw new Error(
+      `Plugin ${identityName(identity)} renamed its namespace to "${namespace.name()}"; a namespace must stay reachable as "${identity.name}"`,
+    );
+  }
+  const aliases = namespace.aliases();
+  if (aliases.length > 0) {
+    throw new Error(
+      `Plugin ${identityName(identity)} aliased its namespace as ${aliases.map((alias) => `"${alias}"`).join(", ")}; a namespace must stay reachable only as "${identity.name}"`,
+    );
+  }
+}
+
 export async function initializePlugins(
-  registry: CommandRegistry,
   definitions: readonly PluginDefinition[] = [],
   options: InitializePluginsOptions = {},
-): Promise<readonly PluginLoadFailure[]> {
+): Promise<InitializedPlugins> {
+  const processContext = options.context ?? createProcessContext();
+  // One environment for both `PluginAPI.env` and the command context, so an
+  // injected environment cannot reach one and miss the other.
+  const env = (options.env ?? processContext.env) as Record<
+    string,
+    string | undefined
+  >;
+  const dependencies = options.dependencies ?? coreDependencies;
+  const namespaces: PluginNamespace[] = [];
+  const claimed = new Map<string, PluginNamespace>();
   const failures: PluginLoadFailure[] = [];
   const queue: Array<PluginDefinition | undefined> = [...definitions];
 
@@ -64,22 +116,49 @@ export async function initializePlugins(
       continue;
     }
 
-    let registrations: CommandRegistration[] | undefined = [];
-    let children: PluginDefinition[] | undefined = [];
+    let staging = true;
+    let namespace: Command | undefined;
+    let violation: Error | undefined;
+    const children: PluginDefinition[] = [];
+    /**
+     * Remember a registration violation as well as raising it. A plugin that
+     * catches the throw must still fail rather than commit what it staged.
+     */
+    const reject = (error: Error): never => {
+      violation ??= error;
+      throw violation;
+    };
     const api: PluginAPI = Object.freeze({
       identity,
-      env: options.env ?? process.env,
-      dependencies: options.dependencies ?? coreDependencies,
-      command(path: string | readonly string[], handler: CommandHandler) {
-        if (!registrations) {
+      env,
+      context: { ...processContext, env, plugin: identity },
+      dependencies,
+      command(build: (namespace: Command) => void) {
+        if (!staging) {
           throw new Error(
             `Plugin ${identity.name} cannot register commands after initialization`,
           );
         }
-        registrations.push({ path, owner: identity, handler });
+        if (!namespace) {
+          const claimError = namespaceClaimError(identity);
+          if (claimError) reject(claimError);
+          namespace = new dependencies.commander.Command(identity.name);
+        }
+        const result: unknown = build(namespace);
+        if (isThenable(result)) {
+          // The builder's own promise stays the plugin's business, but an
+          // unobserved rejection would fault the host, so its outcome is
+          // swallowed here.
+          void Promise.resolve(result).catch(() => {});
+          reject(
+            new Error(
+              `Plugin ${identity.name} must build its namespace synchronously; the builder returned a promise`,
+            ),
+          );
+        }
       },
       plugin(child: PluginDefinition) {
-        if (!children) {
+        if (!staging) {
           throw new Error(
             `Plugin ${identity.name} cannot contribute plugins after initialization`,
           );
@@ -94,18 +173,31 @@ export async function initializePlugins(
         throw new Error("Plugin definition must load a function");
       }
       await plugin(api);
-      const stagedRegistrations = registrations;
-      const stagedChildren = children;
-      registrations = undefined;
-      children = undefined;
-      registry.registerBatch(stagedRegistrations);
-      queue.push(...stagedChildren);
+      staging = false;
+      if (violation) throw violation;
+
+      if (namespace) {
+        verifyNamespaceName(namespace, identity);
+        const owner = claimed.get(identity.name);
+        if (owner) {
+          throw new Error(
+            `Namespace "${identity.name}" is already claimed by ${identityName(owner.identity)}; cannot claim it for ${identityName(identity)}`,
+          );
+        }
+        const contribution = Object.freeze({ identity, command: namespace });
+        claimed.set(identity.name, contribution);
+        namespaces.push(contribution);
+      }
+
+      queue.push(...children);
     } catch (error) {
-      registrations = undefined;
-      children = undefined;
+      staging = false;
       failures.push(Object.freeze({ identity, message: errorMessage(error) }));
     }
   }
 
-  return Object.freeze(failures);
+  return Object.freeze({
+    namespaces: Object.freeze(namespaces),
+    failures: Object.freeze(failures),
+  });
 }

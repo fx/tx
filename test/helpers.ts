@@ -2,6 +2,43 @@ import { expect } from "bun:test";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { CommandProcessContext } from "../src/context.ts";
+
+export interface CapturedContext extends CommandProcessContext {
+  stdoutText(): string;
+  stderrText(): string;
+}
+
+/**
+ * A process context whose streams are captured rather than shared with the
+ * test runner. Dispatch assertions use it so an escape from output routing
+ * fails the suite instead of quietly polluting real process streams.
+ */
+export function captureContext(
+  env: Record<string, string | undefined> = {},
+): CapturedContext {
+  let stdout = "";
+  let stderr = "";
+  return {
+    cwd: "/work",
+    env,
+    stdin: {} as NodeJS.ReadStream,
+    stdout: {
+      write(value: string) {
+        stdout += value;
+        return true;
+      },
+    } as NodeJS.WriteStream,
+    stderr: {
+      write(value: string) {
+        stderr += value;
+        return true;
+      },
+    } as NodeJS.WriteStream,
+    stdoutText: () => stdout,
+    stderrText: () => stderr,
+  };
+}
 
 export async function temporaryDirectory(prefix: string): Promise<string> {
   return realpath(await mkdtemp(join(tmpdir(), prefix)));

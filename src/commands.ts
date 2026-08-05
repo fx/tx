@@ -1,39 +1,59 @@
+import type { Command, CommanderError } from "commander";
 import type { CommandProcessContext } from "./context.ts";
-import type {
-  CommandContext,
-  CommandHandler,
-  PluginIdentity,
-} from "./plugin.ts";
-
-export type { CommandHandler } from "./plugin.ts";
-
-export type CommandPath = string | readonly string[];
-
-export interface Command {
-  readonly path: readonly string[];
-  readonly owner: PluginIdentity;
-  readonly handler: CommandHandler;
-}
-
-export interface CommandRegistration {
-  readonly path: CommandPath;
-  readonly owner: PluginIdentity;
-  readonly handler: CommandHandler;
-}
-
-interface CommandNode {
-  command?: Command;
-  children: Map<string, CommandNode>;
-}
-
-export interface DispatchResult {
-  exitCode: number;
-  command?: Command;
-}
+import type { CoreDependencies, PluginIdentity } from "./plugin.ts";
 
 export const EXIT_SUCCESS = 0;
 export const EXIT_FAILURE = 1;
-export const EXIT_USAGE = 2;
+
+/**
+ * The root options the host owns. They are recognized only as the first
+ * argument; anything after a plugin namespace belongs to that plugin.
+ */
+const rootOptions = new Set(["--help", "-h", "--version", "-V"]);
+
+/**
+ * Parser outcomes that answer a help request. The parser reports the same code
+ * whether it printed help because the user asked for it or because it could not
+ * make sense of the arguments, so the code alone does not settle the exit
+ * status; the stream it printed on does. Everything the parser reports outside
+ * these codes and `commander.version` is a failure. Mapping by code keeps the
+ * CLI's contract independent of the parser's own exit numbers.
+ */
+const helpParserCodes = new Set(["commander.help", "commander.helpDisplayed"]);
+
+/** What the parser reported during one dispatch. */
+interface ParserSignals {
+  /**
+   * The exits the parser raised in place of terminating the process. Only
+   * these are parser outcomes; an error a command threw is a command failure
+   * however closely it resembles one.
+   */
+  readonly exits: WeakSet<object>;
+  /**
+   * Whether the parser sent the help it printed last to standard error. It
+   * answers a request on standard output and rejects arguments it could not
+   * use on standard error, which is the signal the shared code lacks.
+   */
+  helpOnStandardError: boolean;
+}
+
+/**
+ * The signals the newest hardening pass installed on each command. The parser
+ * accumulates help hooks rather than replacing them, so a command may only ever
+ * be given one recorder; the recorder reads its signals from here so that
+ * hardening the same tree again retargets it at the dispatch in flight instead
+ * of leaving another closure behind.
+ */
+const helpRecorders = new WeakMap<Command, { signals: ParserSignals }>();
+
+export interface PluginNamespace {
+  readonly identity: PluginIdentity;
+  readonly command: Command;
+}
+
+export interface DispatchResult {
+  readonly exitCode: number;
+}
 
 export function identityName(identity: PluginIdentity): string {
   const names: string[] = [];
@@ -56,145 +76,74 @@ export function freezePluginIdentity(identity: PluginIdentity): PluginIdentity {
   );
 }
 
-export function normalizeCommandPath(path: CommandPath): readonly string[] {
-  const segments =
-    typeof path === "string" ? path.trim().split(/\s+/) : Array.from(path);
+export function createRootProgram(
+  dependencies: CoreDependencies,
+  namespaces: readonly PluginNamespace[] = [],
+): Command {
+  const program = new dependencies.commander.Command("tx")
+    .description("Extensible command-line toolbox")
+    .version(dependencies.tx.version)
+    .helpCommand(false)
+    .enablePositionalOptions();
 
-  if (segments.length === 0) {
-    throw new Error("Command path must contain one or more non-empty segments");
-  }
+  for (const namespace of namespaces) program.addCommand(namespace.command);
 
-  const normalized: string[] = [];
-  for (const segment of segments) {
-    if (typeof segment !== "string" || segment.trim().length === 0) {
-      throw new Error(
-        "Command path must contain one or more non-empty segments",
-      );
-    }
-    normalized.push(segment.trim());
-  }
-
-  return Object.freeze(normalized);
+  return program;
 }
 
-export class CommandRegistry {
-  readonly #root: CommandNode;
-
-  constructor() {
-    this.#root = { children: new Map() };
+/**
+ * Route output to the injected streams, replace process termination with a
+ * thrown outcome, and record which stream each command sends its help to, for
+ * every command reachable in the assembled tree. Attaching a pre-built command
+ * propagates none of it, so the pass has to be recursive and has to run after
+ * every plugin has contributed. The recorder contributes no help text of its
+ * own; it only observes the destination the parser chose. Running the pass over
+ * a command it already covers retargets what is there rather than layering
+ * another recorder onto it.
+ */
+function hardenCommandTree(
+  command: Command,
+  context: CommandProcessContext,
+  signals: ParserSignals,
+): void {
+  command.exitOverride((exit: CommanderError) => {
+    signals.exits.add(exit);
+    // The parser reports a spawned executable subcommand's failure from an
+    // event handler, where throwing would have nowhere to land; the default
+    // override skips it and so does this one.
+    if (exit.code !== "commander.executeSubCommandAsync") throw exit;
+  });
+  command.configureOutput({
+    writeOut(value: string) {
+      context.stdout.write(value);
+    },
+    writeErr(value: string) {
+      context.stderr.write(value);
+    },
+  });
+  const recorder = helpRecorders.get(command);
+  if (recorder) {
+    recorder.signals = signals;
+  } else {
+    const installed = { signals };
+    helpRecorders.set(command, installed);
+    command.addHelpText("before", ({ error }) => {
+      installed.signals.helpOnStandardError = error;
+      return "";
+    });
   }
-
-  register(
-    path: CommandPath,
-    owner: PluginIdentity,
-    handler: CommandHandler,
-  ): Command {
-    return this.registerBatch([{ path, owner, handler }])[0] as Command;
+  for (const child of command.commands) {
+    hardenCommandTree(child, context, signals);
   }
+}
 
-  registerBatch(
-    registrations: readonly CommandRegistration[],
-  ): readonly Command[] {
-    const commands: Command[] = [];
-    for (const { path, owner, handler } of registrations) {
-      commands.push(
-        Object.freeze({
-          path: normalizeCommandPath(path),
-          owner: freezePluginIdentity(owner),
-          handler,
-        }),
-      );
-    }
-    const pending = new Map<string, Command>();
-
-    for (const command of commands) {
-      const key = JSON.stringify(command.path);
-      const conflicting = this.#find(command.path) ?? pending.get(key);
-      if (conflicting) {
-        throw new Error(
-          `Command "${command.path.join(" ")}" is already registered by ${identityName(conflicting.owner)}; cannot register it for ${identityName(command.owner)}`,
-        );
-      }
-      pending.set(key, command);
-    }
-
-    for (const command of commands) {
-      let node = this.#root;
-      for (const segment of command.path) {
-        let child = node.children.get(segment);
-        if (!child) {
-          child = { children: new Map() };
-          node.children.set(segment, child);
-        }
-        node = child;
-      }
-      node.command = command;
-    }
-
-    return Object.freeze(commands);
-  }
-
-  #find(path: readonly string[]): Command | undefined {
-    let node = this.#root;
-    for (const segment of path) {
-      const child = node.children.get(segment);
-      if (!child) return undefined;
-      node = child;
-    }
-    return node.command;
-  }
-
-  resolve(argv: readonly string[]): Command | undefined {
-    let node = this.#root;
-    let match: Command | undefined;
-
-    for (const segment of argv) {
-      const child = node.children.get(segment);
-      if (!child) break;
-      node = child;
-      match = node.command ?? match;
-    }
-
-    return match;
-  }
-
-  resolveHelpPath(argv: readonly string[]): readonly string[] | undefined {
-    let node = this.#root;
-    const path: string[] = [];
-    let commandPath: readonly string[] | undefined;
-
-    for (const segment of argv) {
-      const child = node.children.get(segment);
-      if (!child) return commandPath;
-      node = child;
-      path.push(segment);
-      if (node.command) commandPath = [...path];
-    }
-
-    return path;
-  }
-
-  help(path: readonly string[] = []): string | undefined {
-    let node = this.#root;
-
-    for (const segment of path) {
-      const child = node.children.get(segment);
-      if (!child) return undefined;
-      node = child;
-    }
-
-    const children = [...node.children.keys()].sort();
-    const usage = path.length === 0 ? "tx" : `tx ${path.join(" ")}`;
-    const hasCommandSlot = path.length === 0 || children.length > 0;
-    const lines = [`Usage: ${usage}${hasCommandSlot ? " <command>" : ""}`];
-
-    if (children.length > 0) {
-      lines.push("", "Commands:");
-      for (const child of children) lines.push(`  ${child}`);
-    }
-
-    return `${lines.join("\n")}\n`;
-  }
+function parserExit(
+  error: unknown,
+  signals: ParserSignals,
+): CommanderError | undefined {
+  return typeof error === "object" && error !== null && signals.exits.has(error)
+    ? (error as CommanderError)
+    : undefined;
 }
 
 function writeError(stderr: NodeJS.WriteStream, error: unknown): void {
@@ -203,43 +152,45 @@ function writeError(stderr: NodeJS.WriteStream, error: unknown): void {
 }
 
 export async function dispatch(
-  registry: CommandRegistry,
+  program: Command,
   argv: readonly string[],
-  processContext: CommandProcessContext,
+  context: CommandProcessContext,
 ): Promise<DispatchResult> {
-  const helpIndex = argv.indexOf("--help");
-  if (argv.length === 0 || helpIndex !== -1) {
-    const requestedPath = helpIndex === -1 ? [] : argv.slice(0, helpIndex);
-    const helpPath = registry.resolveHelpPath(requestedPath);
-    const help = helpPath ? registry.help(helpPath) : undefined;
+  const signals: ParserSignals = {
+    exits: new WeakSet(),
+    helpOnStandardError: false,
+  };
+  hardenCommandTree(program, context, signals);
 
-    if (!help) {
-      processContext.stderr.write(
-        `Error: Unknown command "${requestedPath.join(" ")}". Run "tx --help" for usage.\n`,
-      );
-      return { exitCode: EXIT_USAGE };
-    }
-
-    processContext.stdout.write(help);
-    return { exitCode: EXIT_SUCCESS };
+  const first = argv[0];
+  if (first === undefined) {
+    program.outputHelp({ error: true });
+    return { exitCode: EXIT_FAILURE };
   }
 
-  const command = registry.resolve(argv);
-  if (!command) {
-    processContext.stderr.write(
-      `Error: Unknown command "${argv.join(" ")}". Run "tx --help" for usage.\n`,
+  if (
+    !rootOptions.has(first) &&
+    !program.commands.some((command) => command.name() === first)
+  ) {
+    context.stderr.write(
+      `Error: Unknown command "${first}". Run "tx --help" for usage.\n`,
     );
-    return { exitCode: EXIT_USAGE };
+    return { exitCode: EXIT_FAILURE };
   }
-
-  const context: CommandContext = { ...processContext, plugin: command.owner };
-  const args = argv.slice(command.path.length);
 
   try {
-    await command.handler(args, context);
-    return { exitCode: EXIT_SUCCESS, command };
+    await program.parseAsync(argv, { from: "user" });
+    return { exitCode: EXIT_SUCCESS };
   } catch (error) {
-    writeError(processContext.stderr, error);
-    return { exitCode: EXIT_FAILURE, command };
+    const exit = parserExit(error, signals);
+    if (!exit) {
+      writeError(context.stderr, error);
+      return { exitCode: EXIT_FAILURE };
+    }
+    if (exit.code === "commander.version") return { exitCode: EXIT_SUCCESS };
+    if (helpParserCodes.has(exit.code) && !signals.helpOnStandardError) {
+      return { exitCode: EXIT_SUCCESS };
+    }
+    return { exitCode: EXIT_FAILURE };
   }
 }

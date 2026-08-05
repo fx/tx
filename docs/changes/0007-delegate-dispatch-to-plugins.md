@@ -5,7 +5,7 @@
 Replace the core command trie with a Commander-based root program that resolves only the first argument to a plugin namespace and hands every remaining argument to that plugin, including options and help requests. Each plugin that defines commands owns one namespace named after its identity, builds its own command tree, and receives the parser both pre-built and injected.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** 0006
 
 ## Motivation
@@ -117,25 +117,25 @@ Neither check can catch a synchronous builder that schedules work and returns cl
   - [x] Add tests asserting the injected module is the host instance and that the version metadata matches the manifest
   - [x] Confirm `test/plugin-consumer.test.ts` still type-checks an external consumer with no parser dependency of its own
 
-- [ ] Delegate dispatch to plugin namespaces
-  - [ ] Replace the trie in `src/commands.ts` with root-program construction, first-argument validation, recursive tree hardening, and exit-code mapping
-  - [ ] Test that an unrecognized first argument reports the error and fails even when a root option follows it, covering both root options in both forms
-  - [ ] Delete `CommandRegistry`, `normalizeCommandPath`, and `EXIT_USAGE`
-  - [ ] Change `PluginAPI.command` to the namespace builder and add `PluginAPI.context` in `src/plugin.ts`
-  - [ ] Derive each namespace from the plugin's own identity name in `src/plugins.ts`, reject identity names the spec disallows, claim a namespace only for plugins that define commands, and keep staging atomic
-  - [ ] Accumulate repeated registration calls onto the plugin's single namespace instead of replacing it, and test it
-  - [ ] Reject a builder that returns a thenable, and test that an `async` builder fails the plugin instead of landing its work after the commit
-  - [ ] Fix the staged namespace when the plugin's initialization completes, harden the whole tree immediately before parse, and test that a command added late is still covered
-  - [ ] Validate the staged namespace at commit time against the plugin's identity name, and test that renaming it or adding an alias fails the plugin
-  - [ ] Reject a second plugin claiming an already claimed namespace, naming both plugin identities
-  - [ ] Extend the pre-initialization version fast path in `src/cli.ts` to match either root version form as the first argument regardless of what follows it, replacing today's single-argument check, and cover both forms with and without a trailing token
-  - [ ] Migrate `plugins/marketplace/index.ts` to declared subcommands, arguments, and options
-  - [ ] Delete the three hand-written argument parsers from `plugins/marketplace/manager.ts` and keep the marketplace-owned validators
-  - [ ] Rewrite `test/commands.test.ts`, `test/cli.test.ts`, `test/plugins.test.ts`, `test/plugin-system.test.ts`, `test/marketplace-plugin.test.ts`, and `test/standalone.test.ts` for the new dispatch, help, stream, and exit-code behavior
-  - [ ] Add tests proving an un-hardened path cannot escape: a plugin whose subcommand prints help MUST NOT terminate the host and MUST write to the injected stream
-  - [ ] Add tests proving options after the namespace reach the plugin, including a flag the root itself defines
-  - [ ] Update `docs/manual/plugins.md` for the new authoring API, namespace rule, help delegation, and exit codes
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Delegate dispatch to plugin namespaces (PR #20)
+  - [x] Replace the trie in `src/commands.ts` with root-program construction, first-argument validation, recursive tree hardening, and exit-code mapping
+  - [x] Test that an unrecognized first argument reports the error and fails even when a root option follows it, covering both root options in both forms
+  - [x] Delete `CommandRegistry`, `normalizeCommandPath`, and `EXIT_USAGE`
+  - [x] Change `PluginAPI.command` to the namespace builder and add `PluginAPI.context` in `src/plugin.ts`
+  - [x] Derive each namespace from the plugin's own identity name in `src/plugins.ts`, reject identity names the spec disallows, claim a namespace only for plugins that define commands, and keep staging atomic
+  - [x] Accumulate repeated registration calls onto the plugin's single namespace instead of replacing it, and test it
+  - [x] Reject a builder that returns a thenable, and test that an `async` builder fails the plugin instead of landing its work after the commit
+  - [x] Fix the staged namespace when the plugin's initialization completes, harden the whole tree immediately before parse, and test that a command added late is still covered
+  - [x] Validate the staged namespace at commit time against the plugin's identity name, and test that renaming it or adding an alias fails the plugin
+  - [x] Reject a second plugin claiming an already claimed namespace, naming both plugin identities
+  - [x] Extend the pre-initialization version fast path in `src/cli.ts` to match either root version form as the first argument regardless of what follows it, replacing today's single-argument check, and cover both forms with and without a trailing token
+  - [x] Migrate `plugins/marketplace/index.ts` to declared subcommands, arguments, and options
+  - [x] Delete the three hand-written argument parsers from `plugins/marketplace/manager.ts` and keep the marketplace-owned validators
+  - [x] Rewrite `test/commands.test.ts`, `test/cli.test.ts`, `test/plugins.test.ts`, `test/plugin-system.test.ts`, `test/marketplace-plugin.test.ts`, and `test/standalone.test.ts` for the new dispatch, help, stream, and exit-code behavior
+  - [x] Add tests proving an un-hardened path cannot escape: a plugin whose subcommand prints help MUST NOT terminate the host and MUST write to the injected stream
+  - [x] Add tests proving options after the namespace reach the plugin, including a flag the root itself defines
+  - [x] Update `docs/manual/plugins.md` for the new authoring API, namespace rule, help delegation, and exit codes
+  - [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 

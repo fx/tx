@@ -13,9 +13,6 @@ import {
   deriveMarketplaceName,
   MarketplaceManager,
   normalizeMarketplaceRepository,
-  parseAddMarketplaceArguments,
-  parseListMarketplaceArguments,
-  parseRemoveMarketplaceArguments,
   runGit,
 } from "../plugins/marketplace/manager.ts";
 import {
@@ -134,45 +131,6 @@ describe("marketplace names and arguments", () => {
     ["git@github.com:fx/tx.git", "git@github.com:fx/tx.git"],
   ])("normalizes repository %s as %s", (repository, expected) => {
     expect(normalizeMarketplaceRepository(repository)).toBe(expected);
-  });
-
-  test("strictly parses add arguments with the name in either position", () => {
-    expect(parseAddMarketplaceArguments(["repo"])).toEqual({
-      repository: "repo",
-    });
-    expect(parseAddMarketplaceArguments(["--name", "mine", "repo"])).toEqual({
-      repository: "repo",
-      name: "mine",
-    });
-    expect(parseAddMarketplaceArguments(["repo", "--name", "mine"])).toEqual({
-      repository: "repo",
-      name: "mine",
-    });
-  });
-
-  test.each([
-    [[]],
-    [["repo", "extra"]],
-    [["--unknown", "repo"]],
-    [["--name"]],
-    [["--name", "--other", "repo"]],
-    [["--name", "one", "--name", "two", "repo"]],
-    [["repo", "--name", "../bad"]],
-  ] as const)("rejects invalid add arguments %#", (args) => {
-    expect(() => parseAddMarketplaceArguments(args)).toThrow();
-  });
-
-  test("strictly parses list and remove arguments", () => {
-    expect(parseListMarketplaceArguments([])).toBeUndefined();
-    expect(() => parseListMarketplaceArguments(["extra"])).toThrow(
-      "Usage: tx marketplace list",
-    );
-    expect(parseRemoveMarketplaceArguments(["mine"])).toBe("mine");
-    expect(() => parseRemoveMarketplaceArguments([])).toThrow(
-      "Usage: tx marketplace remove <name>",
-    );
-    expect(() => parseRemoveMarketplaceArguments(["one", "two"])).toThrow();
-    expect(() => parseRemoveMarketplaceArguments(["../bad"])).toThrow();
   });
 });
 

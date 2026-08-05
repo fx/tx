@@ -1,14 +1,10 @@
 /// <reference types="node" />
 
+import type { Command } from "commander";
 import type { CommandContext } from "./context.ts";
 
 export type { Command } from "commander";
 export type { CommandContext } from "./context.ts";
-
-export type CommandHandler = (
-  args: string[],
-  context: CommandContext,
-) => void | Promise<void>;
 
 export interface PluginIdentity {
   readonly name: string;
@@ -37,8 +33,9 @@ export interface PluginDefinition {
 export interface PluginAPI {
   readonly identity: PluginIdentity;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly context: CommandContext;
   readonly dependencies: CoreDependencies;
-  command(path: string | readonly string[], handler: CommandHandler): void;
+  command(build: (namespace: Command) => void): void;
   plugin(definition: PluginDefinition): void;
 }
 

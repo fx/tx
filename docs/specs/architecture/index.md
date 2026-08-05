@@ -6,8 +6,6 @@
 
 The generic core and fully plugin-owned marketplace boundary approved in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md) are implemented.
 
-The Core CLI dispatch model below — one namespace per plugin, with every argument after the namespace delegated to its owner — is specified but **not yet implemented**. It is planned in [Change 0007](../../changes/0007-delegate-dispatch-to-plugins.md). Until that change lands, the implementation resolves the longest matching multi-segment command path, intercepts help itself, and exits `2` on an unknown command.
-
 ## Requirements
 
 ### Core CLI
@@ -243,4 +241,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-03 | Made repository composition neutral and limited `src/` to the generic plugin host | [0003-externalize-marketplace-plugin](../../changes/0003-externalize-marketplace-plugin.md) |
 | 2026-08-03 | Defined scoped package publishing, Linux x64 release assets, version invariants, manual Release Please approvals, and exact-head dispatched CI | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
 | 2026-08-04 | Limited plugin initialization failures to standard-error diagnostics without changing dispatched exit codes | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
-| 2026-08-05 | Specified delegation of everything after the plugin namespace to its owner, settled the parser question, and collapsed usage and runtime failures onto one exit code — planned, not yet implemented | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
+| 2026-08-05 | Delegated everything after the plugin namespace to its owner, settled the parser question, and collapsed usage and runtime failures onto one exit code | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
