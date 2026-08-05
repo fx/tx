@@ -93,7 +93,7 @@ tx resolves the first argument only. `--help`, `-h`, `--version`, and `-V` are t
 
 Root help lists every claimed namespace with the description its owner supplied, and per-command help is generated from your declarations, so no plugin hand-writes a usage string.
 
-Every byte a command writes goes through the injected context streams, and dispatch never terminates the process: help, version, and usage rejections all resolve to an exit code.
+Every byte the host writes — root help, generated usage, version, and parser diagnostics — goes through the injected context streams, and dispatch itself never terminates the process: help, version, and usage rejections all resolve to an exit code returned to the composition root. Write your own output through the `context` streams rather than `process.stdout` or `process.stderr`, and let your actions return or throw instead of calling `process.exit`; plugins are trusted code, so nothing stops you from bypassing either, and both guarantees are yours to keep inside your own actions.
 
 ## Exit codes
 
