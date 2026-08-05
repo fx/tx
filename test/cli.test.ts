@@ -98,6 +98,21 @@ describe("root version fast path", () => {
 });
 
 describe("main", () => {
+  // The tests below that bootstrap the bundled plugins discover marketplaces
+  // from the data directory their context supplies, which falls back to the
+  // real user data directory when the context supplies none. Pointing it at an
+  // empty one keeps their stream assertions about dispatch rather than about
+  // whatever the machine running the suite happens to have installed.
+  let emptyDataHome = "";
+
+  beforeAll(async () => {
+    emptyDataHome = await temporaryDirectory("tx-cli-main-");
+  });
+
+  afterAll(async () => {
+    await rm(emptyDataHome, { recursive: true, force: true });
+  });
+
   test("returns the dispatched command's exit code with injected process wiring", async () => {
     const context = captureContext();
 
@@ -109,7 +124,7 @@ describe("main", () => {
   });
 
   test("bootstraps the plugins it is given and nothing else", async () => {
-    const bundled = captureContext();
+    const bundled = captureContext({ XDG_DATA_HOME: emptyDataHome });
     expect(await main(["marketplace", "--help"], defaultPlugins, bundled)).toBe(
       0,
     );
@@ -149,7 +164,7 @@ describe("main", () => {
       usage: "Usage: tx marketplace",
     },
   ])("answers $label", async ({ argv, exitCode, onStandardError, usage }) => {
-    const context = captureContext();
+    const context = captureContext({ XDG_DATA_HOME: emptyDataHome });
 
     expect(await main(argv, defaultPlugins, context)).toBe(exitCode);
     expect(
