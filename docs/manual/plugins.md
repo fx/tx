@@ -97,10 +97,10 @@ Every byte the host writes — root help, generated usage, version, and parser d
 
 ## Exit codes
 
-- `0` — a command action that returns, a help request (`--help`, `-h`), or a version request (`--version`, `-V`).
+- `0` — a command action that returns, a version request (`--version`, `-V`), or any help a user asked for: `--help` and `-h` at any depth, and a `help` subcommand inside your namespace if you keep the parser's default one. Requested help prints on standard output.
 - `1` — everything else: an unrecognized first argument, arguments your parser rejects, a namespace invoked without one of its subcommands, or an action that throws. tx does not distinguish usage failures from runtime failures by exit code.
 
-`tx` with no arguments prints root help on standard error and exits non-zero.
+Usage that a user did not ask for — the help printed because your namespace needed a subcommand and got none — prints on standard error and counts as a failure, exactly as `tx` with no arguments prints root help on standard error and exits non-zero.
 
 Commands and child definitions registered during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, namespace validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed on standard error and do not change the exit code of the command you ran, so a dispatched command keeps its own exit code — an action that succeeds still exits `0` — while a broken plugin is reported alongside it. Because a failed plugin claims nothing, invoking the namespace it would have owned is reported as an unknown command.
 

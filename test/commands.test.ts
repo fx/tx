@@ -372,21 +372,74 @@ describe("exit-code mapping", () => {
     expect(context.stderrText()).toContain("unknown option '--unknown'");
   });
 
-  test("fails when a namespace is invoked without one of its subcommands", async () => {
+  // The parser reports one code for help it was asked for and help it printed
+  // because it could not use the arguments, so these outcomes are asserted
+  // together: they must never collapse onto a single exit code again.
+  test.each([
+    {
+      label: "a plugin's own help subcommand",
+      argv: ["notes", "help"],
+      exitCode: EXIT_SUCCESS,
+      onStandardError: false,
+      usage: "Usage: tx notes [options] [command]",
+    },
+    {
+      label: "a plugin's own help subcommand for one of its commands",
+      argv: ["notes", "help", "daily"],
+      exitCode: EXIT_SUCCESS,
+      onStandardError: false,
+      usage: "Usage: tx notes daily [options]",
+    },
+    {
+      label: "a help option on one of the plugin's commands",
+      argv: ["notes", "daily", "--help"],
+      exitCode: EXIT_SUCCESS,
+      onStandardError: false,
+      usage: "Usage: tx notes daily [options]",
+    },
+    {
+      label: "a namespace invoked without one of its subcommands",
+      argv: ["notes"],
+      exitCode: EXIT_FAILURE,
+      onStandardError: true,
+      usage: "Usage: tx notes [options] [command]",
+    },
+  ])(
+    "resolves $label by where the parser sent the help",
+    async ({ argv, exitCode, onStandardError, usage }) => {
+      const context = captureContext();
+      const program = createRootProgram(coreDependencies, [
+        namespace("notes", (command) => {
+          command
+            .description("Take notes")
+            .command("daily")
+            .description("Daily notes");
+        }),
+      ]);
+
+      expect(await dispatch(program, argv, context)).toEqual({ exitCode });
+      expect(
+        onStandardError ? context.stderrText() : context.stdoutText(),
+      ).toContain(usage);
+      expect(
+        onStandardError ? context.stdoutText() : context.stderrText(),
+      ).toBe("");
+    },
+  );
+
+  test("still shows root help on standard error and fails without arguments", async () => {
     const context = captureContext();
     const program = createRootProgram(coreDependencies, [
-      namespace("notes", (command) => {
-        command.description("Take notes").command("daily").description("Daily");
-      }),
+      namespace("notes", (command) =>
+        command.description("Take notes").command("daily"),
+      ),
     ]);
 
-    expect(await dispatch(program, ["notes"], context)).toEqual({
+    expect(await dispatch(program, [], context)).toEqual({
       exitCode: EXIT_FAILURE,
     });
     expect(context.stdoutText()).toBe("");
-    expect(context.stderrText()).toContain(
-      "Usage: tx notes [options] [command]",
-    );
+    expect(context.stderrText()).toContain("Usage: tx [options] [command]");
   });
 
   test("does not mistake a command's own error code for a parser outcome", async () => {

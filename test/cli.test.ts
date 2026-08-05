@@ -124,6 +124,42 @@ describe("main", () => {
     expect(bare.stderrText()).not.toContain("marketplace");
   });
 
+  // The bundled plugin keeps the parser's implicit help subcommand, so these
+  // three outcomes are user-reachable today and must stay distinct.
+  test.each([
+    {
+      label: "the bundled plugin's help subcommand",
+      argv: ["marketplace", "help"],
+      exitCode: 0,
+      onStandardError: false,
+      usage: "Usage: tx marketplace",
+    },
+    {
+      label: "the bundled plugin's help subcommand for one of its commands",
+      argv: ["marketplace", "help", "add"],
+      exitCode: 0,
+      onStandardError: false,
+      usage: "Usage: tx marketplace add",
+    },
+    {
+      label: "the bundled namespace with no subcommand",
+      argv: ["marketplace"],
+      exitCode: 1,
+      onStandardError: true,
+      usage: "Usage: tx marketplace",
+    },
+  ])("answers $label", async ({ argv, exitCode, onStandardError, usage }) => {
+    const context = captureContext();
+
+    expect(await main(argv, defaultPlugins, context)).toBe(exitCode);
+    expect(
+      onStandardError ? context.stderrText() : context.stdoutText(),
+    ).toContain(usage);
+    expect(onStandardError ? context.stdoutText() : context.stderrText()).toBe(
+      "",
+    );
+  });
+
   test("reports ordered load errors without changing the dispatched exit code", async () => {
     const dataHome = await mkdtemp(join(tmpdir(), "tx-cli-plugins-"));
     const marketplaceRoot = join(dataHome, "tx", "marketplaces");

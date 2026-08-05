@@ -12,15 +12,23 @@ export const EXIT_FAILURE = 1;
 const rootOptions = new Set(["--help", "-h", "--version", "-V"]);
 
 /**
- * Parser outcomes that resolve to success. Everything else the parser reports
- * — including a namespace invoked without a subcommand, which the parser
- * answers with usage on standard error — is a failure. Mapping by code keeps
- * the CLI's contract independent of the parser's own exit numbers.
+ * Parser outcomes that answer a help request. The parser reports the same code
+ * whether it printed help because the user asked for it or because it could not
+ * make sense of the arguments, so the code alone does not settle the exit
+ * status; `helpDestination` does. Everything the parser reports outside these
+ * codes and `commander.version` is a failure. Mapping by code keeps the CLI's
+ * contract independent of the parser's own exit numbers.
  */
-const successfulParserCodes = new Set([
-  "commander.helpDisplayed",
-  "commander.version",
-]);
+const helpParserCodes = new Set(["commander.help", "commander.helpDisplayed"]);
+
+/**
+ * Where the parser sent the help it printed last. It answers a request on
+ * standard output and rejects arguments it could not use on standard error,
+ * which is the signal the shared code lacks.
+ */
+interface HelpDestination {
+  standardError: boolean;
+}
 
 export interface PluginNamespace {
   readonly identity: PluginIdentity;
@@ -68,14 +76,17 @@ export function createRootProgram(
 }
 
 /**
- * Route output to the injected streams and replace process termination with a
- * thrown outcome, for every command reachable in the assembled tree. Attaching
- * a pre-built command propagates neither setting, so the pass has to be
- * recursive and has to run after every plugin has contributed.
+ * Route output to the injected streams, replace process termination with a
+ * thrown outcome, and record which stream each command sends its help to, for
+ * every command reachable in the assembled tree. Attaching a pre-built command
+ * propagates none of it, so the pass has to be recursive and has to run after
+ * every plugin has contributed. The recorder contributes no help text of its
+ * own; it only observes the destination the parser chose.
  */
 function hardenCommandTree(
   command: Command,
   context: CommandProcessContext,
+  help: HelpDestination,
 ): void {
   command.exitOverride();
   command.configureOutput({
@@ -86,7 +97,13 @@ function hardenCommandTree(
       context.stderr.write(value);
     },
   });
-  for (const child of command.commands) hardenCommandTree(child, context);
+  command.addHelpText("before", ({ error }) => {
+    help.standardError = error;
+    return "";
+  });
+  for (const child of command.commands) {
+    hardenCommandTree(child, context, help);
+  }
 }
 
 function parserErrorCode(error: unknown): string | undefined {
@@ -107,7 +124,8 @@ export async function dispatch(
   argv: readonly string[],
   context: CommandProcessContext,
 ): Promise<DispatchResult> {
-  hardenCommandTree(program, context);
+  const help: HelpDestination = { standardError: false };
+  hardenCommandTree(program, context, help);
 
   const first = argv[0];
   if (first === undefined) {
@@ -134,8 +152,10 @@ export async function dispatch(
       writeError(context.stderr, error);
       return { exitCode: EXIT_FAILURE };
     }
-    return {
-      exitCode: successfulParserCodes.has(code) ? EXIT_SUCCESS : EXIT_FAILURE,
-    };
+    if (code === "commander.version") return { exitCode: EXIT_SUCCESS };
+    if (helpParserCodes.has(code) && !help.standardError) {
+      return { exitCode: EXIT_SUCCESS };
+    }
+    return { exitCode: EXIT_FAILURE };
   }
 }
