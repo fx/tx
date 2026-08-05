@@ -64,6 +64,6 @@ changes:
     path: changes/0007-delegate-dispatch-to-plugins.md
     description: Give each plugin one identity-named namespace and delegate every argument after it, including options and help, to its owner via Commander.
     spec: plugin-system
-    status: draft
+    status: in-progress
     depends_on:
       - "0006"

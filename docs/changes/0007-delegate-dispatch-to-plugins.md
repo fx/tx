@@ -5,7 +5,7 @@
 Replace the core command trie with a Commander-based root program that resolves only the first argument to a plugin namespace and hands every remaining argument to that plugin, including options and help requests. Each plugin that defines commands owns one namespace named after its identity, builds its own command tree, and receives the parser both pre-built and injected.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** in-progress
 **Depends On:** 0006
 
 ## Motivation
@@ -110,7 +110,7 @@ Neither check can catch a synchronous builder that schedules work and returns cl
 
 ## Tasks
 
-- [x] Inject the parser as a core dependency
+- [x] Inject the parser as a core dependency (PR #19)
   - [x] Add `commander` to runtime dependencies and the lockfile
   - [x] Extend `CoreDependencies` in `src/plugin.ts` with the parser module and its version, and populate both in `src/plugins.ts`
   - [x] Re-export the parser's command type from `@fx/tx/plugin` so plugins type their builders without declaring their own parser dependency
