@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { EventEmitter } from "node:events";
 import type { Command } from "commander";
 
 import {
@@ -319,6 +320,61 @@ describe("delegation to a namespace", () => {
     expect(terminated).toBe(false);
     expect(context.stdoutText()).toContain("Usage: tx notes daily [options]");
     expect(context.stderrText()).toBe("");
+  });
+});
+
+describe("repeated dispatch against one program", () => {
+  /**
+   * The parser registers the hooks `addHelpText` installs as listeners on the
+   * command itself, `"before"` ones under `beforeHelp`, so how many a command
+   * carries is observable without reading a private field. The parser's own
+   * types expose only `on` over that emitter, hence the view through
+   * `EventEmitter` to count what is registered.
+   */
+  function helpHooks(command: Command): number {
+    return command.commands.reduce(
+      (total, child) => total + helpHooks(child),
+      (command as unknown as EventEmitter).listenerCount("beforeHelp"),
+    );
+  }
+
+  test("answers the same and installs no further help recorders", async () => {
+    const program = createRootProgram(coreDependencies, [
+      namespace("notes", (command) => {
+        command
+          .description("Take notes")
+          .command("daily")
+          .description("Daily notes");
+      }),
+    ]);
+
+    const first = captureContext();
+    expect(
+      await dispatch(program, ["notes", "daily", "--help"], first),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    // One recorder each for the root, the namespace, and its subcommand.
+    expect(helpHooks(program)).toBe(3);
+
+    const help = captureContext();
+    expect(await dispatch(program, ["notes", "daily", "--help"], help)).toEqual(
+      {
+        exitCode: EXIT_SUCCESS,
+      },
+    );
+    expect(help.stdoutText()).toContain("Usage: tx notes daily [options]");
+    expect(help.stderrText()).toBe("");
+
+    // A recorder left pointing at an earlier dispatch would report the help
+    // this one printed on standard error as a request answered on standard
+    // output, so this outcome also pins the recorder to the dispatch in flight.
+    const usage = captureContext();
+    expect(await dispatch(program, ["notes"], usage)).toEqual({
+      exitCode: EXIT_FAILURE,
+    });
+    expect(usage.stderrText()).toContain("Usage: tx notes [options] [command]");
+    expect(usage.stdoutText()).toBe("");
+
+    expect(helpHooks(program)).toBe(3);
   });
 });
 

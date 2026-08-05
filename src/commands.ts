@@ -37,6 +37,15 @@ interface ParserSignals {
   helpOnStandardError: boolean;
 }
 
+/**
+ * The signals the newest hardening pass installed on each command. The parser
+ * accumulates help hooks rather than replacing them, so a command may only ever
+ * be given one recorder; the recorder reads its signals from here so that
+ * hardening the same tree again retargets it at the dispatch in flight instead
+ * of leaving another closure behind.
+ */
+const helpRecorders = new WeakMap<Command, { signals: ParserSignals }>();
+
 export interface PluginNamespace {
   readonly identity: PluginIdentity;
   readonly command: Command;
@@ -88,7 +97,9 @@ export function createRootProgram(
  * every command reachable in the assembled tree. Attaching a pre-built command
  * propagates none of it, so the pass has to be recursive and has to run after
  * every plugin has contributed. The recorder contributes no help text of its
- * own; it only observes the destination the parser chose.
+ * own; it only observes the destination the parser chose. Running the pass over
+ * a command it already covers retargets what is there rather than layering
+ * another recorder onto it.
  */
 function hardenCommandTree(
   command: Command,
@@ -110,10 +121,17 @@ function hardenCommandTree(
       context.stderr.write(value);
     },
   });
-  command.addHelpText("before", ({ error }) => {
-    signals.helpOnStandardError = error;
-    return "";
-  });
+  const recorder = helpRecorders.get(command);
+  if (recorder) {
+    recorder.signals = signals;
+  } else {
+    const installed = { signals };
+    helpRecorders.set(command, installed);
+    command.addHelpText("before", ({ error }) => {
+      installed.signals.helpOnStandardError = error;
+      return "";
+    });
+  }
   for (const child of command.commands) {
     hardenCommandTree(child, context, signals);
   }
