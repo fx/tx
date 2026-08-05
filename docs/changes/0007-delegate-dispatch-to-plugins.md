@@ -58,7 +58,7 @@ What implementing them requires of this change:
 
 ### Approach
 
-`src/commands.ts` loses `CommandRegistry`, `normalizeCommandPath`, and the trie entirely. In its place, core builds one root program, collects a namespace command from each successfully initialized plugin that staged commands, validates the first argument, and parses. Plugins that stage no commands — the marketplace's intermediate discovery definitions among them — contribute nothing to the root and MUST NOT surface as empty namespaces.
+`src/commands.ts` loses `CommandRegistry`, `normalizeCommandPath`, and the trie entirely. In its place, core builds one root program, collects a namespace command from each successfully initialized plugin that staged commands, validates the first argument, and parses. The marketplace's intermediate discovery definitions stage no commands, so the collection step skips them and they never reach the root program.
 
 Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a plugin's namespace command is built into a staged object and only attached to the root program if initialization succeeds. The queue, FIFO ordering, failure isolation, and diagnostics are untouched.
 
@@ -72,9 +72,9 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
   - **Why:** It is the only widely used Node parser that supports both halves of this change out of the box — nested subcommands with generated per-level help, and positional option scoping so options after a subcommand name are not stolen by the root. It requires Node `>=22.12`, which Bun satisfies.
   - **Alternatives considered:** Extending the existing trie was rejected — descriptions, typed options, variadic arguments, and per-level help are exactly the surface a parser library exists to provide, and the manual said as much. `citty` and `cac` were considered and rejected for weaker nested-subcommand help and smaller ecosystems.
 
-- **Decision:** The root program enables positional-option scoping, and each plugin namespace enables pass-through.
-  - **Why:** This is what makes "everything after the plugin name belongs to the plugin" literally true. Verified experimentally: without positional scoping, `tx notes --version` prints tx's version and the plugin never sees the flag; with it, the flag reaches the plugin's own parser, which accepts or rejects it on the plugin's terms.
-  - **Alternatives considered:** Slicing `argv` at the namespace and calling the plugin's parser directly was rejected because the root then cannot generate a namespace listing with descriptions, and every plugin has to re-derive its own program name for usage lines.
+- **Decision:** The root program enables positional-option scoping, and core does nothing else to the plugin's own option handling.
+  - **Why:** Root scoping alone is what makes "everything after the plugin name belongs to the plugin" literally true. Verified experimentally: without it, `tx notes --version` prints tx's version and the plugin never sees the flag; with it, the flag reaches the plugin's own parser, which accepts or rejects it on the plugin's terms.
+  - **Alternatives considered:** Also forcing pass-through onto every namespace was rejected after testing — pass-through stops option parsing at the first operand, so a namespace declaring both an argument and an option rejects `tx notes file --format json` as excess arguments while accepting `tx notes --format json file`. That silently constrains valid syntax the plugin contract permits. Pass-through remains available to any plugin that wants it, chosen by the plugin rather than imposed by core. Slicing `argv` at the namespace and calling the plugin's parser directly was rejected because the root then cannot generate a namespace listing with descriptions, and every plugin has to re-derive its own program name for usage lines.
 
 - **Decision:** Core validates the first argument itself, before handing the vector to the parser.
   - **Why:** Positional scoping engages only after a *recognized* namespace, so it does not cover an unrecognized one. Verified experimentally: with scoping enabled but no first-argument check, `tx missing --version` prints the version and exits `0`, and `tx missing --help` prints root help and exits `0`, instead of reporting that `missing` is not a namespace. Only `tx missing` on its own reports the error. A first-argument check closes the gap without weakening delegation, because it inspects exactly one token and never the remainder.
@@ -121,7 +121,7 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
   - [ ] Derive each namespace from the plugin's own identity name in `src/plugins.ts`, reject identity names the spec disallows, claim a namespace only for plugins that define commands, and keep staging atomic
   - [ ] Accumulate repeated registration calls onto the plugin's single namespace instead of replacing it, and test it
   - [ ] Reject a second plugin claiming an already claimed namespace, naming both plugin identities
-  - [ ] Extend the pre-initialization version fast path in `src/cli.ts` to both root version forms, and cover both in tests
+  - [ ] Extend the pre-initialization version fast path in `src/cli.ts` to match either root version form as the first argument regardless of what follows it, replacing today's single-argument check, and cover both forms with and without a trailing token
   - [ ] Migrate `plugins/marketplace/index.ts` to declared subcommands, arguments, and options
   - [ ] Delete the three hand-written argument parsers from `plugins/marketplace/manager.ts` and keep the marketplace-owned validators
   - [ ] Rewrite `test/commands.test.ts`, `test/cli.test.ts`, `test/plugins.test.ts`, `test/plugin-system.test.ts`, `test/marketplace-plugin.test.ts`, and `test/standalone.test.ts` for the new dispatch, help, stream, and exit-code behavior
