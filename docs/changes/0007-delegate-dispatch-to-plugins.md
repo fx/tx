@@ -4,7 +4,7 @@
 
 Replace the core command trie with a Commander-based root program that resolves only the first argument to a plugin namespace and hands every remaining argument to that plugin, including options and help requests. Each plugin owns exactly one namespace named after its identity, builds its own command tree, and receives the parser both pre-built and injected.
 
-**Spec:** [Plugin System](../specs/plugin-system/), [Architecture](../specs/architecture/)
+**Spec:** [Plugin System](../specs/plugin-system/)
 **Status:** draft
 **Depends On:** 0006
 
@@ -38,7 +38,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ### Functional Requirements
 
-[Architecture: Core CLI](../specs/architecture/index.md#core-cli) owns the root dispatch contract, delegation boundary, help behavior, and exit codes. [Plugin System: Public Plugin Contract](../specs/plugin-system/index.md#public-plugin-contract) and [Plugin System: Namespace Ownership and Dispatch](../specs/plugin-system/index.md#namespace-ownership-and-dispatch) own the namespace, registration, and dependency-injection contracts. Their scenarios are this change's acceptance criteria and are not restated here.
+[Architecture: Core CLI](../specs/architecture/index.md#core-cli) owns the root dispatch contract, delegation boundary, help behavior, and exit codes. [Plugin System: Public Plugin Contract](../specs/plugin-system/index.md#public-plugin-contract) and [Plugin System: Namespace Ownership](../specs/plugin-system/index.md#namespace-ownership) own the namespace, registration, and dependency-injection contracts. Their scenarios are this change's acceptance criteria and are not restated here. This change amends both specs; the index records Plugin System as its primary spec.
 
 What implementing them requires of this change:
 
@@ -46,8 +46,7 @@ What implementing them requires of this change:
 - The marketplace plugin's hand-written argument parsers MUST be replaced by declared arguments and options. Validation that is genuinely marketplace-owned — local-name safety in particular — MUST remain, and MUST keep rejecting the same inputs it rejects today.
 - `EXIT_USAGE` becomes unreachable and MUST be removed rather than left as dead configuration.
 - The exit-code change is user-visible: an unknown command drops from `2` to `1`, and bare `tx` moves from stdout/`0` to stderr/non-zero. Both are documented in `docs/manual/plugins.md`, which MUST be corrected in the same pull request that changes the behavior.
-- The published package's type surface grows a parser dependency. `test/plugin-consumer.test.ts` builds an external consumer against `@fx/tx/plugin`; it MUST continue to type-check without the consumer declaring its own parser dependency.
-- `test/plugin-boundary.test.ts` MUST continue to prove that no module under `src/` reaches a bundled plugin and no bundled plugin reaches private core modules.
+- Two existing guards cover contracts this change puts under new pressure and MUST keep passing rather than being relaxed: `test/plugin-consumer.test.ts` guards the parser-free authoring contract in [Plugin System: Public Plugin Contract](../specs/plugin-system/index.md#public-plugin-contract) as the published type surface grows a parser dependency, and `test/plugin-boundary.test.ts` guards [Plugin System: Composition and Boundaries](../specs/plugin-system/index.md#composition-and-boundaries) as core and the marketplace plugin are rewritten together.
 
 #### Scenario: Marketplace name validation survives the parser migration
 
@@ -114,9 +113,10 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
   - [ ] Replace the trie in `src/commands.ts` with root-program construction, recursive tree hardening, and exit-code mapping
   - [ ] Delete `CommandRegistry`, `normalizeCommandPath`, and `EXIT_USAGE`
   - [ ] Change `PluginAPI.command` to the namespace builder and add `PluginAPI.context` in `src/plugin.ts`
-  - [ ] Derive each namespace from the plugin's own identity name in `src/plugins.ts`, reject identity names unusable as a command name, and keep staging atomic
+  - [ ] Derive each namespace from the plugin's own identity name in `src/plugins.ts`, reject identity names the spec disallows, claim a namespace only for plugins that define commands, and keep staging atomic
+  - [ ] Accumulate repeated registration calls onto the plugin's single namespace instead of replacing it, and test it
   - [ ] Reject a second plugin claiming an already claimed namespace, naming both plugin identities
-  - [ ] Keep the pre-initialization `--version` fast path in `src/cli.ts`
+  - [ ] Extend the pre-initialization version fast path in `src/cli.ts` to both root version forms, and cover both in tests
   - [ ] Migrate `plugins/marketplace/index.ts` to declared subcommands, arguments, and options
   - [ ] Delete the three hand-written argument parsers from `plugins/marketplace/manager.ts` and keep the marketplace-owned validators
   - [ ] Rewrite `test/commands.test.ts`, `test/cli.test.ts`, `test/plugins.test.ts`, `test/plugin-system.test.ts`, `test/marketplace-plugin.test.ts`, and `test/standalone.test.ts` for the new dispatch, help, stream, and exit-code behavior

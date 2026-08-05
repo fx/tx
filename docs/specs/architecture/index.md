@@ -12,7 +12,8 @@ The Core CLI dispatch model below — one namespace per plugin, with every argum
 
 ### Core CLI
 
-- The first argument MUST select a plugin namespace. Every argument after it, including options and help requests, MUST be interpreted by the owning plugin.
+- The host MUST define exactly two root options, help and version, and MUST recognize them only as the first argument.
+- Any first argument that is not a root option MUST select a plugin namespace. Every argument after that namespace, including options and help requests, MUST be interpreted by the owning plugin.
 - Core MUST NOT interpret, reserve, consume, or reorder any argument that follows the plugin namespace.
 - Core MUST NOT reserve a top-level word for help; a plugin MAY reserve one inside its own namespace.
 - Running `tx` without arguments MUST show root help on standard error and exit non-zero.
@@ -220,7 +221,7 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 ## Open Questions
 
 - Additional supported operating systems and architectures may be decided in a future change.
-- Plugin initialization is eager: every installed plugin loads on every invocation to contribute its namespace and description. Making that lazy MAY be specified once startup cost justifies the added caching contract.
+- Plugin initialization is eager: every installed plugin loads on every invocation to contribute its namespace and description. Making it lazy is worth revisiting if startup cost comes to justify the added caching contract.
 - Automatic marketplace updates are out of scope initially.
 
 ## References

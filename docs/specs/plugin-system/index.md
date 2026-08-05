@@ -55,13 +55,13 @@ The namespace ownership model below — one namespace per plugin, named after it
 - Public plugin types and initialization context MUST NOT contain marketplace names, paths, manifests, storage services, Git services, dependency installers, or marketplace-specific diagnostics.
 - Plugin identity MUST be assigned by the definition's owner and MUST NOT be mutable by the plugin during initialization.
 - Initialization context MUST expose only generic host capabilities.
-- A plugin MUST own exactly one namespace, and that namespace MUST be the plugin's own identity name. A plugin MUST NOT choose, alias, or add a second namespace, and a nested plugin's namespace MUST come from its own name rather than its parent chain.
-- A plugin MAY define commands, subcommands of arbitrary depth, arguments, options, aliases, and descriptions inside its namespace, and MAY contribute any number of lazy child plugin definitions.
 - A plugin that defines no commands MUST NOT claim a namespace.
-- A plugin that defines commands MUST have an identity name usable as a single command name; an identity name that is not MUST be rejected as a plugin failure rather than silently reshaped.
+- A plugin that defines commands MUST claim exactly one, and it MUST be the plugin's own identity name. A plugin MUST NOT choose, alias, or add a second namespace, and a nested plugin's namespace MUST come from its own name rather than its parent chain.
+- A plugin MAY define commands, subcommands of arbitrary depth, arguments, options, aliases, and descriptions inside its namespace, and MAY contribute any number of lazy child plugin definitions.
+- An identity name claiming a namespace MUST be non-empty after trimming, MUST NOT contain whitespace, and MUST NOT begin with `-`. A name that is not MUST be rejected as a plugin failure rather than trimmed, escaped, or otherwise reshaped.
 - The host MUST give a plugin its namespace already constructed, so defining commands, options, arguments, and help MUST NOT require the plugin to import, install, or construct the command parser.
 - A plugin that wants direct parser access MUST obtain it from injected dependencies, so it shares the host's instance.
-- The initialization context MUST expose the command context to the plugin, so a command can reach process streams, environment, working directory, and owning identity without the host prescribing a handler signature.
+- The initialization API MUST expose the command context to the plugin, so a command can reach process streams, environment, working directory, and owning identity without the host prescribing a signature for the plugin's own command implementations.
 - Plugin initialization MAY be asynchronous.
 - A minimal plugin MUST NOT require a package manifest, build step, or additional source file.
 
@@ -90,7 +90,7 @@ export interface PluginAPI {
 export type Plugin = (api: PluginAPI) => void | Promise<void>
 ```
 
-`Command` is the injected parser's command type, re-exported from `@fx/tx/plugin` so a plugin can type its builder without declaring a parser dependency of its own. `build` MAY be called more than once; every call MUST receive the same namespace, so contributions accumulate rather than replace.
+`Command` is the injected parser's command type, re-exported from `@fx/tx/plugin` so a plugin can type its builder without declaring a parser dependency of its own. A plugin MAY call `command` more than once; each call MUST receive that plugin's one namespace, so contributions accumulate rather than replace.
 
 The exact structural representation MAY vary, but it MUST preserve the owned contracts above.
 
@@ -112,45 +112,24 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - **WHEN** it is built and type-checked as an external consumer
 - **THEN** it needs no parser dependency, package manifest, or build step of its own
 
-### Namespace Ownership and Dispatch
+### Namespace Ownership
+
+What a user can type and what the CLI does with it — argument delegation, help, output routing, and exit codes — is owned by [Architecture: Core CLI](../architecture/index.md#core-cli) and is not restated here. This section owns only how a namespace comes to exist and who holds it.
 
 - All committed namespaces MUST live in one root program.
-- Dispatch MUST match only the first argument against committed namespaces.
-- Everything after the namespace MUST be interpreted by its owner, including options, help requests, and options the host defines at the root.
-- The host MUST NOT reserve any option or word inside a plugin's namespace.
+- A namespace MUST become reachable only when the plugin that claims it is committed.
 - Claiming an already committed namespace MUST fail and identify both generic plugin owners.
-- Root help MUST list every committed namespace with the description its owner supplied. Help below a namespace MUST be produced by its owner.
-- Every command's output MUST be written through the injected command context streams, including help and error text the parser generates on the plugin's behalf.
-- Dispatch MUST NOT terminate the process on the plugin's behalf; the host MUST convert termination requests into an exit code returned from dispatch.
-- Help and version requests MUST resolve to a successful exit code; every usage rejection and every command failure MUST resolve to a failing one.
-
-#### Scenario: Nested definition
-
-- **GIVEN** the plugin `notes` defines `daily open` inside its namespace
-- **WHEN** the user runs `tx notes daily open today`
-- **THEN** that command runs and receives `today`
+- The description shown for a namespace in root help MUST be the one its owner supplied.
 
 #### Scenario: Namespace collision
 
-- **GIVEN** two committed plugins have the identity name `notes`
-- **WHEN** the later plugin initializes
+- **GIVEN** a committed plugin has the identity name `notes`
+- **WHEN** a later definition with the same identity name initializes
 - **THEN** its staged contributions are rejected with an error naming both generic plugin identities
-
-#### Scenario: Host options do not leak into a namespace
-
-- **GIVEN** the host defines a version option at the root
-- **WHEN** the user runs `tx notes --version`
-- **THEN** the plugin receives `--version` and the host does not act on it
-
-#### Scenario: Generated output stays on injected streams
-
-- **GIVEN** a plugin command prints its help or rejects its arguments
-- **WHEN** the host dispatches that invocation
-- **THEN** the text appears on the injected streams, the process is not terminated from inside the command, and dispatch returns the matching exit code
 
 ### Generic Context and Dependencies
 
-Each command handler MUST receive generic process and identity context. The context MUST NOT expose marketplace-specific fields.
+Every command MUST be able to reach generic process and identity context through the initialization API, whatever signature the plugin gives its own command implementations. The context MUST NOT expose marketplace-specific fields.
 
 ```ts
 export interface CommandContext {
@@ -304,7 +283,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 
 - A future plugin API MAY add generic lifecycle hooks beyond initialization and dispatch after concrete plugins require them.
 - Core dependency additions SHOULD be demand-driven and backward-compatible.
-- A convention for plugins that expose a single action at their namespace root, rather than subcommands, MAY be specified once several plugins hand-roll one.
+- A convention for plugins that expose a single action at their namespace root, rather than subcommands, could be specified if plugins repeatedly hand-roll one.
 
 ## References
 
