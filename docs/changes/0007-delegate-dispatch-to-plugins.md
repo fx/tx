@@ -110,12 +110,12 @@ Neither check can catch a synchronous builder that schedules work and returns cl
 
 ## Tasks
 
-- [ ] Inject the parser as a core dependency
-  - [ ] Add `commander` to runtime dependencies and the lockfile
-  - [ ] Extend `CoreDependencies` in `src/plugin.ts` with the parser module and its version, and populate both in `src/plugins.ts`
-  - [ ] Re-export the parser's command type from `@fx/tx/plugin` so plugins type their builders without declaring their own parser dependency
-  - [ ] Add tests asserting the injected module is the host instance and that the version metadata matches the manifest
-  - [ ] Confirm `test/plugin-consumer.test.ts` still type-checks an external consumer with no parser dependency of its own
+- [x] Inject the parser as a core dependency
+  - [x] Add `commander` to runtime dependencies and the lockfile
+  - [x] Extend `CoreDependencies` in `src/plugin.ts` with the parser module and its version, and populate both in `src/plugins.ts`
+  - [x] Re-export the parser's command type from `@fx/tx/plugin` so plugins type their builders without declaring their own parser dependency
+  - [x] Add tests asserting the injected module is the host instance and that the version metadata matches the manifest
+  - [x] Confirm `test/plugin-consumer.test.ts` still type-checks an external consumer with no parser dependency of its own
 
 - [ ] Delegate dispatch to plugin namespaces
   - [ ] Replace the trie in `src/commands.ts` with root-program construction, first-argument validation, recursive tree hardening, and exit-code mapping

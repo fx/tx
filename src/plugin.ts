@@ -2,6 +2,7 @@
 
 import type { CommandContext } from "./context.ts";
 
+export type { Command } from "commander";
 export type { CommandContext } from "./context.ts";
 
 export type CommandHandler = (
@@ -20,9 +21,11 @@ export interface CoreDependencies {
   };
   readonly react: typeof import("react");
   readonly ink: typeof import("ink");
+  readonly commander: typeof import("commander");
   readonly versions: {
     readonly react: string;
     readonly ink: string;
+    readonly commander: string;
   };
 }
 

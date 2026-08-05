@@ -1,3 +1,4 @@
+import * as commander from "commander";
 import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -18,9 +19,11 @@ export const coreDependencies: CoreDependencies = Object.freeze({
   tx: Object.freeze({ version: packageMetadata.version }),
   react,
   ink,
+  commander,
   versions: Object.freeze({
     react: packageMetadata.dependencies.react,
     ink: packageMetadata.dependencies.ink,
+    commander: packageMetadata.dependencies.commander,
   }),
 });
 
