@@ -59,6 +59,8 @@ The namespace ownership model below — one namespace per plugin, named after it
 - A plugin that defines commands MUST claim exactly one, and it MUST be the plugin's own identity name. A plugin MUST NOT choose, alias, or add a second namespace, and a nested plugin's namespace MUST come from its own name rather than its parent chain.
 - A plugin MAY define commands, subcommands of arbitrary depth, arguments, options, aliases, and descriptions inside its namespace, and MAY contribute any number of lazy child plugin definitions.
 - An identity name claiming a namespace MUST be non-empty after trimming, MUST NOT contain whitespace, and MUST NOT begin with `-`. A name that is not MUST be rejected as a plugin failure rather than trimmed, escaped, or otherwise reshaped.
+- The host MUST verify, before committing a contribution, that the staged namespace is still reachable under exactly the plugin's identity name and under no other name. A plugin that renames its namespace, gives it an alias, or otherwise makes it reachable under a second name MUST be rejected as a plugin failure. Supplying the namespace pre-built MUST NOT become a way to reclaim the naming decision the host owns.
+- A namespace builder MUST complete before the registration call returns. A builder that defers work — by returning a thenable or scheduling it for later — MUST be rejected as a plugin failure, because contributions that land after the host commits escape both atomic staging and whatever the host applies to the committed tree. Plugin initialization itself MAY still be asynchronous around the call.
 - The host MUST give a plugin its namespace already constructed, so defining commands, options, arguments, and help MUST NOT require the plugin to import, install, or construct the command parser.
 - A plugin that wants direct parser access MUST obtain it from injected dependencies, so it shares the host's instance.
 - The initialization API MUST expose the command context to the plugin, so a command can reach process streams, environment, working directory, and owning identity without the host prescribing a signature for the plugin's own command implementations.
@@ -91,6 +93,8 @@ export type Plugin = (api: PluginAPI) => void | Promise<void>
 ```
 
 `Command` is the injected parser's command type, re-exported from `@fx/tx/plugin` so a plugin can type its builder without declaring a parser dependency of its own. A plugin MAY call `command` more than once; each call MUST receive that plugin's one namespace, so contributions accumulate rather than replace.
+
+The `void` return on `build` is a contract, not a formality: a language that accepts an asynchronous function wherever a void-returning one is expected will let a plugin's later mutations land after the host has committed and finalized the tree, so the host MUST reject a deferring builder rather than trust the signature.
 
 The exact structural representation MAY vary, but it MUST preserve the owned contracts above.
 

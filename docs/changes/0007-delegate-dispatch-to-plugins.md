@@ -62,6 +62,8 @@ What implementing them requires of this change:
 
 Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a plugin's namespace command is built into a staged object and only attached to the root program if initialization succeeds. The queue, FIFO ordering, failure isolation, and diagnostics are untouched.
 
+Handing the plugin a live command object opens two escapes that path-string registration did not have, so staging gains two checks. A builder that defers its work is refused outright, because anything it does after returning would land past the commit point and past the hardening pass. The staged namespace is then re-checked against the plugin's identity name before it is attached, since the builder holds an object whose own name and aliases it can change.
+
 `src/plugin.ts` changes `PluginAPI.command` from `(path, handler)` to a builder that receives the plugin's pre-built namespace command, and gains `PluginAPI.context` so a plugin can reach the injected streams from inside an action without threading them through a handler signature. `CoreDependencies` gains the parser module and its version alongside React and Ink.
 
 `plugins/marketplace/index.ts` declares `add`, `list`, and `remove` as real subcommands with declared arguments and options. `parseAddMarketplaceArguments`, `parseListMarketplaceArguments`, and `parseRemoveMarketplaceArguments` in `plugins/marketplace/manager.ts` are deleted; `validateMarketplaceName`, `normalizeMarketplaceRepository`, and `deriveMarketplaceName` stay, because they encode marketplace safety rules rather than argument syntax.
@@ -120,6 +122,8 @@ Registration staging in `src/plugins.ts` is preserved verbatim in behavior: a pl
   - [ ] Change `PluginAPI.command` to the namespace builder and add `PluginAPI.context` in `src/plugin.ts`
   - [ ] Derive each namespace from the plugin's own identity name in `src/plugins.ts`, reject identity names the spec disallows, claim a namespace only for plugins that define commands, and keep staging atomic
   - [ ] Accumulate repeated registration calls onto the plugin's single namespace instead of replacing it, and test it
+  - [ ] Reject a builder that defers its work, and test that a deferring builder fails the plugin instead of mutating a committed namespace
+  - [ ] Validate the staged namespace at commit time against the plugin's identity name, and test that renaming it or adding an alias fails the plugin
   - [ ] Reject a second plugin claiming an already claimed namespace, naming both plugin identities
   - [ ] Extend the pre-initialization version fast path in `src/cli.ts` to match either root version form as the first argument regardless of what follows it, replacing today's single-argument check, and cover both forms with and without a trailing token
   - [ ] Migrate `plugins/marketplace/index.ts` to declared subcommands, arguments, and options
