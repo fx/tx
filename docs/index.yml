@@ -72,5 +72,5 @@ changes:
     path: changes/0009-skip-quality-commands-for-documentation.md
     description: Skip the CI quality commands for documentation-only runs while still reporting the required check.
     spec: architecture
-    status: draft
+    status: in-progress
     depends_on: []

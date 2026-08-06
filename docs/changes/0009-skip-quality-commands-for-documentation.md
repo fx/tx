@@ -5,7 +5,7 @@
 Make CI's first step decide whether a run's changed files are documentation only. If they are, the job reports success without installing dependencies or running the quality commands. Everything else runs exactly as it does today.
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** draft
+**Status:** in-progress
 **Depends On:** —
 
 ## Motivation
@@ -78,14 +78,16 @@ With a usable base, `git diff --name-only` produces the changed paths, and the r
 
 ## Tasks
 
-- [ ] Skip the quality commands for documentation-only runs
-  - [ ] Add the detection step to `.github/workflows/ci.yml` as the first step after checkout, resolving the base from `pull_request` and `push` events and falling back to the full suite when it cannot
-  - [ ] Give checkout the history depth the diff needs
-  - [ ] Condition the Bun setup, dependency install, and `bun run check` steps on the detection result, keeping the job named `CI`
-  - [ ] Amend [Architecture: Continuous Integration](../specs/architecture/index.md#continuous-integration) with the skip, the fail-safe rule, and the requirement that the check still reports
+- [ ] Skip the quality commands for documentation-only runs (PR #24)
+  - [x] Add the detection step to `.github/workflows/ci.yml` as the first step after checkout, resolving the base from `pull_request` and `push` events and falling back to the full suite when it cannot (PR #24)
+  - [x] Give checkout the history depth the diff needs (PR #24)
+  - [x] Condition the Bun setup, dependency install, and `bun run check` steps on the detection result, keeping the job named `CI` (PR #24)
+  - [x] Amend [Architecture: Continuous Integration](../specs/architecture/index.md#continuous-integration) with the skip, the fail-safe rule, and the requirement that the check still reports (PR #24)
   - [ ] Verify on this pull request that the full suite runs, since it changes a workflow file
   - [ ] Verify on a documentation-only pull request that `CI` reports success with the dependency and quality steps skipped, and record the observation
   - [ ] Verify that a pull request touching documentation and source runs the full suite
+
+The three verification tasks stay open. They require observing real workflow runs, and GitHub Actions is in an active incident that has produced no `pull_request` run since 18:32 UTC — including on this pull request. Marking them complete without a run to point at is exactly the inference the Testing Requirements forbid.
 
 ## Open Questions
 
