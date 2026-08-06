@@ -169,8 +169,8 @@ export interface CommandContext {
 - The default marketplace plugin MUST own marketplace storage, data paths, local names, repository-local `.tx/config.json`, discovery, ordering, dynamic imports, Git operations, Bun dependency installation, diagnostics and recovery mapping, and `marketplace add`, `marketplace list`, and `marketplace remove` behavior.
 - `.tx/config.json` MUST contain the marketplace `plugins` array, MAY contain additional repository configuration, and MUST resolve plugin entries relative to the repository root.
 - Installed marketplaces that predate `.tx/config.json` MUST remain loadable through the legacy root `tx.marketplace.json` manifest; when both files exist, `.tx/config.json` MUST take precedence.
-- `marketplace add` MUST accept Git clone sources and expand bare GitHub `owner/repository` shorthand to its HTTPS clone source. It MUST also accept a local directory, as specified in [Local Marketplace Sources](#local-marketplace-sources).
-- Automatically loading `.tx/config.json` from the current working repository is out of scope; a working repository is loaded by adding it as a local source.
+- `marketplace add` MUST accept Git clone sources and expand bare GitHub `owner/repository` shorthand to its HTTPS clone source. It MUST also accept a local directory, as specified in [Local Marketplace Sources](#local-marketplace-sources) — planned, not yet implemented.
+- Automatically loading `.tx/config.json` from the current working repository is out of scope. Once local sources land, a working repository is loaded by adding it as one.
 - The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
 - The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
 - Marketplace discovery, import, or initialization failures MUST be mapped by the marketplace plugin into marketplace-aware diagnostics while preserving generic host failure isolation.
@@ -249,7 +249,7 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 
 ### Local Marketplace Sources
 
-The local-source model below is specified but **not yet implemented**. It is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md). Until that change lands, `marketplace add` sends every source to `git clone`, so a local path is installed as a snapshot of that repository's checked-out commit.
+The local-source model below is specified but **not yet implemented**. It is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md). Until that change lands, `marketplace add` sends every source to `git clone`: a local path that is itself a Git repository is installed as a snapshot of its checked-out commit, and a local directory that is not a repository fails, because cloning is the only thing `add` knows how to do with it.
 
 A plugin author needs to run their uncommitted work through the real `tx` executable. Cloning cannot serve that: a clone captures a commit, so every edit would have to be committed and reinstalled before it could be run. A local source is therefore a live reference to a directory the author owns, not a copy of it.
 

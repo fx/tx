@@ -64,7 +64,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - The host MUST target Bun and TypeScript.
 - The initial supported platform is Linux x64 with glibc and the Bun baseline CPU target.
 - The deterministic production build MUST create the standalone executable at `dist/tx` using `bun-linux-x64-baseline`.
-- A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage, or from a location that plugin-owned storage references.
+- A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage, or from a location that plugin-owned storage references. Referencing a location outside that storage is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md) and not yet implemented.
 - The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist.
 - GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend.
 - `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
@@ -86,7 +86,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - Mutable feature state MUST live outside the executable.
 - Generic core modules MUST NOT own marketplace storage locations, manifests, names, discovery, Git operations, or dependency installation.
 - A plugin MAY own mutable state and resolve its own platform-appropriate data paths through standard Node.js or Bun APIs.
-- Plugin-owned state MAY reference a directory outside it that the user supplied. Removing that state MUST remove only the reference, never the referenced directory.
+- Plugin-owned state MAY reference a directory outside it that the user supplied. Removing that state MUST remove only the reference, never the referenced directory. This is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md) and not yet implemented; no plugin holds such a reference today.
 - Removing plugin-owned state MAY reset that plugin's installed data without changing the generic host contract.
 - The initial architecture MUST NOT require a database.
 
