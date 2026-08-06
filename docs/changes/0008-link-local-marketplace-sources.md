@@ -129,7 +129,7 @@ The reference itself is a symbolic link at `<marketplaces>/<name>` pointing at t
   - [ ] Ensure no tx-owned failure path deletes, empties, or rolls back the referenced directory, and test it — the guarantee covers tx's own cleanup, not what a trusted lifecycle script does to the tree it runs in
   - [ ] Add tests covering classification of each source form, live re-reading of an edited entry without reinstalling, a local directory winning over `owner/repository` shorthand, a `file://` URL still cloning, an empty source being rejected without installing into or referencing the working directory, an existing non-directory being rejected, an inspection failure that is not `ENOENT` being reported rather than cloned, name derivation including `.`, a trailing separator, and a directory whose own name ends in `.git` (which keeps that suffix, unlike a Git source), and a rejected local source publishing nothing
   - [ ] Add an end-to-end test that a plugin edited in a referenced source dispatches its new behavior on the next invocation
-  - [ ] Update `docs/manual/plugins.md` with local sources, the classification rule, the `file://` escape, dependency-installation timing, and the removal guarantee — in this same pull request, since it documents behavior this PR changes
+  - [ ] Update `docs/manual/plugins.md` with local sources, the classification rule, the `file://` escape, dependency-installation timing, and the removal guarantee — in the pull request that implements this task, not a follow-up, since it documents behavior that pull request changes
   - [ ] Verify 100% coverage and `bun run check`
 
 ## Open Questions
