@@ -64,7 +64,8 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - The host MUST target Bun and TypeScript.
 - The initial supported platform is Linux x64 with glibc and the Bun baseline CPU target.
 - The deterministic production build MUST create the standalone executable at `dist/tx` using `bun-linux-x64-baseline`.
-- A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage, or from a location that plugin-owned storage references. Referencing a location outside that storage is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md) and not yet implemented.
+- A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage.
+- Loading from a location that plugin-owned storage references, rather than from that storage itself, is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md) and not yet implemented.
 - The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist.
 - GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend.
 - `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
