@@ -40,7 +40,10 @@ jobs:
           fi
           echo "Changed files:"
           echo "$changed"
-          if printf '%s\n' "$changed" | grep -qvE '^docs/|\.md$'; then
+          # Grouped so the anchors cannot be misread as applying across the
+          # alternation: a path counts as documentation when it starts with
+          # "docs/" OR ends in ".md", not when it is exactly either.
+          if printf '%s\n' "$changed" | grep -qvE '(^docs/)|(\.md$)'; then
             echo "documentation_only=false" >>"$GITHUB_OUTPUT"
           else
             echo "Documentation-only change; skipping the quality commands."
