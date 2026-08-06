@@ -170,7 +170,7 @@ export interface CommandContext {
 - `.tx/config.json` MUST contain the marketplace `plugins` array, MAY contain additional repository configuration, and MUST resolve plugin entries relative to the repository root.
 - Installed marketplaces that predate `.tx/config.json` MUST remain loadable through the legacy root `tx.marketplace.json` manifest; when both files exist, `.tx/config.json` MUST take precedence.
 - `marketplace add` MUST accept Git clone sources and expand bare GitHub `owner/repository` shorthand to its HTTPS clone source.
-- `marketplace add` will additionally accept a local directory. That requirement is owned by [Local Marketplace Sources](#local-marketplace-sources), which is specified but not yet implemented.
+- For local directory sources, see [Local Marketplace Sources](#local-marketplace-sources) — specified, not yet implemented. That section owns the requirement and states it in RFC 2119 terms; this bullet is a pointer to it, not a second statement of it.
 - Automatically loading `.tx/config.json` from the current working repository is out of scope. Once local sources land, a working repository is loaded by adding it as a local marketplace source.
 - The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
 - The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
