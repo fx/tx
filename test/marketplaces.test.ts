@@ -1099,6 +1099,43 @@ describe("MarketplaceManager", () => {
     },
   );
 
+  test("reports a preparation failure a refused cleanup cannot replace", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-stuck-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      let staging = "";
+      const manager = new MarketplaceManager(root, {
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+        prepare: async (checkout) => {
+          staging = checkout;
+          // The staging directory becomes unremovable in a way no privilege
+          // bypasses: its parent turns into a regular file, so `rm` rejects
+          // with ENOTDIR, which `force: true` does not suppress. A permission
+          // bit would only work for a process that is not root.
+          await rm(root, { recursive: true, force: true });
+          await writeFile(root, "not a directory");
+          throw new Error("prepare failed");
+        },
+      });
+
+      // The publication failure the user needs, not the filesystem error the
+      // cleanup in the `finally` ran into on its way out.
+      await expect(manager.add("repo", "stuck")).rejects.toThrow(
+        "prepare failed",
+      );
+      expect(staging).toStartWith(join(root, ".stuck-staging-"));
+      await expect(
+        rm(staging, { recursive: true, force: true }),
+      ).rejects.toHaveProperty("code", "ENOTDIR");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("lists directories and references in sorted order and tolerates corrupt entries", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplace-list-");
     try {

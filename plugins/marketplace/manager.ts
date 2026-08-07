@@ -535,7 +535,10 @@ export class MarketplaceManager implements MarketplaceOperations {
       await rename(staging, target);
       return name;
     } finally {
-      await rm(staging, { recursive: true, force: true });
+      // Through the helper rather than `rm` directly: preparation and the name
+      // check both throw failures the user needs to read, and a removal the
+      // filesystem refuses would replace them from inside this `finally`.
+      await discardStaging(staging);
     }
   }
 
