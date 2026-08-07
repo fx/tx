@@ -82,3 +82,11 @@ changes:
     spec: architecture
     status: complete
     depends_on: []
+  - id: "0010"
+    name: retry-marketplace-clones-over-ssh
+    path: changes/0010-retry-marketplace-clones-over-ssh.md
+    description: Retry a failed HTTP(S) marketplace clone once against the SSH source derived from it so private repositories install.
+    spec: plugin-system
+    status: complete
+    depends_on:
+      - "0008"

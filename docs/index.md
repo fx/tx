@@ -20,3 +20,4 @@
 | 0007 | [Delegate Dispatch to Plugins](changes/0007-delegate-dispatch-to-plugins.md) | [Plugin System](specs/plugin-system/) | complete | 0006 |
 | 0008 | [Link Local Marketplace Sources](changes/0008-link-local-marketplace-sources.md) | [Plugin System](specs/plugin-system/) | complete | 0007 |
 | 0009 | [Skip Quality Commands for Documentation](changes/0009-skip-quality-commands-for-documentation.md) | [Architecture](specs/architecture/) | complete | — |
+| 0010 | [Retry Marketplace Clones Over SSH](changes/0010-retry-marketplace-clones-over-ssh.md) | [Plugin System](specs/plugin-system/) | complete | 0008 |
