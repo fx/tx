@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   deriveMarketplaceName,
+  deriveMarketplaceSshRepository,
   MarketplaceManager,
   normalizeMarketplaceRepository,
   type RunGit,
@@ -135,6 +136,39 @@ describe("marketplace names and arguments", () => {
     ["git@github.com:fx/tx.git", "git@github.com:fx/tx.git"],
   ])("normalizes repository %s as %s", (repository, expected) => {
     expect(normalizeMarketplaceRepository(repository)).toBe(expected);
+  });
+
+  test.each([
+    ["https://github.com/fx/tx.git", "git@github.com:fx/tx.git"],
+    ["http://example.com/me/plugins.git", "git@example.com:me/plugins.git"],
+    [
+      "https://alice@git.company.com/team/tools.git",
+      "alice@git.company.com:team/tools.git",
+    ],
+    ["https://x:token@example.com/me/r.git", "x@example.com:me/r.git"],
+    [
+      "https://example.com:8443/me/r.git",
+      "ssh://git@example.com:8443/me/r.git",
+    ],
+    [
+      "https://alice@example.com:8443/me/r.git",
+      "ssh://alice@example.com:8443/me/r.git",
+    ],
+    ["https://example.com/me/r.git?ref=main", "git@example.com:me/r.git"],
+  ])("derives the SSH source of %s as %s", (repository, expected) => {
+    expect(deriveMarketplaceSshRepository(repository)).toBe(expected);
+  });
+
+  test.each([
+    "https://example.com/",
+    "ssh://git@example.com/me/r.git",
+    "git@example.com:me/r.git",
+    "file:///srv/repo.git",
+    "git://example.com/me/r.git",
+    "/local/repository",
+    "C:\\repos\\windows.git",
+  ])("derives no SSH source from %s", (repository) => {
+    expect(deriveMarketplaceSshRepository(repository)).toBeUndefined();
   });
 });
 
@@ -930,7 +964,7 @@ describe("MarketplaceManager", () => {
     }
   });
 
-  test("passes its initialization environment to every Git operation", async () => {
+  test("augments the environment of a clone and passes its own to every other Git operation", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplace-git-env-");
     try {
       const root = join(temporaryRoot, "marketplaces");
@@ -960,7 +994,17 @@ describe("MarketplaceManager", () => {
         ],
         ["-C", join(root, "installed"), "config", "--get", "remote.origin.url"],
       ]);
-      expect(calls.every((call) => call.env === env)).toBe(true);
+      // A clone attempt runs non-interactively, so its environment is a copy
+      // carrying two more variables. Listing keeps the initialization
+      // environment by reference, and the frozen original is left as it is.
+      expect(calls[0]?.env).toEqual({
+        PATH: "/test/bin",
+        TOKEN: "secret",
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+      });
+      expect(calls[1]?.env).toBe(env);
+      expect(env).toEqual({ PATH: "/test/bin", TOKEN: "secret" });
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -1098,6 +1142,219 @@ describe("MarketplaceManager", () => {
         "code",
         "ENOENT",
       );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("marketplace clone transports", () => {
+  test("retries a failed HTTPS clone over SSH and lists the SSH source", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-ssh-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const cloned: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          if (args[0] !== "clone") {
+            return { stdout: "git@github.com:fx/tx.git\n" };
+          }
+          const candidate = args[2] as string;
+          cloned.push(candidate);
+          if (candidate.startsWith("https://")) {
+            throw new Error("Authentication failed");
+          }
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+      });
+
+      expect(await manager.add("fx/tx")).toBe("tx");
+      expect(cloned).toEqual([
+        "https://github.com/fx/tx.git",
+        "git@github.com:fx/tx.git",
+      ]);
+      expect(await manager.list()).toEqual([
+        { name: "tx", source: "git@github.com:fx/tx.git" },
+      ]);
+      expect(await readdir(root)).toEqual(["tx"]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("attempts nothing further once the HTTPS clone succeeds", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-https-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const cloned: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          cloned.push(args[2] as string);
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+      });
+
+      expect(await manager.add("fx/tx")).toBe("tx");
+      expect(cloned).toEqual(["https://github.com/fx/tx.git"]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    "git@example.com:me/r.git",
+    "ssh://git@example.com/me/r.git",
+    "file:///srv/r.git",
+    "host:path",
+  ])("attempts the non-HTTPS source %s exactly once", async (source) => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-single-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const cloned: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        prepare: async () => {},
+        runGit: async (args) => {
+          cloned.push(args[2] as string);
+          throw new Error("clone failed");
+        },
+      });
+
+      // The lone failure is reported exactly as Git reported it, since there
+      // was no retry to describe.
+      await expect(manager.add(source, "single")).rejects.toThrow(
+        /^clone failed$/,
+      );
+      expect(cloned).toEqual([source]);
+      expect(await readdir(root)).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports both attempts when the SSH retry also fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-both-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          throw new Error(
+            (args[2] as string).startsWith("https://")
+              ? "HTTPS refused"
+              : "SSH refused",
+          );
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("fx/tx", "both")
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const { message, cause } = failure as Error;
+      expect(message).toBe(
+        'Cloning "https://github.com/fx/tx.git" failed and the SSH retry "git@github.com:fx/tx.git" failed too: HTTPS refused; SSH refused',
+      );
+      expect(cause).toBeInstanceOf(AggregateError);
+      expect(
+        (cause as AggregateError).errors.map(
+          (error: Error) => `${error.message}`,
+        ),
+      ).toEqual(["HTTPS refused", "SSH refused"]);
+      expect(await readdir(root)).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("omits a source's credentials from the reported attempts", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-secret-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const cloned: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          cloned.push(args[2] as string);
+          throw new Error("refused");
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("https://token@example.com/me/r.git", "secret")
+        .catch((error: unknown) => error);
+
+      const { message } = failure as Error;
+      expect(message).not.toContain("token");
+      expect(message).toContain('"https://example.com/me/r.git"');
+      expect(message).toContain('"example.com:me/r.git"');
+      // Derivation still reads the userinfo user, so the attempt tx actually
+      // made carries it; only what tx reports does not.
+      expect(cloned).toEqual([
+        "https://token@example.com/me/r.git",
+        "token@example.com:me/r.git",
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("stages every attempt in its own empty directory", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-staging-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const stagings: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          const staging = args.at(-1) as string;
+          if ((args[2] as string).startsWith("https://")) {
+            stagings.push(staging);
+            // A failed clone can leave a partial checkout behind, and
+            // `git clone` refuses a destination that is not empty.
+            await writeFile(join(staging, "partial.txt"), "partial");
+            throw new Error("Authentication failed");
+          }
+          expect(staging).not.toBe(stagings[0]);
+          expect(await readdir(staging)).toEqual([]);
+          stagings.push(staging);
+          await writeFile(join(staging, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+      });
+
+      expect(await manager.add("fx/tx", "fresh")).toBe("fresh");
+      expect(stagings).toHaveLength(2);
+      expect(await readdir(root)).toEqual(["fresh"]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps a configured SSH command while disabling Git's own prompt", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-ssh-command-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const environments: Readonly<Record<string, string | undefined>>[] = [];
+      const manager = new MarketplaceManager(root, {
+        env: { GIT_SSH_COMMAND: "ssh -i /keys/id" },
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          environments.push(options.env);
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+      });
+
+      expect(await manager.add("fx/tx", "keyed")).toBe("keyed");
+      expect(environments).toEqual([
+        { GIT_SSH_COMMAND: "ssh -i /keys/id", GIT_TERMINAL_PROMPT: "0" },
+      ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

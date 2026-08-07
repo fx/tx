@@ -56,10 +56,45 @@ export interface MarketplaceManagerOptions {
 const githubRepositoryPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
 const windowsDrivePattern = /^[A-Za-z]:[\\/]/;
 const unknownSource = "<unknown>";
+const defaultSshUser = "git";
+const derivedSshUserPattern = new RegExp(`^(?!${defaultSshUser}@)[^@/]*@`);
 
 export function normalizeMarketplaceRepository(repository: string): string {
   if (!githubRepositoryPattern.test(repository)) return repository;
   return `https://github.com/${repository}${repository.endsWith(".git") ? "" : ".git"}`;
+}
+
+/**
+ * The SSH source for an already-normalized HTTP(S) repository, or undefined
+ * for every other source form: an `ssh://` URL, SCP-style `host:path`,
+ * `file://`, `git://`, a bare path, and a Windows drive letter all either
+ * fail this parse or carry another protocol, and each of them is a source
+ * Git can already reach as it was typed.
+ *
+ * SCP syntax is what a forge's own instructions and an `ssh_config` are
+ * written in, so it is the normal spelling — but it has nowhere to put a
+ * port, which is why a source carrying one becomes an `ssh://` URL instead.
+ * The userinfo user is kept because an internal forge is exactly where a
+ * user other than `git` occurs; the password is dropped because it is an
+ * HTTP(S) credential that means nothing over SSH.
+ */
+export function deriveMarketplaceSshRepository(
+  repository: string,
+): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(repository);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+
+  const path = url.pathname.replace(/^\/+/, "");
+  if (!path) return undefined;
+  const user = url.username || defaultSshUser;
+  return url.port
+    ? `ssh://${user}@${url.host}${url.pathname}`
+    : `${user}@${url.hostname}:${path}`;
 }
 
 export function deriveMarketplaceName(repository: string): string {
@@ -114,6 +149,73 @@ function derivedName(source: string, derive: () => string): string {
       { cause: error },
     );
   }
+}
+
+/**
+ * A source named without whatever credential its userinfo carries. Naming
+ * the attempted sources is new here, and `https://<token>@host/owner/repo.git`
+ * is a supported source, so reporting one as it was typed would newly write a
+ * token to standard error.
+ *
+ * A derived SCP-syntax candidate does not parse as a URL, and its user is
+ * `git` unless the HTTP(S) source supplied one — so `git@` is kept, being a
+ * fixed default rather than anything the caller handed over, and any other
+ * user is removed along with the userinfo it came from. Nothing distinguishes
+ * a person's account name from a token used as one, so both go.
+ */
+function redactRepositoryCredentials(repository: string): string {
+  try {
+    const url = new URL(repository);
+    url.username = "";
+    url.password = "";
+    return url.href;
+  } catch {
+    return repository.replace(derivedSshUserPattern, "");
+  }
+}
+
+/**
+ * What to throw once every clone attempt is spent. A lone failure is reported
+ * exactly as Git reported it, because there was no retry to describe. Two are
+ * inlined into one message, since the CLI surfaces `error.message` and a user
+ * looking at a failed private install needs to see that SSH was tried and how
+ * it went; both errors survive as the cause so neither stack is lost.
+ */
+function cloneFailure(
+  attempts: readonly string[],
+  failures: readonly Error[],
+): unknown {
+  if (failures.length < 2) return failures.at(0);
+
+  const [primary = "", fallback = ""] = attempts.map(
+    redactRepositoryCredentials,
+  );
+  const detail = failures.map(({ message }) => message).join("; ");
+  return new Error(
+    `Cloning "${primary}" failed and the SSH retry "${fallback}" failed too: ${detail}`,
+    { cause: new AggregateError(failures) },
+  );
+}
+
+/**
+ * The environment for a clone attempt. Git's own terminal prompt is switched
+ * off and SSH is put in batch mode, because a private HTTP(S) clone without a
+ * credential otherwise blocks on `/dev/tty` and the SSH retry never runs.
+ * Credential helpers and `GIT_ASKPASS` are deliberately untouched, so a
+ * credential the user did configure still resolves. A `GIT_SSH_COMMAND`
+ * already in the environment is a deliberate SSH invocation — an identity
+ * file, an alternate config, a proxy command — and is left exactly as it is,
+ * because appending an option to an arbitrary shell string is guesswork.
+ */
+function nonInteractiveGitEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<string, string | undefined>> {
+  const { GIT_SSH_COMMAND: sshCommand } = env;
+  return {
+    ...env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_SSH_COMMAND: sshCommand || "ssh -o BatchMode=yes",
+  };
 }
 
 export async function runGit(
@@ -212,13 +314,50 @@ export class MarketplaceManager implements MarketplaceOperations {
     return name;
   }
 
+  /**
+   * The staging checkout of the first candidate source that clones. An HTTP(S)
+   * source is followed by the SSH source derived from it, so a repository the
+   * user can reach over SSH but not over HTTP(S) still installs; every other
+   * source form is its own only candidate.
+   *
+   * Each attempt gets a fresh staging directory and removes it before the next
+   * one starts, because `git clone` refuses a destination that is not empty and
+   * a failed clone can leave a partial checkout behind — reusing one directory
+   * would fail the retry for a reason that has nothing to do with SSH.
+   */
+  async #cloneStaging(
+    source: string,
+    name: string,
+    parent: string,
+  ): Promise<string> {
+    const repository = normalizeMarketplaceRepository(source);
+    const ssh = deriveMarketplaceSshRepository(repository);
+    const attempts = ssh === undefined ? [repository] : [repository, ssh];
+    const failures: Error[] = [];
+
+    for (const candidate of attempts) {
+      const staging = await mkdtemp(join(parent, `.${name}-staging-`));
+      try {
+        await this.#runGit(["clone", "--", candidate, staging], {
+          env: nonInteractiveGitEnv(this.#env),
+        });
+        return staging;
+      } catch (error) {
+        failures.push(error as Error);
+        await rm(staging, { recursive: true, force: true });
+      }
+    }
+    throw cloneFailure(attempts, failures);
+  }
+
+  /**
+   * Publication is deliberately outside the retry: preparation runs a trusted
+   * lifecycle script and the name check reports a marketplace someone else
+   * installed, and neither becomes true by cloning the same commit again.
+   */
   async #clone(source: string, name: string, target: string): Promise<string> {
-    const staging = await mkdtemp(join(dirname(target), `.${name}-staging-`));
+    const staging = await this.#cloneStaging(source, name, dirname(target));
     try {
-      await this.#runGit(
-        ["clone", "--", normalizeMarketplaceRepository(source), staging],
-        { env: this.#env },
-      );
       await this.#prepareCheckout(staging);
       await this.#requireAvailable(name, target);
       await rename(staging, target);
