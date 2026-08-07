@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  chmod,
   lstat,
   mkdir,
   readdir,
@@ -143,24 +144,23 @@ describe("marketplace names and arguments", () => {
     ["http://example.com/me/plugins.git", "git@example.com:me/plugins.git"],
     [
       "https://alice@git.company.com/team/tools.git",
-      "alice@git.company.com:team/tools.git",
+      "git@git.company.com:team/tools.git",
     ],
-    ["https://x:token@example.com/me/r.git", "x@example.com:me/r.git"],
-    [
-      "https://example.com:8443/me/r.git",
-      "ssh://git@example.com:8443/me/r.git",
-    ],
-    [
-      "https://alice@example.com:8443/me/r.git",
-      "ssh://alice@example.com:8443/me/r.git",
-    ],
+    ["https://x:token@example.com/me/r.git", "git@example.com:me/r.git"],
+    ["https://example.com:8443/me/r.git", "git@example.com:me/r.git"],
+    ["https://alice@example.com:8443/me/r.git", "git@example.com:me/r.git"],
     ["https://example.com/me/r.git?ref=main", "git@example.com:me/r.git"],
+    [
+      "https://git.corp.example/team/my%20repo.git",
+      "git@git.corp.example:team/my repo.git",
+    ],
   ])("derives the SSH source of %s as %s", (repository, expected) => {
     expect(deriveMarketplaceSshRepository(repository)).toBe(expected);
   });
 
   test.each([
     "https://example.com/",
+    "https://example.com/me/%zz.git",
     "ssh://git@example.com/me/r.git",
     "git@example.com:me/r.git",
     "file:///srv/repo.git",
@@ -994,14 +994,15 @@ describe("MarketplaceManager", () => {
         ],
         ["-C", join(root, "installed"), "config", "--get", "remote.origin.url"],
       ]);
-      // A clone attempt runs non-interactively, so its environment is a copy
-      // carrying two more variables. Listing keeps the initialization
-      // environment by reference, and the frozen original is left as it is.
+      // A clone attempt runs without Git's terminal prompt, so its environment
+      // is a copy carrying one more variable — an SSH command belongs to the
+      // derived retry, which a successful HTTP(S) clone never reaches. Listing
+      // keeps the initialization environment by reference, and the frozen
+      // original is left as it is.
       expect(calls[0]?.env).toEqual({
         PATH: "/test/bin",
         TOKEN: "secret",
         GIT_TERMINAL_PROMPT: "0",
-        GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
       });
       expect(calls[1]?.env).toBe(env);
       expect(env).toEqual({ PATH: "/test/bin", TOKEN: "secret" });
@@ -1272,7 +1273,7 @@ describe("marketplace clone transports", () => {
     }
   });
 
-  test("omits a source's credentials from the reported attempts", async () => {
+  test("omits a source's credentials from every part of the failure", async () => {
     const temporaryRoot = await temporaryDirectory("tx-clone-secret-");
     try {
       const root = join(temporaryRoot, "marketplaces");
@@ -1280,24 +1281,40 @@ describe("marketplace clone transports", () => {
       const manager = new MarketplaceManager(root, {
         prepare: async () => {},
         runGit: async (args) => {
-          cloned.push(args[2] as string);
-          throw new Error("refused");
+          const candidate = args[2] as string;
+          cloned.push(candidate);
+          // Git repeats the clone URL in its own stderr and strips only the
+          // password from it, so the token in the user position survives into
+          // the message tx would otherwise inline verbatim.
+          throw new Error(
+            `Git command failed: fatal: unable to access '${candidate.replace(":ghp_SECRET", "")}/': 403`,
+          );
         },
       });
 
       const failure: unknown = await manager
-        .add("https://token@example.com/me/r.git", "secret")
+        .add("https://alice:ghp_SECRET@example.com/me/r.git", "secret")
         .catch((error: unknown) => error);
 
-      const { message } = failure as Error;
-      expect(message).not.toContain("token");
+      expect(failure).toBeInstanceOf(Error);
+      const { message, cause } = failure as Error;
+      expect(message).not.toContain("ghp_SECRET");
+      expect(message).not.toContain("alice");
       expect(message).toContain('"https://example.com/me/r.git"');
-      expect(message).toContain('"example.com:me/r.git"');
-      // Derivation still reads the userinfo user, so the attempt tx actually
-      // made carries it; only what tx reports does not.
+      expect(message).toContain('"git@example.com:me/r.git"');
+      expect(message).toContain(
+        "unable to access 'https://example.com/me/r.git",
+      );
+      expect(cause).toBeInstanceOf(AggregateError);
+      for (const preserved of (cause as AggregateError).errors as Error[]) {
+        expect(preserved.message).not.toContain("ghp_SECRET");
+        expect(preserved.message).not.toContain("alice");
+      }
+      // The derived attempt carries no credential of its own to redact: it is
+      // always `git@host:path`, whatever the HTTP(S) source authenticated as.
       expect(cloned).toEqual([
-        "https://token@example.com/me/r.git",
-        "token@example.com:me/r.git",
+        "https://alice:ghp_SECRET@example.com/me/r.git",
+        "git@example.com:me/r.git",
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -1336,30 +1353,181 @@ describe("marketplace clone transports", () => {
     }
   });
 
-  test("keeps a configured SSH command while disabling Git's own prompt", async () => {
-    const temporaryRoot = await temporaryDirectory("tx-clone-ssh-command-");
+  test("retries after a staging directory it cannot remove", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-locked-");
+    const locked: string[] = [];
     try {
       const root = join(temporaryRoot, "marketplaces");
-      const environments: Readonly<Record<string, string | undefined>>[] = [];
       const manager = new MarketplaceManager(root, {
-        env: { GIT_SSH_COMMAND: "ssh -i /keys/id" },
         prepare: async () => {},
-        runGit: async (args, options) => {
-          environments.push(options.env);
-          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+        runGit: async (args) => {
+          const staging = args.at(-1) as string;
+          if ((args[2] as string).startsWith("https://")) {
+            // A partial checkout the filesystem refuses to unlink: the
+            // directory holding it cannot be written, so its child cannot be
+            // removed by a non-root process.
+            const directory = join(staging, "locked");
+            await mkdir(directory);
+            await writeFile(join(directory, "partial.txt"), "partial");
+            await chmod(directory, 0o555);
+            locked.push(directory);
+            throw new Error("Authentication failed");
+          }
+          await writeFile(join(staging, "clone.txt"), "clone");
           return { stdout: "" };
         },
       });
 
-      expect(await manager.add("fx/tx", "keyed")).toBe("keyed");
-      expect(environments).toEqual([
+      expect(await manager.add("fx/tx", "stubborn")).toBe("stubborn");
+      expect(await readFile(join(root, "stubborn/clone.txt"), "utf8")).toBe(
+        "clone",
+      );
+      // The removal really did fail: what it could not unlink is still there,
+      // which is the leftover the retry was allowed to walk away from.
+      expect(
+        await readFile(join(locked[0] as string, "partial.txt"), "utf8"),
+      ).toBe("partial");
+    } finally {
+      await Promise.all(locked.map((directory) => chmod(directory, 0o755)));
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps a configured GIT_SSH_COMMAND and never probes Git configuration", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-ssh-command-");
+    try {
+      const { calls, add } = recordingManager(temporaryRoot, {
+        GIT_SSH_COMMAND: "ssh -i /keys/id",
+      });
+
+      expect(await add("keyed")).toBe("keyed");
+      expect(calls.map(({ args }) => args[0])).toEqual(["clone", "clone"]);
+      expect(calls.map(({ env }) => env)).toEqual([
+        { GIT_SSH_COMMAND: "ssh -i /keys/id", GIT_TERMINAL_PROMPT: "0" },
         { GIT_SSH_COMMAND: "ssh -i /keys/id", GIT_TERMINAL_PROMPT: "0" },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
+
+  test("keeps a configured GIT_SSH, which Git honours as well", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-ssh-wrapper-");
+    try {
+      const { calls, add } = recordingManager(temporaryRoot, {
+        GIT_SSH: "/usr/local/bin/ssh-wrapper",
+      });
+
+      expect(await add("wrapped")).toBe("wrapped");
+      expect(calls.map(({ args }) => args[0])).toEqual(["clone", "clone"]);
+      expect(calls.map(({ env }) => env)).toEqual([
+        { GIT_SSH: "/usr/local/bin/ssh-wrapper", GIT_TERMINAL_PROMPT: "0" },
+        { GIT_SSH: "/usr/local/bin/ssh-wrapper", GIT_TERMINAL_PROMPT: "0" },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps an SSH command configured through core.sshCommand", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-ssh-config-");
+    try {
+      const { calls, add } = recordingManager(
+        temporaryRoot,
+        { PATH: "/test/bin" },
+        async () => ({ stdout: "ssh -i /run/secrets/deploy_key\n" }),
+      );
+
+      expect(await add("deployed")).toBe("deployed");
+      expect(calls.map(({ args }) => args)).toEqual([
+        ["clone", "--", "https://github.com/fx/tx.git", expect.any(String)],
+        ["config", "--get", "core.sshCommand"],
+        ["clone", "--", "git@github.com:fx/tx.git", expect.any(String)],
+      ]);
+      expect(calls.map(({ env }) => env)).toEqual([
+        { PATH: "/test/bin", GIT_TERMINAL_PROMPT: "0" },
+        { PATH: "/test/bin" },
+        { PATH: "/test/bin", GIT_TERMINAL_PROMPT: "0" },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test.each<[string, RunGit]>([
+    [
+      "is unset",
+      async () => {
+        throw new Error("Git command failed");
+      },
+    ],
+    ["is empty", async () => ({ stdout: "  \n" })],
+  ])(
+    "puts the SSH attempt in batch mode when core.sshCommand %s",
+    async (_case, probe) => {
+      const temporaryRoot = await temporaryDirectory("tx-clone-batch-");
+      try {
+        const { calls, add } = recordingManager(
+          temporaryRoot,
+          { PATH: "/test/bin" },
+          probe,
+        );
+
+        expect(await add("batched")).toBe("batched");
+        expect(calls.map(({ env }) => env)).toEqual([
+          { PATH: "/test/bin", GIT_TERMINAL_PROMPT: "0" },
+          { PATH: "/test/bin" },
+          {
+            PATH: "/test/bin",
+            GIT_TERMINAL_PROMPT: "0",
+            GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+          },
+        ]);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
 });
+
+/**
+ * A manager whose HTTP(S) clone always fails, so the derived SSH attempt is
+ * reached, recording the arguments and environment of every Git call. `probe`
+ * answers anything that is not a clone, which is how a test decides what
+ * `git config --get core.sshCommand` reports.
+ */
+function recordingManager(
+  parent: string,
+  env: Readonly<Record<string, string | undefined>>,
+  probe: RunGit = async () => {
+    throw new Error("Git command failed");
+  },
+): {
+  readonly calls: readonly {
+    readonly args: readonly string[];
+    readonly env: Readonly<Record<string, string | undefined>>;
+  }[];
+  readonly add: (name: string) => Promise<string>;
+} {
+  const calls: {
+    readonly args: readonly string[];
+    readonly env: Readonly<Record<string, string | undefined>>;
+  }[] = [];
+  const manager = new MarketplaceManager(join(parent, "marketplaces"), {
+    env,
+    prepare: async () => {},
+    runGit: async (args, options) => {
+      calls.push({ args: [...args], env: options.env });
+      if (args[0] !== "clone") return probe(args, options);
+      if ((args[2] as string).startsWith("https://")) {
+        throw new Error("Authentication failed");
+      }
+      await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+      return { stdout: "" };
+    },
+  });
+  return { calls, add: (name) => manager.add("fx/tx", name) };
+}
 
 const rejectGit: RunGit = async () => {
   throw new Error("Git must not run for a local source");

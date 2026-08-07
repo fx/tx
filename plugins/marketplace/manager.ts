@@ -57,7 +57,7 @@ const githubRepositoryPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
 const windowsDrivePattern = /^[A-Za-z]:[\\/]/;
 const unknownSource = "<unknown>";
 const defaultSshUser = "git";
-const derivedSshUserPattern = new RegExp(`^(?!${defaultSshUser}@)[^@/]*@`);
+const batchModeSshCommand = "ssh -o BatchMode=yes";
 
 export function normalizeMarketplaceRepository(repository: string): string {
   if (!githubRepositoryPattern.test(repository)) return repository;
@@ -71,12 +71,18 @@ export function normalizeMarketplaceRepository(repository: string): string {
  * fail this parse or carry another protocol, and each of them is a source
  * Git can already reach as it was typed.
  *
- * SCP syntax is what a forge's own instructions and an `ssh_config` are
- * written in, so it is the normal spelling — but it has nowhere to put a
- * port, which is why a source carrying one becomes an `ssh://` URL instead.
- * The userinfo user is kept because an internal forge is exactly where a
- * user other than `git` occurs; the password is dropped because it is an
- * HTTP(S) credential that means nothing over SSH.
+ * The result is always `git@host:path` in the SCP syntax a forge's own
+ * instructions and an `ssh_config` are written in. Nothing from the HTTP(S)
+ * authority beyond the host survives: userinfo is an HTTP credential rather
+ * than an SSH login, which every forge that matters answers as `git` anyway,
+ * and an HTTP(S) port is not an SSH port, so carrying one would open an SSH
+ * handshake against the HTTPS listener. A user needing another login or
+ * another port types that SSH source themselves.
+ *
+ * The path is decoded because Git decodes percent-escapes in an `ssh://` URL
+ * but not in SCP syntax, where `my%20repo.git` would ask the remote for a
+ * repository spelled exactly that; a malformed escape derives nothing rather
+ * than a source that is wrong.
  */
 export function deriveMarketplaceSshRepository(
   repository: string,
@@ -89,12 +95,13 @@ export function deriveMarketplaceSshRepository(
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
 
-  const path = url.pathname.replace(/^\/+/, "");
-  if (!path) return undefined;
-  const user = url.username || defaultSshUser;
-  return url.port
-    ? `ssh://${user}@${url.host}${url.pathname}`
-    : `${user}@${url.hostname}:${path}`;
+  const encoded = url.pathname.replace(/^\/+/, "");
+  if (!encoded) return undefined;
+  try {
+    return `${defaultSshUser}@${url.hostname}:${decodeURIComponent(encoded)}`;
+  } catch {
+    return undefined;
+  }
 }
 
 export function deriveMarketplaceName(repository: string): string {
@@ -152,26 +159,57 @@ function derivedName(source: string, derive: () => string): string {
 }
 
 /**
- * A source named without whatever credential its userinfo carries. Naming
- * the attempted sources is new here, and `https://<token>@host/owner/repo.git`
- * is a supported source, so reporting one as it was typed would newly write a
- * token to standard error.
+ * Every literal a source's userinfo puts into text written about that source:
+ * the `userinfo@` run as the source spells it, the `user@` run Git echoes
+ * after dropping the password itself, and the user and the password alone.
+ * A source without userinfo, and anything that is not a URL, carries nothing.
  *
- * A derived SCP-syntax candidate does not parse as a URL, and its user is
- * `git` unless the HTTP(S) source supplied one — so `git@` is kept, being a
- * fixed default rather than anything the caller handed over, and any other
- * user is removed along with the userinfo it came from. Nothing distinguishes
- * a person's account name from a token used as one, so both go.
+ * `https://<token>@host/owner/repository.git` is a supported source, so a
+ * failure that quotes it — the attempts this reports by name, and Git's own
+ * stderr, which repeats the clone URL minus only its password — would write
+ * a live credential to standard error. Nothing distinguishes a person's
+ * account name from a token used as one, so both go.
  */
-function redactRepositoryCredentials(repository: string): string {
+function sourceCredentials(repository: string): readonly string[] {
+  let url: URL;
   try {
-    const url = new URL(repository);
-    url.username = "";
-    url.password = "";
-    return url.href;
+    url = new URL(repository);
   } catch {
-    return repository.replace(derivedSshUserPattern, "");
+    return [];
   }
+  const { username, password } = url;
+  const userinfo = password ? `${username}:${password}` : username;
+  const literals = new Set(
+    [userinfo && `${userinfo}@`, username && `${username}@`, password, username]
+      .filter((literal) => literal !== "")
+      .sort((left, right) => right.length - left.length),
+  );
+  return [...literals];
+}
+
+/** Text with every one of a source's credential literals taken out of it. */
+function withoutCredentials(
+  text: string,
+  credentials: readonly string[],
+): string {
+  return credentials.reduce(
+    (redacted, credential) => redacted.split(credential).join(""),
+    text,
+  );
+}
+
+/**
+ * A failure carrying no credential. The error is returned as it is when there
+ * was nothing to remove, so the common case keeps its original stack; an error
+ * whose message quoted a credential is replaced rather than sanitized in
+ * place, because its own stack repeats that message.
+ */
+function withoutCredentialsInFailure(
+  failure: Error,
+  credentials: readonly string[],
+): Error {
+  const message = withoutCredentials(failure.message, credentials);
+  return message === failure.message ? failure : new Error(message);
 }
 
 /**
@@ -179,43 +217,47 @@ function redactRepositoryCredentials(repository: string): string {
  * exactly as Git reported it, because there was no retry to describe. Two are
  * inlined into one message, since the CLI surfaces `error.message` and a user
  * looking at a failed private install needs to see that SSH was tried and how
- * it went; both errors survive as the cause so neither stack is lost.
+ * it went; both errors survive as the cause so neither is lost. The source's
+ * credential is taken out of all of it — the attempt names, the Git output
+ * quoted between them, and the errors kept as the cause alike.
  */
 function cloneFailure(
   attempts: readonly string[],
   failures: readonly Error[],
+  credentials: readonly string[],
 ): unknown {
   if (failures.length < 2) return failures.at(0);
 
-  const [primary = "", fallback = ""] = attempts.map(
-    redactRepositoryCredentials,
-  );
+  const [primary = "", fallback = ""] = attempts;
   const detail = failures.map(({ message }) => message).join("; ");
   return new Error(
-    `Cloning "${primary}" failed and the SSH retry "${fallback}" failed too: ${detail}`,
-    { cause: new AggregateError(failures) },
+    withoutCredentials(
+      `Cloning "${primary}" failed and the SSH retry "${fallback}" failed too: ${detail}`,
+      credentials,
+    ),
+    {
+      cause: new AggregateError(
+        failures.map((failure) =>
+          withoutCredentialsInFailure(failure, credentials),
+        ),
+      ),
+    },
   );
 }
 
 /**
- * The environment for a clone attempt. Git's own terminal prompt is switched
- * off and SSH is put in batch mode, because a private HTTP(S) clone without a
- * credential otherwise blocks on `/dev/tty` and the SSH retry never runs.
- * Credential helpers and `GIT_ASKPASS` are deliberately untouched, so a
- * credential the user did configure still resolves. A `GIT_SSH_COMMAND`
- * already in the environment is a deliberate SSH invocation — an identity
- * file, an alternate config, a proxy command — and is left exactly as it is,
- * because appending an option to an arbitrary shell string is guesswork.
+ * Removes a staging directory without letting the removal become the failure.
+ * A partial checkout the filesystem refuses to unlink is a directory left
+ * behind; reporting that instead of the clone error, and abandoning the retry
+ * this whole path exists for, would lose the failure the user needs and the
+ * install they asked for while leaving the directory behind anyway.
  */
-function nonInteractiveGitEnv(
-  env: Readonly<Record<string, string | undefined>>,
-): Readonly<Record<string, string | undefined>> {
-  const { GIT_SSH_COMMAND: sshCommand } = env;
-  return {
-    ...env,
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_SSH_COMMAND: sshCommand || "ssh -o BatchMode=yes",
-  };
+async function discardStaging(staging: string): Promise<void> {
+  try {
+    await rm(staging, { recursive: true, force: true });
+  } catch {
+    // The clone failure stands, and the next attempt stages elsewhere.
+  }
 }
 
 export async function runGit(
@@ -331,23 +373,70 @@ export class MarketplaceManager implements MarketplaceOperations {
     parent: string,
   ): Promise<string> {
     const repository = normalizeMarketplaceRepository(source);
-    const ssh = deriveMarketplaceSshRepository(repository);
-    const attempts = ssh === undefined ? [repository] : [repository, ssh];
+    const derived = deriveMarketplaceSshRepository(repository);
+    const attempts =
+      derived === undefined ? [repository] : [repository, derived];
+    const credentials = sourceCredentials(repository);
+    // Git's own terminal prompt is off for every attempt, because a private
+    // HTTP(S) clone without a credential otherwise blocks on `/dev/tty` and
+    // the SSH retry never runs. Credential helpers and `GIT_ASKPASS` are
+    // deliberately untouched, so a credential the user did configure still
+    // resolves. Only the derived retry asks for more than that, and only
+    // once it is reached.
+    const promptless = { ...this.#env, GIT_TERMINAL_PROMPT: "0" };
     const failures: Error[] = [];
 
     for (const candidate of attempts) {
+      const env =
+        candidate === derived
+          ? await this.#sshAttemptEnv(promptless)
+          : promptless;
       const staging = await mkdtemp(join(parent, `.${name}-staging-`));
       try {
-        await this.#runGit(["clone", "--", candidate, staging], {
-          env: nonInteractiveGitEnv(this.#env),
-        });
+        await this.#runGit(["clone", "--", candidate, staging], { env });
         return staging;
       } catch (error) {
         failures.push(error as Error);
-        await rm(staging, { recursive: true, force: true });
+        await discardStaging(staging);
       }
     }
-    throw cloneFailure(attempts, failures);
+    throw cloneFailure(attempts, failures, credentials);
+  }
+
+  /**
+   * The environment for the derived SSH attempt: batch mode by default, so a
+   * missing key or an unknown host key fails rather than asking, but never in
+   * place of an SSH command the caller configured. Git takes one from
+   * `GIT_SSH_COMMAND`, from `GIT_SSH`, or from `core.sshCommand`, and each is
+   * a deliberate invocation — an identity file, an alternate config, a proxy
+   * command. Overriding one would drop the deploy key of exactly the setup
+   * this retry exists to serve.
+   */
+  async #sshAttemptEnv(
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<Readonly<Record<string, string | undefined>>> {
+    const { GIT_SSH_COMMAND: sshCommand, GIT_SSH: sshProgram } = env;
+    if (sshCommand || sshProgram) return env;
+    if (await this.#hasConfiguredSshCommand()) return env;
+    return { ...env, GIT_SSH_COMMAND: batchModeSshCommand };
+  }
+
+  /**
+   * Whether Git configuration names an SSH command. `git config --get` exits
+   * non-zero for a variable that is not set, which `runGit` reports as a
+   * failure, so an unset variable and an unreadable configuration are alike
+   * here: nothing is configured, and the default applies.
+   */
+  async #hasConfiguredSshCommand(): Promise<boolean> {
+    try {
+      const { stdout } = await this.#runGit(
+        ["config", "--get", "core.sshCommand"],
+        { env: this.#env },
+      );
+      return stdout.trim() !== "";
+    } catch {
+      return false;
+    }
   }
 
   /**
