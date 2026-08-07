@@ -1994,6 +1994,14 @@ describe("marketplace clone transports", () => {
       },
     ],
     [
+      "leaves the value blank",
+      {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.sshCommand",
+        GIT_CONFIG_VALUE_0: "  ",
+      },
+    ],
+    [
       "counts its entries with something that is not a number",
       {
         GIT_CONFIG_COUNT: "many",

@@ -343,6 +343,10 @@ export async function discardStaging(staging: string): Promise<void> {
  * key is compared that way. A `GIT_CONFIG_COUNT` that is not a whole number —
  * absent, malformed, fractional — describes no entries and is scanned as none;
  * a negative one needs no guard of its own, since the scan starts at zero.
+ *
+ * A value is trimmed before it counts, so that a blank one reads as
+ * unconfigured in this scope exactly as it does in the file scopes below,
+ * which compare the trimmed output of `git config --get`.
  */
 function hasEnvironmentSshCommand(
   env: Readonly<Record<string, string | undefined>>,
@@ -353,7 +357,7 @@ function hasEnvironmentSshCommand(
   for (let index = 0; index < count; index += 1) {
     const key = env[`GIT_CONFIG_KEY_${index}`];
     if (key?.toLowerCase() === sshCommandVariable) {
-      if (env[`GIT_CONFIG_VALUE_${index}`]) return true;
+      if (env[`GIT_CONFIG_VALUE_${index}`]?.trim()) return true;
     }
   }
   return false;
