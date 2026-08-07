@@ -170,8 +170,8 @@ export interface CommandContext {
 - `.tx/config.json` MUST contain the marketplace `plugins` array, MAY contain additional repository configuration, and MUST resolve plugin entries relative to the repository root.
 - Installed marketplaces that predate `.tx/config.json` MUST remain loadable through the legacy root `tx.marketplace.json` manifest; when both files exist, `.tx/config.json` MUST take precedence.
 - `marketplace add` MUST accept Git clone sources and expand bare GitHub `owner/repository` shorthand to its HTTPS clone source.
-- For local directory sources, see [Local Marketplace Sources](#local-marketplace-sources) — specified, not yet implemented. That section owns the requirement and states it in RFC 2119 terms; this bullet is a pointer to it, not a second statement of it.
-- Automatically loading `.tx/config.json` from the current working repository is out of scope. Once local sources land, a working repository is loaded by adding it as a local marketplace source.
+- For local directory sources, see [Local Marketplace Sources](#local-marketplace-sources). That section owns the requirement and states it in RFC 2119 terms; this bullet is a pointer to it, not a second statement of it.
+- Automatically loading `.tx/config.json` from the current working repository is out of scope. A working repository is loaded by adding it as a local marketplace source.
 - The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
 - The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
 - Marketplace discovery, import, or initialization failures MUST be mapped by the marketplace plugin into marketplace-aware diagnostics while preserving generic host failure isolation.
@@ -371,4 +371,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-04 | Added safe, ordered, deduplicated per-plugin dependency manifest installation | [0005-install-per-plugin-dependencies](../../changes/0005-install-per-plugin-dependencies.md) |
 | 2026-08-04 | Extended plugin failure isolation to the process exit code | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
 | 2026-08-05 | Gave each plugin one identity-named namespace, replaced path registration with a host-supplied command builder, and injected the command parser | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
-| 2026-08-06 | Specified local marketplace sources as live references so authors can run uncommitted plugin work against the real executable — planned, not yet implemented | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
+| 2026-08-06 | Specified local marketplace sources as live references so authors can run uncommitted plugin work against the real executable | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
