@@ -1843,6 +1843,123 @@ describe("marketplace clone transports", () => {
     },
   );
 
+  test.each<[string, Readonly<Record<string, string>>]>([
+    [
+      "names it",
+      {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.sshCommand",
+        GIT_CONFIG_VALUE_0: "ssh -i /run/secrets/deploy_key",
+      },
+    ],
+    [
+      "names it in another case, among other entries",
+      {
+        GIT_CONFIG_COUNT: "2",
+        GIT_CONFIG_KEY_0: "user.name",
+        GIT_CONFIG_VALUE_0: "ci",
+        GIT_CONFIG_KEY_1: "CORE.SSHCOMMAND",
+        GIT_CONFIG_VALUE_1: "ssh -i /run/secrets/deploy_key",
+      },
+    ],
+  ])(
+    "keeps an SSH command the environment's Git configuration %s",
+    async (_case, configured) => {
+      const temporaryRoot = await temporaryDirectory(
+        "tx-clone-ssh-env-config-",
+      );
+      try {
+        const env = { PATH: "/test/bin", ...configured };
+        const { calls, add } = recordingManager(temporaryRoot, env);
+
+        expect(await add("commanded")).toBe("commanded");
+        // Command scope is the one scope beyond the global and system files
+        // that a clone applies, and it outranks both, so nothing is probed
+        // and nothing is injected over it.
+        expect(calls.map(({ args }) => args[0])).toEqual(["clone", "clone"]);
+        expect(calls.map(({ env: passed }) => passed)).toEqual([
+          { ...env, GIT_TERMINAL_PROMPT: "0" },
+          { ...env, GIT_TERMINAL_PROMPT: "0" },
+        ]);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each<[string, Readonly<Record<string, string>>]>([
+    [
+      "names another variable",
+      {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.sshCommandTimeout",
+        GIT_CONFIG_VALUE_0: "ssh -i /run/secrets/deploy_key",
+      },
+    ],
+    [
+      "leaves the value empty",
+      {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.sshCommand",
+        GIT_CONFIG_VALUE_0: "",
+      },
+    ],
+    [
+      "counts its entries with something that is not a number",
+      {
+        GIT_CONFIG_COUNT: "many",
+        GIT_CONFIG_KEY_0: "core.sshCommand",
+        GIT_CONFIG_VALUE_0: "ssh -i /run/secrets/deploy_key",
+      },
+    ],
+    [
+      "counts its entries with a fraction",
+      {
+        GIT_CONFIG_COUNT: "1.5",
+        GIT_CONFIG_KEY_0: "core.sshCommand",
+        GIT_CONFIG_VALUE_0: "ssh -i /run/secrets/deploy_key",
+      },
+    ],
+    [
+      "counts fewer entries than it supplies",
+      {
+        GIT_CONFIG_COUNT: "0",
+        GIT_CONFIG_KEY_0: "core.sshCommand",
+        GIT_CONFIG_VALUE_0: "ssh -i /run/secrets/deploy_key",
+      },
+    ],
+  ])(
+    "puts every clone attempt in batch mode when the environment %s",
+    async (_case, configured) => {
+      const temporaryRoot = await temporaryDirectory("tx-clone-ssh-env-none-");
+      try {
+        const env = { PATH: "/test/bin", ...configured };
+        const { calls, add } = recordingManager(temporaryRoot, env);
+
+        expect(await add("batched")).toBe("batched");
+        // Nothing is configured, so the two scoped files are still asked.
+        expect(calls.map(({ args }) => args[0])).toEqual([
+          "config",
+          "config",
+          "clone",
+          "clone",
+        ]);
+        const batched = {
+          ...env,
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+        };
+        expect(calls.map(({ env: passed }) => passed)).toEqual([
+          env,
+          env,
+          batched,
+          batched,
+        ]);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 /**

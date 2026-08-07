@@ -59,6 +59,7 @@ const unknownSource = "<unknown>";
 const defaultSshUser = "git";
 const batchModeSshCommand = "ssh -o BatchMode=yes";
 const sshCommandScopes = ["--global", "--system"] as const;
+const sshCommandVariable = "core.sshcommand";
 
 export function normalizeMarketplaceRepository(repository: string): string {
   if (!githubRepositoryPattern.test(repository)) return repository;
@@ -310,6 +311,41 @@ export async function discardStaging(staging: string): Promise<void> {
   }
 }
 
+/**
+ * Whether an environment configures `core.sshCommand` through Git's
+ * `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` protocol
+ * (Git 2.31 and later), the documented way to supply configuration without
+ * writing a file.
+ *
+ * This is *command*-scope configuration, and a clone applies it: it outranks
+ * the global and system files, and unlike the local scope it is not tied to
+ * whatever repository the caller happens to be standing in. So a deploy key
+ * pinned this way names a command the clone really does run, and injecting a
+ * default over it would drop the key — which is why command scope is read here
+ * while local scope deliberately is not. It is also the only such scope
+ * reachable without a Git call, since this code builds the clone's argv itself
+ * and passes no `-c` of its own.
+ *
+ * Section and variable names are case-insensitive in Git configuration, so the
+ * key is compared that way. A `GIT_CONFIG_COUNT` that is not a whole number —
+ * absent, malformed, fractional — describes no entries and is scanned as none;
+ * a negative one needs no guard of its own, since the scan starts at zero.
+ */
+function hasEnvironmentSshCommand(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const { GIT_CONFIG_COUNT: declared } = env;
+  const count = Number(declared);
+  if (!Number.isInteger(count)) return false;
+  for (let index = 0; index < count; index += 1) {
+    const key = env[`GIT_CONFIG_KEY_${index}`];
+    if (key?.toLowerCase() === sshCommandVariable) {
+      if (env[`GIT_CONFIG_VALUE_${index}`]) return true;
+    }
+  }
+  return false;
+}
+
 export async function runGit(
   args: readonly string[],
   options: {
@@ -482,12 +518,14 @@ export class MarketplaceManager implements MarketplaceOperations {
 
   /**
    * Whether Git configuration names an SSH command in a scope a clone applies.
-   * Only the global and system files are read, and `--local` MUST NOT be added
-   * to them: `git clone` creates the repository it writes into, so it never
-   * applies the local configuration of whatever repository the caller happens
-   * to be standing in. Reading that scope would report a command the clone
-   * will not use, suppress batch mode for nothing, and leave ssh(1) free to
-   * block on the host-key prompt the default exists to prevent.
+   * The environment's own command-scope entries are scanned first, because
+   * they outrank both files and cost no Git call; after them the global and
+   * system files are read. `--local` MUST NOT be added to those two: `git
+   * clone` creates the repository it writes into, so it never applies the
+   * local configuration of whatever repository the caller happens to be
+   * standing in. Reading that scope would report a command the clone will not
+   * use, suppress batch mode for nothing, and leave ssh(1) free to block on
+   * the host-key prompt the default exists to prevent.
    *
    * Each scope is asked for separately rather than parsed out of
    * `--show-scope`, which works on every Git version and leaves no output
@@ -497,6 +535,7 @@ export class MarketplaceManager implements MarketplaceOperations {
    * configured, and the default applies.
    */
   async #hasConfiguredSshCommand(): Promise<boolean> {
+    if (hasEnvironmentSshCommand(this.#env)) return true;
     for (const scope of sshCommandScopes) {
       try {
         const { stdout } = await this.#runGit(
