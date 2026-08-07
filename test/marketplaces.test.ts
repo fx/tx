@@ -1321,6 +1321,115 @@ describe("marketplace clone transports", () => {
     }
   });
 
+  test.each([
+    ["pa@ss", "ss@example"],
+    ["s p", "s p@example"],
+  ])(
+    "omits a password spelled with %p, which a URL parse would escape",
+    async (password, run) => {
+      const temporaryRoot = await temporaryDirectory("tx-clone-escaped-");
+      try {
+        const root = join(temporaryRoot, "marketplaces");
+        const source = `https://user:${password}@example.com/me/r.git`;
+        const manager = new MarketplaceManager(root, {
+          prepare: async () => {},
+          // Git is handed the raw source and quotes it back raw, escaping
+          // nothing, so the credential reaches stderr exactly as it was typed.
+          runGit: async (args) => {
+            throw new Error(
+              `Git command failed: fatal: unable to access '${args[2] as string}/': 403`,
+            );
+          },
+        });
+
+        const failure: unknown = await manager
+          .add(source, "escaped")
+          .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(Error);
+        const { message, cause } = failure as Error;
+        expect(message).not.toContain(password);
+        expect(message).not.toContain(run);
+        expect(message).toContain('"https://example.com/me/r.git"');
+        expect(message).toContain('"git@example.com:me/r.git"');
+        expect(cause).toBeInstanceOf(AggregateError);
+        for (const preserved of (cause as AggregateError).errors as Error[]) {
+          expect(preserved.message).not.toContain(password);
+          expect(preserved.message).not.toContain(run);
+        }
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each([
+    ["https://git:tok@github.com/acme/tools.git", "github.com/acme/tools.git"],
+    ["https://me:tok@example.com/me/r.git", "example.com/me/r.git"],
+  ])(
+    "keeps %p intact when its username also spells host or path text",
+    async (source, repository) => {
+      const temporaryRoot = await temporaryDirectory("tx-clone-collide-");
+      try {
+        const root = join(temporaryRoot, "marketplaces");
+        const manager = new MarketplaceManager(root, {
+          prepare: async () => {},
+          runGit: async (args) => {
+            throw new Error(
+              `Git command failed: fatal: unable to access '${args[2] as string}/': 403`,
+            );
+          },
+        });
+
+        const failure: unknown = await manager
+          .add(source, "collide")
+          .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(Error);
+        const { message } = failure as Error;
+        // The username is an identifier, not the secret: taking it out as a
+        // substring would rewrite the host and the path around it.
+        expect(message).not.toContain("tok");
+        expect(message).toContain(`https://${repository}`);
+        expect(message).toContain(
+          `"git@${repository.replace("/", ":")}" failed too`,
+        );
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("omits a password Git quotes outside a URL", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-bare-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async () => {
+          throw new Error(
+            "Git command failed: fatal: Authentication failed for user 'alice' with password 'ghp_LOOSE'",
+          );
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("https://alice:ghp_LOOSE@example.com/me/r.git", "bare")
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const { message, cause } = failure as Error;
+      expect(message).not.toContain("ghp_LOOSE");
+      expect(message).toContain("Authentication failed for user 'alice'");
+      expect(cause).toBeInstanceOf(AggregateError);
+      for (const preserved of (cause as AggregateError).errors as Error[]) {
+        expect(preserved.message).not.toContain("ghp_LOOSE");
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("stages every attempt in its own empty directory", async () => {
     const temporaryRoot = await temporaryDirectory("tx-clone-staging-");
     try {

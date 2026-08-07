@@ -159,41 +159,100 @@ function derivedName(source: string, derive: () => string): string {
 }
 
 /**
- * Every literal a source's userinfo puts into text written about that source:
- * the `userinfo@` run as the source spells it, the `user@` run Git echoes
- * after dropping the password itself, and the user and the password alone.
- * A source without userinfo, and anything that is not a URL, carries nothing.
- *
- * `https://<token>@host/owner/repository.git` is a supported source, so a
- * failure that quotes it — the attempts this reports by name, and Git's own
- * stderr, which repeats the clone URL minus only its password — would write
- * a live credential to standard error. Nothing distinguishes a person's
- * account name from a token used as one, so both go.
+ * The name a failure reports an attempt by: the source with its userinfo
+ * cleared, or the source itself when it is not a URL. The label is built this
+ * way rather than scrubbed, because scrubbing a username out of text rewrites
+ * the text around it — `git`, `me` and `com` are all real HTTP(S) usernames
+ * and all occur in the hosts and paths a user needs to read back.
  */
-function sourceCredentials(repository: string): readonly string[] {
+function credentialFreeSource(repository: string): string {
   let url: URL;
   try {
     url = new URL(repository);
   } catch {
-    return [];
+    return repository;
   }
-  const { username, password } = url;
-  const userinfo = password ? `${username}:${password}` : username;
-  const literals = new Set(
-    [userinfo && `${userinfo}@`, username && `${username}@`, password, username]
-      .filter((literal) => literal !== "")
-      .sort((left, right) => right.length - left.length),
-  );
-  return [...literals];
+  url.username = "";
+  url.password = "";
+  return url.href;
+}
+
+interface RawUserinfo {
+  readonly prefix: string;
+  readonly userinfo: string;
+  readonly suffix: string;
+}
+
+/**
+ * A source's userinfo exactly as the source spells it, read from the string
+ * rather than from a parsed `URL`: `URL` percent-encodes what it parses, while
+ * Git is handed the raw string and echoes it back raw, so a literal taken from
+ * the parse matches nothing the moment the credential holds a character `URL`
+ * escapes (`@`, a space, `:` and the rest).
+ *
+ * The authority is what stands between `://` and the first `/`, `?` or `#`;
+ * userinfo is everything before its last `@`, since an unescaped `@` inside a
+ * password is precisely the case the parse cannot describe.
+ */
+function rawUserinfo(repository: string): RawUserinfo | undefined {
+  const scheme = repository.indexOf("://");
+  if (scheme < 0) return undefined;
+  const start = scheme + 3;
+  const delimiter = repository.slice(start).search(/[/?#]/);
+  const end = delimiter < 0 ? repository.length : start + delimiter;
+  const separator = repository.slice(start, end).lastIndexOf("@");
+  if (separator < 0) return undefined;
+  return {
+    prefix: repository.slice(0, start),
+    userinfo: repository.slice(start, start + separator),
+    suffix: repository.slice(start + separator + 1),
+  };
+}
+
+/**
+ * What to take out of Git's own output for a source that carries a credential,
+ * as `[literal, replacement]` pairs applied longest first.
+ *
+ * Git repeats the clone URL it was given, so the thing to remove is that whole
+ * URL rather than a fragment of it: the source as it was handed over, and the
+ * same source with its password component dropped, which is the form Git
+ * echoes. Both are replaced by the credential-free label, so the message still
+ * names the repository. The password alone follows as a safety net for output
+ * that quotes it outside a URL.
+ *
+ * The bare username is deliberately never removed. It is an identifier rather
+ * than the secret, and removing it is what corrupts the surrounding text. The
+ * accepted cost is cosmetic: if Git quotes a password-stripped URL in some
+ * third form, the username may survive in it.
+ */
+function credentialRedactions(
+  repository: string,
+): readonly (readonly [string, string])[] {
+  const raw = rawUserinfo(repository);
+  if (raw === undefined) return [];
+
+  const label = credentialFreeSource(repository);
+  const separator = raw.userinfo.indexOf(":");
+  const password = separator < 0 ? "" : raw.userinfo.slice(separator + 1);
+  const redactions: (readonly [string, string])[] = [[repository, label]];
+  if (password) {
+    const user = raw.userinfo.slice(0, separator);
+    redactions.push(
+      [`${raw.prefix}${user}@${raw.suffix}`, label],
+      [password, ""],
+    );
+  }
+  return redactions.sort(([left], [right]) => right.length - left.length);
 }
 
 /** Text with every one of a source's credential literals taken out of it. */
 function withoutCredentials(
   text: string,
-  credentials: readonly string[],
+  redactions: readonly (readonly [string, string])[],
 ): string {
-  return credentials.reduce(
-    (redacted, credential) => redacted.split(credential).join(""),
+  return redactions.reduce(
+    (redacted, [literal, replacement]) =>
+      redacted.split(literal).join(replacement),
     text,
   );
 }
@@ -206,9 +265,9 @@ function withoutCredentials(
  */
 function withoutCredentialsInFailure(
   failure: Error,
-  credentials: readonly string[],
+  redactions: readonly (readonly [string, string])[],
 ): Error {
-  const message = withoutCredentials(failure.message, credentials);
+  const message = withoutCredentials(failure.message, redactions);
   return message === failure.message ? failure : new Error(message);
 }
 
@@ -217,28 +276,29 @@ function withoutCredentialsInFailure(
  * exactly as Git reported it, because there was no retry to describe. Two are
  * inlined into one message, since the CLI surfaces `error.message` and a user
  * looking at a failed private install needs to see that SSH was tried and how
- * it went; both errors survive as the cause so neither is lost. The source's
- * credential is taken out of all of it — the attempt names, the Git output
- * quoted between them, and the errors kept as the cause alike.
+ * it went; both errors survive as the cause so neither is lost.
+ *
+ * The labels arrive already credential-free and the Git output is scrubbed
+ * before it is inlined, so no redaction ever runs over the composed sentence
+ * and none of them can damage the names it reports.
  */
 function cloneFailure(
-  attempts: readonly string[],
+  labels: readonly string[],
   failures: readonly Error[],
-  credentials: readonly string[],
+  redactions: readonly (readonly [string, string])[],
 ): unknown {
   if (failures.length < 2) return failures.at(0);
 
-  const [primary = "", fallback = ""] = attempts;
-  const detail = failures.map(({ message }) => message).join("; ");
+  const [primary = "", fallback = ""] = labels;
+  const detail = failures
+    .map(({ message }) => withoutCredentials(message, redactions))
+    .join("; ");
   return new Error(
-    withoutCredentials(
-      `Cloning "${primary}" failed and the SSH retry "${fallback}" failed too: ${detail}`,
-      credentials,
-    ),
+    `Cloning "${primary}" failed and the SSH retry "${fallback}" failed too: ${detail}`,
     {
       cause: new AggregateError(
         failures.map((failure) =>
-          withoutCredentialsInFailure(failure, credentials),
+          withoutCredentialsInFailure(failure, redactions),
         ),
       ),
     },
@@ -376,7 +436,11 @@ export class MarketplaceManager implements MarketplaceOperations {
     const derived = deriveMarketplaceSshRepository(repository);
     const attempts =
       derived === undefined ? [repository] : [repository, derived];
-    const credentials = sourceCredentials(repository);
+    // What the failure names the attempts by. The derived candidate is always
+    // `git@host:path` under the derivation rule, so it carries nothing; only
+    // the source it came from has userinfo to leave out.
+    const labels = [credentialFreeSource(repository), ...attempts.slice(1)];
+    const redactions = credentialRedactions(repository);
     // Git's own terminal prompt is off for every attempt, because a private
     // HTTP(S) clone without a credential otherwise blocks on `/dev/tty` and
     // the SSH retry never runs. Credential helpers and `GIT_ASKPASS` are
@@ -400,7 +464,7 @@ export class MarketplaceManager implements MarketplaceOperations {
         await discardStaging(staging);
       }
     }
-    throw cloneFailure(attempts, failures, credentials);
+    throw cloneFailure(labels, failures, redactions);
   }
 
   /**
