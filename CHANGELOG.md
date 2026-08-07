@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/fx/tx/compare/v1.0.0...v1.1.0) (2026-08-07)
+
+
+### Features
+
+* **marketplace:** add local directories as live marketplace sources ([#27](https://github.com/fx/tx/issues/27)) ([b4c5c22](https://github.com/fx/tx/commit/b4c5c228bf0e713de166ae23ceff149f7f44b9d2))
+* **marketplace:** discover and list referenced marketplaces ([#25](https://github.com/fx/tx/issues/25)) ([f8ae7c2](https://github.com/fx/tx/commit/f8ae7c2949e8d5cadd0110b75ac5b3a1290febbe))
+
 ## 1.0.0 (2026-08-05)
 
 
