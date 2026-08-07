@@ -192,8 +192,23 @@ export interface CommandContext {
 - The marketplace manifest, every plugin entry, and every selected package candidate MUST be validated before the first installation starts. Each installation MUST run with the selected real manifest's containing directory as its working directory.
 - Cloned marketplace addition MUST remove staging and publish no checkout when validation or trusted dependency installation fails. Each clone attempt MUST stage into its own fresh, empty directory, and every staging directory the addition creates MUST be removed on every exit path — an attempt that fails may leave a partial checkout behind, which the next attempt cannot clone into. A removal the filesystem refuses MUST NOT replace the failure that preceded it — a clone failure between attempts, or a validation, installation, or installed-name failure at publication — or keep a remaining attempt from running, since abandoning the retry loses both the failure the user needs and the installation they asked for while leaving the directory behind regardless. A local source has no staging to remove; its failure contract is in [Local Marketplace Sources](#local-marketplace-sources).
 - In a compiled executable, the marketplace plugin MUST invoke Bun dependency installation through the running executable (`process.execPath`) with `BUN_BE_BUN=1` so installation does not depend on a separate `bun` executable on `PATH`.
+- A plugin entry MUST be loaded with its dependency graph resolved by Node's resolution algorithm, in a compiled executable exactly as outside one. Resolution MUST honour `exports` maps, including subpath exports, subpath patterns, and conditions; `imports` maps; the legacy `main` and directory-index fallbacks; and the `node_modules` walk. A resolved dependency MUST resolve its own dependencies by the same rules, to any depth. A compiled executable's own runtime module resolver MUST NOT be relied on for this: it reads no on-disk `package.json`, which leaves an `exports`-only package unreachable, a `main` naming anything other than `index.js` unreachable, a package carrying both an `exports` map and a root `index.js` silently resolved to the wrong file, and every dependency of a dependency unreachable for the same reasons.
+- Loading a plugin entry MUST preserve the entry file's module identity, so `import.meta` names the plugin's own file and directory and a plugin reading a file beside itself still finds it. Loading MUST write nothing into a marketplace checkout and MUST NOT modify an installed `node_modules`; a referenced local marketplace is the author's own working tree and MUST stay as they left it. Loading MUST resolve identically whether or not tx is running compiled, so work against a source checkout exercises the module graph the released executable builds.
+- A plugin whose dependency graph cannot be resolved MUST fail as a plugin failure naming the specifier that could not be resolved, under the existing failure-isolation contract.
 
 The marketplace plugin owns the detailed marketplace command, manifest, path-safety, installation, and recovery contracts. Core consumes only the generic child definitions it contributes.
+
+#### Scenario: Dependency behind an exports map
+
+- **GIVEN** an installed plugin dependency whose entry point is published only by its `exports` map, with no `main` and no root `index.js`
+- **WHEN** the plugin imports it by its bare name or by a subpath the map publishes, from the compiled executable
+- **THEN** the import resolves to the file the map selects, and the dependency's own dependencies resolve too
+
+#### Scenario: Live reference left untouched by loading
+
+- **GIVEN** a marketplace referenced from the author's own directory
+- **WHEN** its plugins are loaded
+- **THEN** the directory and its installed `node_modules` are unchanged, and the plugin's `import.meta` still names its own file
 
 #### Scenario: Broken marketplace recovery
 
@@ -381,6 +396,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
 - [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Change 0010: Retry Marketplace Clones Over SSH](../../changes/0010-retry-marketplace-clones-over-ssh.md)
+- [Change 0011: Resolve Plugin Dependencies By Node Rules](../../changes/0011-resolve-plugin-dependencies-by-node-rules.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -399,3 +415,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-05 | Gave each plugin one identity-named namespace, replaced path registration with a host-supplied command builder, and injected the command parser | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
 | 2026-08-06 | Specified local marketplace sources as live references so authors can run uncommitted plugin work against the real executable | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
 | 2026-08-07 | Required a failed HTTP(S) marketplace clone to be retried once against its derived SSH source, non-interactively, staged per attempt, and reported without credentials | [0010-retry-marketplace-clones-over-ssh](../../changes/0010-retry-marketplace-clones-over-ssh.md) |
+| 2026-08-07 | Required a plugin's dependency graph to resolve by Node's rules in a compiled executable, without relying on its runtime module resolver | [0011-resolve-plugin-dependencies-by-node-rules](../../changes/0011-resolve-plugin-dependencies-by-node-rules.md) |

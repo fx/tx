@@ -1,0 +1,107 @@
+# 0011: Resolve Plugin Dependencies By Node Rules
+
+## Summary
+
+Make a plugin's dependencies resolve the way every other Bun and Node program resolves them. A plugin entry is loaded through Bun's bundler, which implements the whole Node resolution algorithm, instead of being handed to the compiled executable's runtime module resolver, which reads no `package.json` at all. A plugin that declares a dependency and has it installed can import it — by its bare name, by a subpath its `exports` map publishes, and transitively through the dependency's own dependencies.
+
+**Spec:** [Plugin System](../specs/plugin-system/)
+**Status:** complete
+**Depends On:** 0005
+
+## Motivation
+
+[Change 0005](./0005-install-per-plugin-dependencies.md) gave each plugin a `package.json` and installs it with `bun install`. The install works: a plugin declaring `@modelcontextprotocol/sdk` gets it, and its ninety-odd transitive packages, laid out in the plugin's own `node_modules`. Importing any of it from the released executable fails.
+
+```
+Cannot find module '@modelcontextprotocol/sdk/server/mcp.js' from '.tx/co/mcp.ts'
+```
+
+The install is not at fault. Copying the same `package.json` and the same host-installed `node_modules` into a bare directory and running `bun` there resolves that specifier immediately. What differs is the runtime doing the resolving.
+
+Inside a Bun single-file executable, resolving a specifier against a directory outside the embedded filesystem is reduced to path arithmetic. A literal file path resolves. A directory holding `index.js` resolves. Nothing else is consulted — not `exports`, not `main`, not `type`, not for a bare specifier and not for a relative directory import either. Three consequences follow, and all three are reachable from an ordinary npm dependency:
+
+- A package whose entry point exists only in an `exports` map is reported missing. `@modelcontextprotocol/sdk` publishes no `main` at all, which is increasingly ordinary; so does its subpath `./server/mcp.js`.
+- A package whose `main` names anything other than `index.js` is reported missing. `cors`, `ajv`, and `debug` are each installed, each have a `main`, and each fail.
+- A package carrying both an `exports` map and a root `index.js` resolves — to `index.js`, which is not what its `exports` map selects. That failure is silent.
+
+The reduction applies to every specifier in the graph, not only the ones a plugin writes, so an installed dependency cannot reach its own dependencies either: importing the SDK by its real file path gets past the first failure and dies on `Cannot find package 'zod-to-json-schema'` from inside the SDK.
+
+This went unnoticed because the only dependency any plugin had declared until now was `date-fns`, which has a `main`, ships a root `index.js`, and depends on nothing. It resolves by path arithmetic alone.
+
+The gap is in the executable's runtime resolver specifically, and it cannot be worked around from inside one. A runtime module hook does not see a literal import specifier — Bun resolves those before consulting one, and fails there. `Bun.resolveSync` is degraded identically. What is not degraded is the bundler: `Bun.build` implements Node resolution in full and implements it identically compiled and uncompiled. Loading a plugin through it resolves the graph correctly and hands the runtime a module with nothing left to resolve.
+
+## Requirements
+
+### Testing Requirements
+
+This change MUST satisfy the project's standing testing rules in [Architecture: Development Conventions](../specs/architecture/index.md#development-conventions). CI enforces these as merge gates:
+
+- Biome formatting and lint checks MUST pass.
+- TypeScript checking MUST pass with no errors, including the consumer-project check that compiles the marketplace plugin against `@fx/tx` alone. The plugin MUST NOT acquire a type dependency on Bun's global types.
+- Bun tests MUST pass with 100% statement, function, and line coverage across production source files.
+- Resolution MUST be tested against the compiled executable. A resolution test running only in-process proves nothing: uncompiled, every specifier in this change already resolves, so such a test passes against the defect it is meant to catch.
+- The dependency fixture MUST be unresolvable by path arithmetic in every case it covers: a package with no `main` and no root `index.js` whose `exports` map selects by condition, a subpath export whose name differs from the file behind it, a package reached through another package's dependency, and an installed package whose `main` names something other than `index.js`. A fixture that happens to ship a root `index.js` passes before the fix and covers nothing.
+- Both the eager and the lazy import shape MUST be covered: a dependency imported as the entry module is evaluated, and one imported inside a command action, which is the shape that reported the defect.
+- A plugin whose dependency is genuinely absent MUST have a test that its failure names the unresolved specifier.
+- Tests MUST create every fixture inside a temporary directory they own and MUST remove it afterwards. No test may reach the network or run `bun install`.
+
+### Functional Requirements
+
+- A plugin entry MUST be loaded with its dependency graph resolved by Node's resolution algorithm, in the compiled executable exactly as outside it.
+- Resolution MUST honour `exports` maps, including subpath exports, subpath patterns, and conditions; `imports` maps; the legacy `main` and directory-index fallbacks; and the `node_modules` walk.
+- A resolved dependency MUST resolve its own dependencies by the same rules, to any depth.
+- The loaded module MUST keep the identity of the entry file: `import.meta.url` and `import.meta.dir` MUST name the plugin's own file and directory, so a plugin reading a file beside itself still finds it.
+- Loading MUST write nothing into a marketplace checkout and MUST NOT modify an installed `node_modules`. A referenced local marketplace is the author's own working tree.
+- A plugin whose graph cannot be resolved MUST fail as a plugin failure, reporting the specifier that could not be resolved, and MUST leave healthy plugins loadable — the existing isolation contract.
+- Loading MUST behave identically whether or not tx is running compiled, so a plugin author working against a source checkout exercises the module graph the released executable builds.
+
+## Design
+
+### Approach
+
+`plugins/marketplace/module.ts` owns loading a plugin entry as a module. It registers a Bun module loader keyed to that entry's exact path, and the loader returns the entry bundled by `Bun.build` with `target: "bun"`. The runtime then loads the bundle *as* that path, so the module keeps its real identity while its whole graph arrives already resolved.
+
+`plugins/marketplace/index.ts` calls `importPluginEntry(entryPath)` where it previously called `import()` directly. Nothing else about entry definition, failure mapping, or recovery changes.
+
+### Decisions
+
+**Bundle rather than resolve.** The alternative was a Node resolution implementation of our own, fed to the runtime through a resolver hook. Two things rule it out. A runtime hook never sees a literal import specifier, which is nearly all of them — Bun resolves those itself and fails before any hook runs — so the hook would fix only the rare dynamic specifier computed at runtime. And a hand-written resolver would be a second implementation of `exports`, `imports`, conditions, patterns, and the legacy fallbacks, maintained here, wrong in its own ways. `Bun.build` is Bun's own implementation of exactly that algorithm, and it is not degraded inside an executable.
+
+**Keyed to the entry path, returning source rather than a file.** The bundle is never written anywhere. Returning it from a loader keyed to the entry's own path is what preserves `import.meta`, and it is also what keeps a referenced local marketplace clean: that checkout is the author's working tree, and an artifact appearing in it on every `tx` invocation would show up in their `git status`. Bundling the graph of the real `@modelcontextprotocol/sdk` costs about 12ms, so nothing is cached and nothing can go stale — a live reference stays live.
+
+**Bundling applies uncompiled too.** Restricting it to a compiled executable would leave a plugin author's source-checkout runs more permissive than the executable their users install, which is the arrangement that hid this defect for six changes. The same module graph is built either way.
+
+**Encapsulation is now enforced.** A specifier reaching past a package's `exports` map into a file it does not publish used to resolve, because the degraded resolver treated it as a path and never read the map. It now fails, as it does in Node and in Bun outside an executable. This is a behaviour change and it is the correct one; a plugin reaching into a dependency's internals was relying on the defect.
+
+**Bun's global types stay out of the plugin.** `test/plugin-consumer.test.ts` compiles the marketplace plugin inside a consumer project that installs `@fx/tx` and nothing else, where `@types/bun` is absent — the check that keeps the plugin externalizable. The two runtime entry points the loader needs are therefore declared locally and read off `globalThis`. The plugin already reaches the same runtime through Node's own `process.execPath` to install dependencies.
+
+### Non-Goals
+
+- Resolving a specifier computed at runtime, rather than written literally, from inside a plugin's graph. It is not resolvable at bundle time and the runtime resolver it would fall to is the degraded one. No plugin does this.
+- Caching bundles between invocations. At about 12ms for a large graph it buys little and costs staleness against a live local marketplace.
+- Sharing one dependency instance between two plugins that install the same package. Per-plugin dependency isolation is already what [Change 0005](./0005-install-per-plugin-dependencies.md) specifies.
+- Fixing the executable's runtime resolver. It belongs to Bun; this change routes around it.
+
+## Tasks
+
+- [x] Specify plugin dependency resolution in [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership)
+- [x] Add `plugins/marketplace/module.ts` and load entries through it from `plugins/marketplace/index.ts`
+- [x] Cover the compiled executable's resolution of an `exports`-only package, a subpath export, a transitively required package, and an installed package whose `main` is not `index.js`, in `test/plugin-dependencies.test.ts`
+- [x] Cover the unresolved-dependency failure and repeated loading of one entry
+- [x] Document dependency resolution in `docs/manual/plugins.md`
+- [x] Verify 100% coverage and `bun run check`
+
+## Open Questions
+
+- [ ] Should the host, rather than the marketplace plugin, own loading a plugin entry as a module? It is a host concern in principle, but the spec assigns dynamic import to the marketplace plugin today, and moving it would mean a new public runtime API rather than a defect fix.
+- [ ] Should a plugin be able to declare a dependency as external, so two plugins share one installed copy? Nothing wants it yet, and dependency isolation is the current contract.
+- [ ] Should the failure for an unresolved dependency suggest reinstalling the marketplace rather than removing it? The recovery advice is shared with every other plugin failure and is not specific to this one.
+
+## References
+
+- [Plugin System](../specs/plugin-system/)
+- [Change 0005: Install Per-Plugin Dependencies](./0005-install-per-plugin-dependencies.md)
+- [Change 0008: Link Local Marketplace Sources](./0008-link-local-marketplace-sources.md)
+- [Bun bundler](https://bun.sh/docs/bundler)
+- [Bun single-file executables](https://bun.sh/docs/bundler/executables)
+- [Node.js package entry points](https://nodejs.org/api/packages.html#package-entry-points)

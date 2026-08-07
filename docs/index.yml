@@ -90,3 +90,11 @@ changes:
     status: complete
     depends_on:
       - "0008"
+  - id: "0011"
+    name: resolve-plugin-dependencies-by-node-rules
+    path: changes/0011-resolve-plugin-dependencies-by-node-rules.md
+    description: Load plugin entries through Bun's bundler so their dependencies resolve by Node's rules inside the compiled executable.
+    spec: plugin-system
+    status: complete
+    depends_on:
+      - "0005"
