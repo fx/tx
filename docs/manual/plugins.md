@@ -16,7 +16,19 @@ tx marketplace list
 tx marketplace remove tools
 ```
 
-`add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+`add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTPS clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+
+## Private repositories over SSH
+
+An HTTP(S) source is always tried over HTTP(S) first. If that clone fails, for any reason, `tx` derives the SSH source from it and clones once more under the same name. Nothing about a public marketplace changes; a private one installs from the shorthand, on the strength of the SSH key you already have.
+
+The derived source is `git@host:path` in the SCP syntax a forge's own instructions are written in, or `ssh://git@host:port/path` when the HTTP(S) source carries a port, since SCP syntax has no way to express one. A user in the source is kept, so `https://alice@git.company.com/team/tools.git` derives `alice@git.company.com:team/tools.git`; a password is dropped, because it is an HTTP(S) credential and means nothing over SSH. Sources that are already `ssh://`, SCP syntax, `file://`, or a plain path are cloned once, as they were typed.
+
+Clone attempts run Git non-interactively. Without that, a private HTTPS clone with no credential stops on Git's terminal prompt and waits, and the SSH retry never happens. Credential helpers and `GIT_ASKPASS` are untouched, so a credential you have configured is still found and the HTTPS clone still succeeds. Only Git's own prompt is suppressed, and only while cloning — `marketplace list` and dependency installation are unaffected.
+
+The SSH attempt runs `ssh -o BatchMode=yes`, so an unknown host key or a missing key fails rather than asking. A `GIT_SSH_COMMAND` already in your environment is used exactly as it is, since it is a deliberate invocation — an identity file, an alternate config, a proxy command — and `tx` has no business rewriting it. That includes its prompting behavior: a key whose passphrase is not already in your agent can still stop and ask.
+
+When both attempts fail, the failure names both sources and carries both messages, so you can see which transport failed how. Any credential in the source's userinfo is left out of that report.
 
 ## Local sources
 
