@@ -66,7 +66,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - The deterministic production build MUST create the standalone executable at `dist/tx` using `bun-linux-x64-baseline`.
 - A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage, or from a location that storage references rather than from the storage itself.
 - The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist.
-- GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend. Those two assets are also what the executable updates itself from; [Updates: Executable Updates](../updates/index.md#executable-updates) owns that behavior and the platforms it reaches.
+- GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend. Those two assets are also what an executable no version manager owns replaces itself from; where one does own it, self-update delegates to that manager instead. [Updates: Executable Updates](../updates/index.md#executable-updates) owns both paths and the platforms they reach.
 - `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
 
 #### Scenario: Standalone host
@@ -99,7 +99,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 ### Composition Root
 
 - A repository composition root outside `src/` MUST supply an ordered list of default plugin definitions to the host.
-- Default plugin ordering MUST be explicit at the composition root. Ordering is observable: it fixes the order in which contributed update participants run, which is why the plugin owning the executable is composed last.
+- Default plugin ordering MUST be explicit at the composition root. Ordering is observable rather than cosmetic: it fixes the order in which contributed update participants run. A default plugin that owns the executable itself MUST therefore be composed after every other default plugin, so that whatever the others own is updated before the executable is replaced.
 - The composition root MAY import default plugin entries; core implementation under `src/` MUST NOT.
 - A default plugin MUST be removable or replaceable without adding feature-specific vocabulary to `src/`.
 
