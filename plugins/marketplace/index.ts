@@ -154,7 +154,7 @@ export function createMarketplacePlugin(
               "Install a marketplace from a Git repository, or reference a local directory",
             )
             .argument(
-              "<repository>",
+              "<source>",
               "Git clone source, bare owner/repository GitHub shorthand, or an existing local directory referenced live",
             )
             .option(

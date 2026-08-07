@@ -71,7 +71,7 @@ describe("first-party marketplace plugin", () => {
     expect(namespaceHelp.stdoutText()).toContain(
       "Usage: tx marketplace [options] [command]",
     );
-    expect(namespaceHelp.stdoutText()).toContain("add [options] <repository>");
+    expect(namespaceHelp.stdoutText()).toContain("add [options] <source>");
     expect(namespaceHelp.stdoutText()).toContain("list ");
     expect(namespaceHelp.stdoutText()).toContain("remove <name>");
     expect(namespaceHelp.stderrText()).toBe("");
@@ -81,7 +81,7 @@ describe("first-party marketplace plugin", () => {
       await dispatch(program, ["marketplace", "add", "--help"], addHelp),
     ).toEqual({ exitCode: EXIT_SUCCESS });
     expect(addHelp.stdoutText()).toContain(
-      "Usage: tx marketplace add [options] <repository>",
+      "Usage: tx marketplace add [options] <source>",
     );
     expect(addHelp.stdoutText()).toContain("--name <name>");
     expect(addHelp.stderrText()).toBe("");
@@ -140,7 +140,7 @@ describe("first-party marketplace plugin", () => {
   });
 
   test.each([
-    ["add", [], "missing required argument 'repository'"],
+    ["add", [], "missing required argument 'source'"],
     ["add", ["one", "two"], "too many arguments"],
     [
       "add",
