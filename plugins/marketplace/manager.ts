@@ -226,6 +226,17 @@ function rawUserinfo(repository: string): string | undefined {
  *   out of Git's own quoted SSH output (`git@host:path` becomes `host:path`).
  *   Cosmetic, confined to text Git quoted, and the reported SSH name is
  *   composed separately and stays exact.
+ * - An empty userinfo component contributes no literal at all. A source may
+ *   legitimately leave the user out and carry the token as the password
+ *   (`https://:token@host/path`, which GitHub and GitLab both accept), or
+ *   spell an empty userinfo outright (`https://@host/path`); the run built
+ *   from such a component would be the bare string `@`, and deleting that
+ *   takes every `@` out of Git's output — `git@host` becomes `githost`, a
+ *   host that does not exist, in the composed message and in the failures
+ *   kept as its cause. The secret is covered regardless: the run Git actually
+ *   quotes for the first form is `:token@`, the whole userinfo, and if Git
+ *   ever quotes the password-stripped `https://@host/path` there is no
+ *   credential left in it to remove.
  */
 function credentialRedactions(repository: string): readonly string[] {
   const userinfo = rawUserinfo(repository);
@@ -233,7 +244,9 @@ function credentialRedactions(repository: string): readonly string[] {
 
   const separator = userinfo.indexOf(":");
   const user = separator < 0 ? userinfo : userinfo.slice(0, separator);
-  const runs = new Set([`${userinfo}@`, `${user}@`]);
+  const runs = new Set(
+    [userinfo, user].filter(Boolean).map((run) => `${run}@`),
+  );
   return [...runs].sort((left, right) => right.length - left.length);
 }
 

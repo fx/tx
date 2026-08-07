@@ -1500,6 +1500,95 @@ describe("marketplace clone transports", () => {
     }
   });
 
+  test("keeps every host intact for a source whose userinfo has no user", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-empty-user-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          // An empty user with the token as the password is a real supported
+          // form, and Git drops the whole userinfo when it quotes the URL
+          // back — leaving a bare `@` as the only thing a user-derived
+          // literal could match.
+          throw new Error(
+            `Git command failed: fatal: unable to access '${(args[2] as string).replace(":ghp_SECRET@", "")}/': 403`,
+          );
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("https://:ghp_SECRET@github.com/acme/tools.git", "emptyuser")
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const { message, cause } = failure as Error;
+      expect(message).not.toContain("ghp_SECRET");
+      // A degenerate literal would be the bare string `@`, which deletes every
+      // `@` Git wrote and turns `git@github.com` into a host that does not
+      // exist.
+      expect(message).toContain(
+        "unable to access 'https://github.com/acme/tools.git/'",
+      );
+      expect(message).toContain(
+        "unable to access 'git@github.com:acme/tools.git/'",
+      );
+      expect(message).toContain('"https://github.com/acme/tools.git"');
+      expect(message).toContain('"git@github.com:acme/tools.git"');
+      expect(cause).toBeInstanceOf(AggregateError);
+      const preserved = ((cause as AggregateError).errors as Error[]).map(
+        ({ message: quoted }) => quoted,
+      );
+      expect(preserved).toEqual([
+        "Git command failed: fatal: unable to access 'https://github.com/acme/tools.git/': 403",
+        "Git command failed: fatal: unable to access 'git@github.com:acme/tools.git/': 403",
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps every host intact for a source whose userinfo is empty", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-empty-userinfo-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          throw new Error(
+            `Git command failed: fatal: unable to access '${args[2] as string}/': 403`,
+          );
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("https://@github.com/acme/tools.git", "emptyuserinfo")
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const { message, cause } = failure as Error;
+      // A wholly empty userinfo carries no credential, so there is nothing to
+      // remove and nothing may be removed.
+      expect(message).toContain(
+        "unable to access 'git@github.com:acme/tools.git/'",
+      );
+      expect(message).toContain('"https://github.com/acme/tools.git"');
+      expect(message).toContain('"git@github.com:acme/tools.git"');
+      expect(cause).toBeInstanceOf(AggregateError);
+      const preserved = ((cause as AggregateError).errors as Error[]).map(
+        ({ message: quoted }) => quoted,
+      );
+      expect(preserved).toEqual([
+        "Git command failed: fatal: unable to access 'https://@github.com/acme/tools.git/': 403",
+        "Git command failed: fatal: unable to access 'git@github.com:acme/tools.git/': 403",
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test.each([
     ["pa@ss", "ss@example"],
     ["s p", "s p@example"],
