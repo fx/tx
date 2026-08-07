@@ -18,3 +18,4 @@
 | 0005 | [Install Per-Plugin Dependencies](changes/0005-install-per-plugin-dependencies.md) | [Plugin System](specs/plugin-system/) | complete | 0004 |
 | 0006 | [Isolate Plugin Failure Exit Codes](changes/0006-isolate-plugin-failure-exit-codes.md) | [Plugin System](specs/plugin-system/) | complete | 0005 |
 | 0007 | [Delegate Dispatch to Plugins](changes/0007-delegate-dispatch-to-plugins.md) | [Plugin System](specs/plugin-system/) | complete | 0006 |
+| 0009 | [Skip Quality Commands for Documentation](changes/0009-skip-quality-commands-for-documentation.md) | [Architecture](specs/architecture/) | in-progress | — |

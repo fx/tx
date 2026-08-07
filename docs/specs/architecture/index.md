@@ -131,6 +131,9 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - CI MUST run for every pull request and every push to the default branch.
 - CI MUST install dependencies from the committed Bun lockfile without updating it.
 - CI MUST run Biome formatting and lint checks, TypeScript checking, Bun tests with coverage, and the production build.
+- A run whose changed files are limited to documentation — paths under `docs/` and files named `*.md` — MUST report success without installing dependencies or running those commands. Every other run MUST run them in full, including a run that changes documentation alongside anything else.
+- Documentation-only detection MUST fail safe. When the changed files cannot be determined — no base commit to compare against, an unknown base, or an empty diff — the run MUST execute the full suite rather than skip it.
+- Skipping MUST NOT change what reports. The required `CI` check MUST still be produced for a documentation-only run, because a required check that never reports blocks the pull request instead of exempting it.
 - CI MUST fail when any command fails or any coverage category falls below 100%.
 - Required checks MUST NOT use failure suppression.
 - CI MUST also support explicit `workflow_dispatch` without changing the required `CI` job name.
@@ -145,6 +148,24 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - **GIVEN** Release Please creates or updates a release PR with `GITHUB_TOKEN`
 - **WHEN** release orchestration processes that PR
 - **THEN** it explicitly dispatches CI and waits for a successful `workflow_dispatch` run at the exact PR head SHA
+
+#### Scenario: Documentation-only pull request
+
+- **GIVEN** a pull request changes only paths under `docs/` and files named `*.md`
+- **WHEN** CI runs
+- **THEN** the required `CI` check reports success without installing dependencies or running the quality commands
+
+#### Scenario: Documentation alongside source
+
+- **GIVEN** a pull request changes a documentation file and a source file
+- **WHEN** CI runs
+- **THEN** the full suite runs, exactly as it would without the documentation change
+
+#### Scenario: Undeterminable diff
+
+- **GIVEN** CI cannot determine which files changed
+- **WHEN** it decides whether to skip
+- **THEN** it runs the full suite
 
 #### Scenario: Coverage regression
 
@@ -228,6 +249,7 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 - [Plugin System](../plugin-system/)
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
+- [Change 0009: Skip Quality Commands for Documentation](../../changes/0009-skip-quality-commands-for-documentation.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
 
 ## Changelog
@@ -242,3 +264,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-03 | Defined scoped package publishing, Linux x64 release assets, version invariants, manual Release Please approvals, and exact-head dispatched CI | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
 | 2026-08-04 | Limited plugin initialization failures to standard-error diagnostics without changing dispatched exit codes | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
 | 2026-08-05 | Delegated everything after the plugin namespace to its owner, settled the parser question, and collapsed usage and runtime failures onto one exit code | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
+| 2026-08-06 | Exempted documentation-only runs from the CI quality commands while still reporting the required check | [0009-skip-quality-commands-for-documentation](../../changes/0009-skip-quality-commands-for-documentation.md) |
