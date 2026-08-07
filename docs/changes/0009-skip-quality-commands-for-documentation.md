@@ -5,7 +5,7 @@
 Make CI's first step decide whether a run's changed files are documentation only. If they are, the job reports success without installing dependencies or running the quality commands. Everything else runs exactly as it does today.
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** —
 
 ## Motivation
@@ -78,16 +78,16 @@ With a usable base, `git diff --name-only` produces the changed paths, and the r
 
 ## Tasks
 
-- [ ] Skip the quality commands for documentation-only runs (PR #24)
+- [x] Skip the quality commands for documentation-only runs (PR #24)
   - [x] Add the detection step to `.github/workflows/ci.yml` as the first step after checkout, resolving the base from `pull_request` and `push` events and falling back to the full suite when it cannot (PR #24)
   - [x] Give checkout the history depth the diff needs (PR #24)
   - [x] Condition the Bun setup, dependency install, and `bun run check` steps on the detection result, keeping the job named `CI` (PR #24)
   - [x] Amend [Architecture: Continuous Integration](../specs/architecture/index.md#continuous-integration) with the skip, the fail-safe rule, and the requirement that the check still reports (PR #24)
-  - [ ] Verify on this pull request that the full suite runs, since it changes a workflow file
-  - [ ] Verify on a documentation-only pull request that `CI` reports success with the dependency and quality steps skipped, and record the observation
-  - [ ] Verify that a pull request touching documentation and source runs the full suite
+  - [x] Verify on this pull request that the full suite runs, since it changes a workflow file (run 31140583512, PR #24 at 603cb6d)
+  - [x] Verify on a documentation-only pull request that `CI` reports success with the dependency and quality steps skipped, and record the observation (run 31140918308, PR #23 at 42377cc)
+  - [x] Verify that a pull request touching documentation and source runs the full suite (run 31142727490, PR #25 at ccf138a)
 
-The three verification tasks stay open. They require observing real workflow runs, and GitHub Actions is in an active incident that has produced no `pull_request` run since 18:32 UTC — including on this pull request. Marking them complete without a run to point at is exactly the inference the Testing Requirements forbid.
+All three verifications were read from the per-step conclusions of real workflow runs rather than inferred from the workflow file. Run 31140583512 on PR #24 at `603cb6d` — the pull request that changed `.github/workflows/ci.yml`, which is not documentation — ran the Bun setup, `bun ci`, and `bun run check` steps to success, confirming the detection step does not skip a workflow change. Run 31140918308 on the documentation-only PR #23 at `42377cc` reported the `CI` job successful with those same three steps marked `skipped`, corroborated on `push` by run 31141024917 on `main` at `871a4b9`. Run 31142727490 on PR #25 at `ccf138a`, whose diff touched `docs/changes/0008-link-local-marketplace-sources.md` alongside `plugins/marketplace/manager.ts`, `plugins/marketplace/storage.ts`, and two test files, ran all three steps to success, confirming a mixed diff is treated as source.
 
 ## Open Questions
 
