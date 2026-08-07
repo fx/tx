@@ -10,6 +10,10 @@ specs:
     path: specs/plugin-system/
     description: Generic plugin hosting and externalized marketplace-plugin ownership contracts.
     status: active
+  - name: updates
+    path: specs/updates/
+    description: User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited.
+    status: active
 
 changes:
   - id: "0001"
@@ -90,3 +94,35 @@ changes:
     status: complete
     depends_on:
       - "0008"
+  - id: "0011"
+    name: add-generic-update-lifecycle
+    path: changes/0011-add-generic-update-lifecycle.md
+    description: Add generic update participants to the host and a bundled update plugin owning tx update and its dry run.
+    spec: updates
+    status: draft
+    depends_on:
+      - "0007"
+  - id: "0012"
+    name: update-installed-marketplaces
+    path: changes/0012-update-installed-marketplaces.md
+    description: Contribute a marketplace update participant that fetches, moves a clean checkout forward, reprepares it, and restores it on failure.
+    spec: updates
+    status: draft
+    depends_on:
+      - "0011"
+  - id: "0013"
+    name: pin-marketplace-versions
+    path: changes/0013-pin-marketplace-versions.md
+    description: Accept a version suffix on a marketplace source, record the pin in its checkout, and honor it when updating.
+    spec: updates
+    status: draft
+    depends_on:
+      - "0012"
+  - id: "0014"
+    name: update-the-tx-executable
+    path: changes/0014-update-the-tx-executable.md
+    description: Contribute an executable update participant that delegates to a version manager or verifies and atomically replaces the published executable.
+    spec: updates
+    status: draft
+    depends_on:
+      - "0011"
