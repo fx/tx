@@ -129,7 +129,7 @@ describe("main", () => {
       0,
     );
     expect(bundled.stdoutText()).toContain("Usage: tx marketplace");
-    expect(bundled.stdoutText()).toContain("add [options] <repository>");
+    expect(bundled.stdoutText()).toContain("add [options] <source>");
     expect(bundled.stderrText()).toBe("");
 
     const bare = captureContext();

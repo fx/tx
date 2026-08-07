@@ -142,28 +142,31 @@ export function createMarketplacePlugin(
       return ({ command, context, env, plugin }) => {
         const root = resolveMarketplaceDirectory({ env });
         const manager =
-          options.manager ?? new MarketplaceManager(root, { env });
+          options.manager ??
+          new MarketplaceManager(root, { env, cwd: context.cwd });
 
         command((namespace) => {
           namespace.description("Manage installed plugin marketplaces");
 
           namespace
             .command("add")
-            .description("Install a marketplace from a Git repository")
+            .description(
+              "Install a marketplace from a Git repository, or reference a local directory",
+            )
             .argument(
-              "<repository>",
-              "Git clone source, or bare owner/repository GitHub shorthand",
+              "<source>",
+              "Git clone source, bare owner/repository GitHub shorthand, or an existing local directory referenced live",
             )
             .option(
               "--name <name>",
-              "Local marketplace name, instead of one derived from the repository",
+              "Local marketplace name, instead of one derived from the source",
             )
-            .action(async (repository: string, flags: { name?: string }) => {
+            .action(async (source: string, flags: { name?: string }) => {
               const requested =
                 flags.name === undefined
                   ? undefined
                   : validateMarketplaceName(flags.name);
-              const name = await manager.add(repository, requested);
+              const name = await manager.add(source, requested);
               context.stdout.write(`Added marketplace "${name}".\n`);
             });
 

@@ -4,15 +4,18 @@ import {
   mkdir,
   readdir,
   readFile,
+  readlink,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   deriveMarketplaceName,
   MarketplaceManager,
   normalizeMarketplaceRepository,
+  type RunGit,
   runGit,
 } from "../plugins/marketplace/manager.ts";
 import {
@@ -788,7 +791,7 @@ describe("MarketplaceManager", () => {
     );
   });
 
-  test("clones local Git repositories, awaits preparation, lists, and removes", async () => {
+  test("clones a file:// repository, awaits preparation, lists, and removes", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplaces-");
     try {
       const repository = await createGitRepository(
@@ -796,6 +799,8 @@ describe("MarketplaceManager", () => {
         "source.git",
         { "README.txt": "marketplace\n" },
       );
+      // The directory exists, so only the URL scheme keeps this a clone.
+      const source = pathToFileURL(repository).href;
       const root = join(temporaryRoot, "data", "marketplaces");
       let prepared = false;
       const manager = new MarketplaceManager(root, {
@@ -809,17 +814,21 @@ describe("MarketplaceManager", () => {
         },
       });
 
-      expect(await manager.add(repository)).toBe("source");
+      expect(await manager.add(source)).toBe("source");
       expect(prepared).toBe(true);
-      expect(await manager.list()).toEqual([
-        { name: "source", source: repository },
-      ]);
-      await expect(manager.add(repository)).rejects.toThrow(
-        "already installed",
-      );
+      expect(await manager.list()).toEqual([{ name: "source", source }]);
+      await expect(manager.add(source)).rejects.toThrow("already installed");
+      expect((await lstat(join(root, "source"))).isSymbolicLink()).toBe(false);
       expect(await readFile(join(root, "source", "README.txt"), "utf8")).toBe(
         "marketplace\n",
       );
+
+      // A clone is a snapshot: the source moves on without it.
+      await writeFile(join(repository, "README.txt"), "edited\n");
+      expect(await readFile(join(root, "source", "README.txt"), "utf8")).toBe(
+        "marketplace\n",
+      );
+
       await manager.remove("source");
       await expect(lstat(join(root, "source"))).rejects.toHaveProperty(
         "code",
@@ -1089,6 +1098,381 @@ describe("MarketplaceManager", () => {
         "code",
         "ENOENT",
       );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+const rejectGit: RunGit = async () => {
+  throw new Error("Git must not run for a local source");
+};
+
+/**
+ * A directory holding a valid marketplace, created inside the caller's own
+ * temporary directory so nothing in the working repository is referenced,
+ * installed into, or removed.
+ */
+async function createLocalSource(
+  parent: string,
+  name: string,
+  plugin = name,
+): Promise<string> {
+  const source = join(parent, name);
+  await mkdir(join(source, ".tx"), { recursive: true });
+  await Promise.all([
+    writeFile(join(source, "plugin.ts"), "export default () => {};\n"),
+    writeFile(
+      join(source, ".tx/config.json"),
+      JSON.stringify({ plugins: [{ name: plugin, entry: "plugin.ts" }] }),
+    ),
+  ]);
+  return source;
+}
+
+describe("local marketplace sources", () => {
+  test("sends every Git source form to clone, including one naming a real directory", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-git-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const source = pathToFileURL(
+        await createLocalSource(temporaryRoot, "tools"),
+      ).href;
+      const cloned: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        prepare: async () => {},
+        runGit: async (args) => {
+          cloned.push(args[2] as string);
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+      });
+
+      // A directory whose name reads as SCP-style syntax to Git reads that way
+      // here too, and stays reachable as a local source by a path.
+      const colon = await createLocalSource(temporaryRoot, "host:path");
+
+      expect(await manager.add(source)).toBe("tools");
+      expect(await manager.add("git@example.com:me/scp.git")).toBe("scp");
+      expect(await manager.add("ssh://git@example.com/me/remote.git")).toBe(
+        "remote",
+      );
+      expect(await manager.add("owner/absent")).toBe("absent");
+      expect(await manager.add("host:path", "colon-remote")).toBe(
+        "colon-remote",
+      );
+      expect(await manager.add("./host:path", "colon-local")).toBe(
+        "colon-local",
+      );
+
+      expect(cloned).toEqual([
+        source,
+        "git@example.com:me/scp.git",
+        "ssh://git@example.com/me/remote.git",
+        "https://github.com/owner/absent.git",
+        "host:path",
+      ]);
+      for (const name of ["absent", "colon-remote", "remote", "scp", "tools"]) {
+        expect((await lstat(join(root, name))).isSymbolicLink()).toBe(false);
+      }
+      expect(await readlink(join(root, "colon-local"))).toBe(colon);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("references an existing directory and re-reads its edits without reinstalling", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-local-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const source = await createLocalSource(temporaryRoot, "tools");
+      const prepared: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        runGit: rejectGit,
+        prepare: async (checkout) => {
+          prepared.push(checkout);
+        },
+      });
+
+      expect(await manager.add("tools")).toBe("tools");
+      expect(prepared).toEqual([source]);
+      const target = join(root, "tools");
+      expect((await lstat(target)).isSymbolicLink()).toBe(true);
+      expect(await readlink(target)).toBe(source);
+      expect(await manager.list()).toEqual([{ name: "tools", source }]);
+      expect((await readMarketplaceManifest(target)).plugins[0]?.name).toBe(
+        "tools",
+      );
+
+      await writeFile(
+        join(source, ".tx/config.json"),
+        '{"plugins":[{"name":"edited","entry":"plugin.ts"}]}',
+      );
+
+      expect((await readMarketplaceManifest(target)).plugins[0]?.name).toBe(
+        "edited",
+      );
+      expect(prepared).toEqual([source]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("lets an existing directory win over owner/repository shorthand", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-shorthand-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const source = await createLocalSource(
+        temporaryRoot,
+        join("owner", "repository"),
+        "shorthand",
+      );
+      const cloned: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        prepare: async () => {},
+        runGit: async (args) => {
+          cloned.push(args[2] as string);
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+      });
+
+      expect(await manager.add("owner/repository")).toBe("repository");
+      expect(await readlink(join(root, "repository"))).toBe(source);
+      expect(cloned).toEqual([]);
+
+      // The remote of the same spelling stays reachable by its full URL.
+      expect(
+        await manager.add("https://github.com/owner/repository.git", "remote"),
+      ).toBe("remote");
+      expect(cloned).toEqual(["https://github.com/owner/repository.git"]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("names a local marketplace after the directory it resolves to", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-name-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await Promise.all([
+        createLocalSource(temporaryRoot, "tools"),
+        createLocalSource(temporaryRoot, "legacy.git"),
+        createLocalSource(temporaryRoot, "-unsafe"),
+      ]);
+      const managerIn = (cwd: string) =>
+        new MarketplaceManager(root, {
+          cwd,
+          runGit: rejectGit,
+          prepare: async () => {},
+        });
+
+      expect(await managerIn(join(temporaryRoot, "tools")).add(".")).toBe(
+        "tools",
+      );
+      await managerIn(temporaryRoot).remove("tools");
+      expect(await managerIn(temporaryRoot).add("tools/")).toBe("tools");
+      // A directory named tools.git is called that; only a Git URL drops it.
+      expect(await managerIn(temporaryRoot).add("legacy.git")).toBe(
+        "legacy.git",
+      );
+      await expect(managerIn(temporaryRoot).add("-unsafe")).rejects.toThrow(
+        'Cannot derive a safe marketplace name from "-unsafe"; pass --name <name>',
+      );
+
+      expect((await readdir(root)).toSorted()).toEqual(["legacy.git", "tools"]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a name already held by a clone or a reference", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-taken-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const source = await createLocalSource(temporaryRoot, "tools");
+      await mkdir(join(root, "cloned"), { recursive: true });
+      const prepared: string[] = [];
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        runGit: rejectGit,
+        prepare: async (checkout) => {
+          prepared.push(checkout);
+        },
+      });
+
+      expect(await manager.add("tools")).toBe("tools");
+      await expect(manager.add("tools")).rejects.toThrow(
+        'Marketplace "tools" is already installed',
+      );
+      await expect(manager.add(source, "cloned")).rejects.toThrow(
+        'Marketplace "cloned" is already installed',
+      );
+
+      expect(prepared).toEqual([source]);
+      expect((await readdir(root)).toSorted()).toEqual(["cloned", "tools"]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an empty source before it can name the working directory", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-empty-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const cwd = await createLocalSource(temporaryRoot, "work");
+      const manager = new MarketplaceManager(root, {
+        cwd,
+        runGit: rejectGit,
+        prepare: async () => {
+          throw new Error("Preparation must not run");
+        },
+      });
+
+      await expect(manager.add("")).rejects.toThrow(
+        "Marketplace source must not be empty",
+      );
+      await expect(manager.add("", "named")).rejects.toThrow(
+        "Marketplace source must not be empty",
+      );
+
+      expect((await readdir(cwd)).toSorted()).toEqual([".tx", "plugin.ts"]);
+      await expect(lstat(root)).rejects.toHaveProperty("code", "ENOENT");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an existing non-directory and reports other inspection failures", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-inspect-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await Promise.all([
+        writeFile(join(temporaryRoot, "file.txt"), "not a marketplace"),
+        symlink("loop", join(temporaryRoot, "loop")),
+      ]);
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        runGit: rejectGit,
+        prepare: async () => {
+          throw new Error("Preparation must not run");
+        },
+      });
+
+      await expect(manager.add("file.txt")).rejects.toThrow(
+        'Marketplace source "file.txt" is not a directory',
+      );
+      // An unreadable path is reported as itself rather than resurfacing as
+      // an unrelated clone failure.
+      await expect(manager.add("loop")).rejects.toHaveProperty("code", "ELOOP");
+
+      await expect(lstat(root)).rejects.toHaveProperty("code", "ENOENT");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("pins the resolved real path against a later repointed link", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-pinned-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const current = join(temporaryRoot, "current");
+      const [first] = await Promise.all([
+        createLocalSource(join(temporaryRoot, "first"), "repo", "first"),
+        createLocalSource(join(temporaryRoot, "second"), "repo", "second"),
+      ]);
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        runGit: rejectGit,
+        prepare: async () => {},
+      });
+      await symlink(join(temporaryRoot, "first"), current);
+
+      expect(await manager.add("current/repo", "pinned")).toBe("pinned");
+      await rm(current);
+      await symlink(join(temporaryRoot, "second"), current);
+
+      const target = join(root, "pinned");
+      expect(await readlink(target)).toBe(first);
+      expect((await readMarketplaceManifest(target)).plugins[0]?.name).toBe(
+        "first",
+      );
+      expect(await manager.list()).toEqual([{ name: "pinned", source: first }]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("publishes nothing and leaves the referenced tree in place when preparation fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-rejected-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const source = await createLocalSource(temporaryRoot, "tools");
+      const failing = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        runGit: rejectGit,
+        prepare: async (checkout) => {
+          // Whatever trusted installation writes into the tree is not tx's to
+          // undo; withholding the reference is all tx owns here.
+          await writeFile(join(checkout, "installed.txt"), "installed");
+          throw new Error("trusted lifecycle failed");
+        },
+      });
+
+      await expect(failing.add("tools")).rejects.toThrow(
+        "trusted lifecycle failed",
+      );
+      expect(await readdir(root)).toEqual([]);
+      expect((await readdir(source)).toSorted()).toEqual([
+        ".tx",
+        "installed.txt",
+        "plugin.ts",
+      ]);
+      expect(await readFile(join(source, "plugin.ts"), "utf8")).toBe(
+        "export default () => {};\n",
+      );
+
+      // Production validation rejects an invalid source the same way, with no
+      // dependency installation reached and nothing removed.
+      const invalid = join(temporaryRoot, "invalid");
+      await mkdir(invalid);
+      await writeFile(join(invalid, "keep.txt"), "keep");
+      await expect(
+        new MarketplaceManager(root, {
+          cwd: temporaryRoot,
+          runGit: rejectGit,
+        }).add("invalid"),
+      ).rejects.toThrow("Missing .tx/config.json");
+      expect(await readdir(root)).toEqual([]);
+      expect(await readdir(invalid)).toEqual(["keep.txt"]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("withholds a reference for a name taken during preparation", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-source-race-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const source = await createLocalSource(temporaryRoot, "tools");
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        runGit: rejectGit,
+        prepare: async () => {
+          await mkdir(join(root, "race"));
+          await writeFile(join(root, "race", "existing.txt"), "existing");
+        },
+      });
+
+      await expect(manager.add("tools", "race")).rejects.toThrow(
+        'Marketplace "race" is already installed',
+      );
+      expect(await readdir(root)).toEqual(["race"]);
+      expect((await lstat(join(root, "race"))).isDirectory()).toBe(true);
+      expect((await readdir(source)).toSorted()).toEqual([".tx", "plugin.ts"]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

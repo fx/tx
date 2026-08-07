@@ -72,7 +72,7 @@ changes:
     path: changes/0008-link-local-marketplace-sources.md
     description: Add a local directory as a live marketplace reference so authors can run uncommitted plugin work against the real executable.
     spec: plugin-system
-    status: draft
+    status: complete
     depends_on:
       - "0007"
   - id: "0009"

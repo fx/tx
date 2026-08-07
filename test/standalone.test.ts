@@ -4,6 +4,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -21,7 +22,12 @@ interface CommandResult {
 }
 
 test("the production build is a standalone executable", async () => {
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "tx-standalone-"));
+  // Realpath: the fixture marketplace is referenced by its resolved path, so
+  // an intermediate link in the platform temporary directory would otherwise
+  // make the listed source disagree with the path this test built.
+  const temporaryRoot = await realpath(
+    await mkdtemp(join(tmpdir(), "tx-standalone-")),
+  );
 
   try {
     const stagedProject = join(temporaryRoot, "project");
