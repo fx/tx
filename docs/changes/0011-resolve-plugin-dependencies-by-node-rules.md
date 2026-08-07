@@ -18,15 +18,29 @@ Cannot find module '@modelcontextprotocol/sdk/server/mcp.js' from '.tx/co/mcp.ts
 
 The install is not at fault. Copying the same `package.json` and the same host-installed `node_modules` into a bare directory and running `bun` there resolves that specifier immediately. What differs is the runtime doing the resolving.
 
-Inside a Bun single-file executable, resolving a specifier against a directory outside the embedded filesystem is reduced to path arithmetic. A literal file path resolves. A directory holding `index.js` resolves. Nothing else is consulted — not `exports`, not `main`, not `type`, not for a bare specifier and not for a relative directory import either. Three consequences follow, and all three are reachable from an ordinary npm dependency:
+Inside a Bun single-file executable, resolving a specifier against a directory outside the embedded filesystem is reduced to path arithmetic. A literal file path resolves. A directory holding `index.js` resolves. Nothing else is consulted — not `exports`, not `main`, not `type`, not for a bare specifier and not for a relative directory import either.
 
-- A package whose entry point exists only in an `exports` map is reported missing. `@modelcontextprotocol/sdk` publishes no `main` at all, which is increasingly ordinary; so does its subpath `./server/mcp.js`.
-- A package whose `main` names anything other than `index.js` is reported missing. `cors`, `ajv`, and `debug` are each installed, each have a `main`, and each fail.
-- A package carrying both an `exports` map and a root `index.js` resolves — to `index.js`, which is not what its `exports` map selects. That failure is silent.
+The whole rule is therefore: **a package resolves if and only if it ships a root `index.js`.** It separates every package observed against the released executable, and nothing else does — not `exports`, not CommonJS versus ESM, not whether the package has dependencies of its own:
 
-The reduction applies to every specifier in the graph, not only the ones a plugin writes, so an installed dependency cannot reach its own dependencies either: importing the SDK by its real file path gets past the first failure and dies on `Cannot find package 'zod-to-json-schema'` from inside the SDK.
+| package | `main` | `exports` | `type` | root `index.js` | resolves |
+|---|---|---|---|---|---|
+| `ms` | `./index` | no | – | yes | yes |
+| `indent-string` | – | yes | `module` | yes | yes |
+| `date-fns` | `index.cjs` | yes | `module` | yes | yes |
+| `zod` | `./index.cjs` | yes | `module` | yes | yes |
+| `decimal.js` | `decimal` | yes | – | no | **no** |
+| `ajv-formats` | `dist/index.js` | no | – | no | **no** |
+| `debug` | `./src/index.js` | no | – | no | **no** |
 
-This went unnoticed because the only dependency any plugin had declared until now was `date-fns`, which has a `main`, ships a root `index.js`, and depends on nothing. It resolves by path arithmetic alone.
+Three consequences follow, and all three are reachable from an ordinary npm dependency:
+
+- A package whose entry point exists only in an `exports` map is reported missing. `@modelcontextprotocol/sdk/server/mcp.js` is a published subpath and fails.
+- A package whose `main` names anything other than `index.js` is reported missing. `debug`, `ajv-formats`, and `decimal.js` are each installed, each have a `main`, and each fail.
+- A package carrying both a declared entry point and a root `index.js` resolves — to the `index.js`, which is not the entry point it declares. That failure is silent, and it is the worst of the three.
+
+The reduction applies to every specifier in the graph, not only the ones a plugin writes, so an installed dependency cannot reach its own dependencies either: `ajv-formats` cannot reach `ajv` from its own `dist/limit.js`, and the SDK cannot reach `zod-to-json-schema` from its own `zod-json-schema-compat.js`, whether or not the plugin declares them.
+
+This went unnoticed because the only dependency any plugin had declared until now was `date-fns`, which ships a root `index.js`. It resolves by path arithmetic alone.
 
 The gap is in the executable's runtime resolver specifically, and it cannot be worked around from inside one. A runtime module hook does not see a literal import specifier — Bun resolves those before consulting one, and fails there. `Bun.resolveSync` is degraded identically. What is not degraded is the bundler: `Bun.build` implements Node resolution in full and implements it identically compiled and uncompiled. Loading a plugin through it resolves the graph correctly and hands the runtime a module with nothing left to resolve.
 
@@ -40,7 +54,10 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 - TypeScript checking MUST pass with no errors, including the consumer-project check that compiles the marketplace plugin against `@fx/tx` alone. The plugin MUST NOT acquire a type dependency on Bun's global types.
 - Bun tests MUST pass with 100% statement, function, and line coverage across production source files.
 - Resolution MUST be tested against the compiled executable. A resolution test running only in-process proves nothing: uncompiled, every specifier in this change already resolves, so such a test passes against the defect it is meant to catch.
-- The dependency fixture MUST be unresolvable by path arithmetic in every case it covers: a package with no `main` and no root `index.js` whose `exports` map selects by condition, a subpath export whose name differs from the file behind it, a package reached through another package's dependency, and an installed package whose `main` names something other than `index.js`. A fixture that happens to ship a root `index.js` passes before the fix and covers nothing.
+- The dependency fixture MUST be unresolvable by path arithmetic in every case it covers: a package with no `main` and no root `index.js` whose `exports` map selects by condition, a subpath export whose name differs from the file behind it, a package reached through another package's dependency, and an installed package whose `main` names something other than `index.js`. A fixture package that ships a root `index.js` passes before the fix and covers nothing.
+- CommonJS MUST be covered in both shapes that any candidate rule has to separate: a CommonJS package with a dependency of its own (`debug`'s shape) and a CommonJS package with no dependencies and an extensionless `main` (`decimal.js`'s shape).
+- The silent failure MUST be covered: a package declaring an entry point *and* shipping a root `index.js` holding something else MUST resolve to its declared entry. This is the one case that reports no error before the fix, so a test asserting only that the import succeeds would pass against the defect; the test MUST assert which file was loaded.
+- Fixture packages MUST be written by the test rather than installed, so no test reaches the network or runs `bun install`.
 - Both the eager and the lazy import shape MUST be covered: a dependency imported as the entry module is evaluated, and one imported inside a command action, which is the shape that reported the defect.
 - A plugin whose dependency is genuinely absent MUST have a test that its failure names the unresolved specifier.
 - Tests MUST create every fixture inside a temporary directory they own and MUST remove it afterwards. No test may reach the network or run `bun install`.
@@ -86,7 +103,7 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 
 - [x] Specify plugin dependency resolution in [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership)
 - [x] Add `plugins/marketplace/module.ts` and load entries through it from `plugins/marketplace/index.ts`
-- [x] Cover the compiled executable's resolution of an `exports`-only package, a subpath export, a transitively required package, and an installed package whose `main` is not `index.js`, in `test/plugin-dependencies.test.ts`
+- [x] Cover the compiled executable's resolution of an `exports`-only package, a subpath export, a transitively required package, an installed package whose `main` is not `index.js`, both CommonJS shapes, and an entry point shadowed by a root `index.js`, in `test/plugin-dependencies.test.ts`
 - [x] Cover the unresolved-dependency failure and repeated loading of one entry
 - [x] Document dependency resolution in `docs/manual/plugins.md`
 - [x] Verify 100% coverage and `bun run check`

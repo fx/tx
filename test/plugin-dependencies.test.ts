@@ -8,7 +8,8 @@ const repositoryRoot = join(import.meta.dir, "..");
 
 /**
  * A dependency tree no compiled executable can resolve by path arithmetic
- * alone, which is all its runtime module resolver does:
+ * alone, which is all its runtime module resolver does. Every package here is
+ * shaped after one that fails against the released executable today:
  *
  * - `exports-only` publishes no `main` and no root `index.js`, so nothing but
  *   its `exports` map names its entry point, and that map selects between two
@@ -17,8 +18,48 @@ const repositoryRoot = join(import.meta.dir, "..");
  *   file behind it.
  * - `leaf` is reached both directly and as a dependency of `exports-only`, and
  *   its `main` points somewhere other than `index.js`, of which it has none.
+ * - `commonjs-tracing` is CommonJS with a dependency of its own, no `exports`
+ *   map, and a `main` under `src/` — the shape of `debug`.
+ * - `commonjs-numeric` is CommonJS with no dependencies at all and an
+ *   extensionless `main` naming a file beside it — the shape of `decimal.js`,
+ *   and the case that rules out "packages with dependencies" as the rule.
+ * - `shadowed-entry` carries both a `main` and a root `index.js` holding
+ *   something else. Path arithmetic finds the `index.js` and resolves,
+ *   silently, to the wrong file; this is the only failure of the set that
+ *   reports no error at all.
  */
 const dependencyTree: Readonly<Record<string, string>> = {
+  "node_modules/commonjs-tracing/package.json": JSON.stringify({
+    name: "commonjs-tracing",
+    version: "1.0.0",
+    main: "./src/index.js",
+    dependencies: { "commonjs-duration": "*" },
+  }),
+  "node_modules/commonjs-tracing/src/index.js":
+    "const duration = require('commonjs-duration');\nmodule.exports = 'traced in ' + duration(1000);\n",
+  "node_modules/commonjs-duration/package.json": JSON.stringify({
+    name: "commonjs-duration",
+    version: "1.0.0",
+    main: "./index",
+  }),
+  "node_modules/commonjs-duration/index.js":
+    "module.exports = (value) => value / 1000 + 's';\n",
+  "node_modules/commonjs-numeric/package.json": JSON.stringify({
+    name: "commonjs-numeric",
+    version: "1.0.0",
+    main: "./numeric",
+  }),
+  "node_modules/commonjs-numeric/numeric.js":
+    "module.exports = { scale: (value) => value * 2 };\n",
+  "node_modules/shadowed-entry/package.json": JSON.stringify({
+    name: "shadowed-entry",
+    version: "1.0.0",
+    main: "./lib/entry.js",
+  }),
+  "node_modules/shadowed-entry/lib/entry.js":
+    "module.exports = 'declared entry';\n",
+  "node_modules/shadowed-entry/index.js":
+    "module.exports = 'shadowing index.js';\n",
   "node_modules/exports-only/package.json": JSON.stringify({
     name: "exports-only",
     version: "1.0.0",
@@ -51,13 +92,23 @@ const dependencyTree: Readonly<Record<string, string>> = {
  */
 const pluginEntry = `import { main } from 'exports-only';
 import { leaf } from 'leaf';
+import traced from 'commonjs-tracing';
+import numeric from 'commonjs-numeric';
+import shadowed from 'shadowed-entry';
 
 export default ({ command, context }) => {
   command((namespace) => {
     namespace.description('Dependency fixture plugin');
     namespace.command('report').action(async () => {
       const { sub } = await import('exports-only/sub.js');
-      context.stdout.write(JSON.stringify({ main, leaf, sub }) + '\\n');
+      context.stdout.write(JSON.stringify({
+        main,
+        leaf,
+        sub,
+        traced,
+        scaled: numeric.scale(21),
+        shadowed,
+      }) + '\\n');
     });
   });
 };
@@ -107,6 +158,11 @@ test("a plugin resolves its dependency tree by Node's rules", async () => {
       main: "main via leaf",
       leaf: "leaf",
       sub: "sub via leaf",
+      traced: "traced in 1s",
+      scaled: 42,
+      // Not "shadowing index.js": the declared entry wins over the root
+      // `index.js` that path arithmetic reaches first.
+      shadowed: "declared entry",
     });
     expect(result.exitCode).toBe(0);
   } finally {
