@@ -18,7 +18,7 @@ A team wants everyone on the same plugin version. Any instruction that says "add
 
 A marketplace publishes tags and a user wants releases rather than every commit on the default branch. Pinning to a tag with the update command still reporting newer tags gives them a release channel they step through deliberately.
 
-The spelling matters as much as the feature. `fx/cc@1.4.0` reads the way every package manager's version syntax reads, and it costs no flag, no second argument, and no ordering to remember. It has to be parsed carefully, because `@` is also how an SSH source spells its user and how an HTTP(S) source spells a credential — which is why the rule is anchored on the last `@` after the last `/` rather than on the first one found.
+The spelling matters as much as the feature. `fx/cc@1.4.0` reads the way every package manager's version syntax reads, and it costs no flag, no second argument, and no ordering to remember. It has to be parsed carefully, because `@` is also how an SSH source spells its user and how an HTTP(S) source spells a credential — which is why the separator is looked for only outside the source's authority, the part Git reads to find the host, rather than anywhere in the string.
 
 ## Requirements
 
@@ -33,6 +33,7 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 - Git execution MUST stay injected. No test may reach the network.
 - The suffix parser MUST have a table-driven test covering every source form the plugin accepts: bare shorthand, HTTP(S) with and without userinfo, SCP-style, `ssh://`, `file://`, a bare path, a Windows drive letter, and each of those with and without a suffix. A parser that mistakes `git@host:owner/repo.git` for a pinned source MUST fail that test.
 - A ref containing `/` MUST have a test asserting it parses as a ref, for every source form, since that is the case an authority-blind separator rule silently gets wrong.
+- The pre-release exclusion MUST have a test asserting a pre-release tag higher than the pin is not reported, alongside one asserting an ordinary tag higher than a pre-release pin is.
 - The precedence rule MUST have a test using a real temporary directory whose name contains `@`, asserting it is added as a live local reference under its full name and that no ref is parsed.
 - The pin-survives-update requirement MUST have a test that fails against an implementation which moves a pinned checkout to the remote's default branch.
 - Committed tests MUST NOT contain unjustified focused or skipped cases.
@@ -54,7 +55,9 @@ What implementing them requires of this change:
 
 ### Approach
 
-Source parsing gains one function: given a Git source, return the source and its ref. It skips the source's authority and then takes the last `@` in what remains. The authority ends at the first `/` after `://` for a scheme, at the colon for SCP-style syntax, and does not exist for anything else — the same boundary `carriesGitSyntax` already computes to decide that a source belongs to Git. So `git@github.com:owner/repo.git` and `https://token@github.com/owner/repo.git` parse as unpinned, `fx/cc@1.4.0` and `git@github.com:owner/repo.git@v1.4.0` parse as pinned, and `fx/cc@release/1.4` pins to a slash-bearing branch without an escape syntax.
+Source parsing gains one function: given a Git source, return the source and its ref. It skips the source's authority and then takes the last `@` in what remains. The authority ends at the first `/` after `://` for a scheme, at the colon for SCP-style syntax, and does not exist for anything else. So `git@github.com:owner/repo.git` and `https://token@github.com/owner/repo.git` parse as unpinned, `fx/cc@1.4.0` and `git@github.com:owner/repo.git@v1.4.0` parse as pinned, and `fx/cc@release/1.4` pins to a slash-bearing branch without an escape syntax.
+
+That boundary does not exist in the plugin today and this change introduces it. `carriesGitSyntax` answers a related question — is the first colon before the first slash — with a boolean, and returns nothing about where the authority ends; the two share a rule and not an implementation. Which makes this the third parser in the module reading a source by its own rules, so implementing it SHOULD settle the open question [0010](./0010-retry-marketplace-clones-over-ssh.md) recorded about unifying them, or record why it still should not be settled.
 
 It runs after classification, so a local directory never reaches it, and `add` rejects a local source that carried a suffix rather than silently ignoring the version the user asked for.
 
@@ -62,7 +65,7 @@ Resolution follows the order the spec fixes — tag, branch, commit, then the `v
 
 The pin is recorded in the checkout's own Git configuration under a `tx` key. Reading it is one local Git call, which the participant makes while it is already reading that repository; removing the marketplace removes the pin with it, because it lives inside the directory being removed.
 
-The update participant changes in one place: resolving the target. Unpinned, the target is the remote's default branch as 0012 specified. Pinned, the target is what the recorded ref resolves to after the fetch — for a tag or a hash that is the same commit every time, so nothing is available; for a branch it moves with the branch. When the pin is a tag and the remote publishes a higher one, the higher tag is reported as detail and nothing is applied.
+The update participant changes in one place: resolving the target. Unpinned, the target is the remote's default branch as 0012 specified. Pinned, the target is what the recorded ref resolves to against the freshly fetched remote — a hash is the same commit every time, a branch moves with the branch, and a tag moves if the remote moved it, which the pin follows because it names the ref rather than a commit. When the pin is a tag and the remote publishes a higher release tag, that tag is reported as detail and nothing is applied.
 
 `marketplace pin` resolves the ref against the fetched remote before recording it, so a typo is rejected while the previous pin stands. It does not move the checkout: pinning states an intention, and `tx update` is where intentions become checkouts. `marketplace unpin` deletes the key.
 
@@ -73,8 +76,12 @@ The update participant changes in one place: resolving the target. Unpinned, the
   - **Alternatives considered:** `--ref <ref>` was rejected as a second thing to remember for something that is part of the source's identity. Supporting both was rejected as two syntaxes for one idea, with a conflict rule nobody should need to learn.
 
 - **Decision:** Exclude the source's authority, then split on the last `@` in what remains. Supersedes an earlier decision on this branch that anchored the split on the last `@` following the source's last `/`.
-  - **Why:** Every `@` that is *not* a version separator lives in the authority — `git@host:path`, `https://user@host/path` — so excluding the authority is the rule, stated directly. Anchoring on the last `/` instead was an approximation of it that held only while refs contained no `/`: `fx/cc@release/1.4` moves the last `/` past the `@`, so the suffix silently stops being a suffix and `tx` clones a repository nobody typed. Excluding the authority costs the same single scan, keeps the credential case [0010](./0010-retry-marketplace-clones-over-ssh.md) established as real, and admits every ref Git accepts, slashes included. The boundary is also not new — `carriesGitSyntax` already computes it to decide whether a source belongs to Git at all.
+  - **Why:** Every `@` that is *not* a version separator lives in the authority — `git@host:path`, `https://user@host/path` — so excluding the authority is the rule, stated directly. Anchoring on the last `/` instead was an approximation of it that held only while refs contained no `/`: `fx/cc@release/1.4` moves the last `/` past the `@`, so the suffix silently stops being a suffix and `tx` clones a repository nobody typed. Excluding the authority costs the same single scan, keeps the credential case [0010](./0010-retry-marketplace-clones-over-ssh.md) established as real, and admits slash-bearing refs, which is most of what the approximation cost.
   - **Alternatives considered:** Parsing the source as a URL first was rejected: SCP syntax and bare paths do not parse, so it would need a source-form list. Splitting on the first `@` was rejected because it eats an SSH source's user. Forbidding `/` in a suffix ref and directing users to `marketplace pin` was rejected once it became clear the restriction was unenforceable — the parser cannot see a suffix it has already failed to split, so the rejection could never fire and the user would get a clone failure naming a repository they did not ask for. Requiring the ref to look like a version was rejected: branch names and hashes are legitimate refs and look like nothing in particular.
+
+- **Decision:** The suffix carries refs whose names contain no `@`; a ref that contains one is set with `marketplace pin`.
+  - **Why:** Git permits `@` inside a ref name, and no separator rule can find the right `@` in `fx/cc@release@beta` without knowing which side the user meant. Taking the last one splits it as source `fx/cc@release` with ref `beta`, and the addition then fails against a remote nobody named — noisy, but not silent, which is the most that can be promised here. `pin` has the ref as an argument of its own and needs no separator, so nothing is unreachable. The limitation is stated in the spec rather than left to be discovered, and it costs a construction almost nobody writes: `@` in a ref name is legal and vanishingly rare, while the same character is the version separator of every package manager a user has met.
+  - **Alternatives considered:** An escape or quoting syntax was rejected as notation invented for a case with no observed users. Trying both splits and preferring whichever resolves was rejected as making the meaning of an argument depend on what happens to exist on a remote. Claiming the suffix accepts any commit-ish was rejected as the claim that was actually wrong.
 
 - **Decision:** Classification wins over suffix parsing.
   - **Why:** [0008](./0008-link-local-marketplace-sources.md) settled that a source naming an existing directory is that directory, and a directory whose name contains `@` is unremarkable — `tools@2`, `notes@work`. Parsing the suffix first would rename such a directory out from under the user and then fail to find it, reporting an error about a repository they never mentioned. Running classification first means a local path is never split, and a suffix on a local source is an explicit error rather than a silent one.
@@ -132,7 +139,7 @@ The update participant changes in one place: resolving the target. Unpinned, the
 - [ ] Make the update participant pin-aware
   - [ ] Read the pin and target what it resolves to after the fetch, keeping the default-branch target for an unpinned marketplace
   - [ ] Allow a pinned marketplace to move in either direction while keeping the ancestry requirement for an unpinned one
-  - [ ] Report the pin, and report a higher tag published by the remote as detail without proposing to apply it
+  - [ ] Report the pin, and report a higher release tag published by the remote as detail, excluding pre-releases, without proposing to apply it
 
 - [ ] Add `marketplace pin` and `marketplace unpin`
   - [ ] Resolve the ref against the fetched remote before recording, leaving the previous pin in place on failure
@@ -155,7 +162,7 @@ The update participant changes in one place: resolving the target. Unpinned, the
 
 - [ ] Should `marketplace list` mark which marketplaces are pinned, beyond showing the version they hold? A column of mostly-empty values against a marker in the version label is a formatting decision worth making with real output in front of us.
 - [ ] Should a pin be settable at add time for a source that also needs `--name`, in one command? It already is; the question is whether the two interact in a way the manual has to spell out.
-- [ ] Should the newer-tag report consider pre-release tags? Excluding them is probably right and needs a definition of pre-release that the marketplace manifest does not currently supply.
+- [ ] Should a marketplace be able to opt into pre-release tags being reported? They are excluded outright today, which is right for a user tracking releases and wrong for one testing a marketplace's next version — and an opt-in needs somewhere to live that is not a pin.
 
 ## References
 

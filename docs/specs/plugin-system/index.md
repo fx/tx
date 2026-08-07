@@ -125,7 +125,7 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 A plugin that installs something on the user's behalf can be asked what it would change and told to change it. The host owns registering, isolating, and handing over those participants; what an update *means* is owned by [Updates](../updates/index.md), and the marketplace and executable participants are specified there.
 
 - A plugin MAY contribute update participants during initialization, and MAY contribute more than one.
-- A contributed participant MUST be staged, committed, and discarded on exactly the same terms as commands and child plugin definitions, so a plugin that fails initialization contributes no participant.
+- A contributed participant is staged, committed, and discarded under the atomic-staging rules in [Generic Plugin Host](#generic-plugin-host), which owns them for every contribution; a plugin that fails initialization therefore contributes no participant. Nothing about participants changes those rules, and this section states none of them again.
 - The host MUST record the contributing plugin's identity with each participant, so a driver can report a participant's failure against its owner without the participant naming itself.
 - The host MUST make committed participants readable through the initialization API, in the deterministic FIFO order in which they were committed.
 - Reading participants MUST reflect what is committed at the moment of the call. A plugin that reads them during its own initialization sees only what was committed before it, which is why the driver reads them when its command runs rather than when it initializes.
