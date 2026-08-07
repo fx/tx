@@ -478,6 +478,19 @@ export async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * A marketplace is a real directory or a reference to one. A reference is kept
+ * whatever it now resolves to — a directory, a non-directory, or nothing —
+ * because it still occupies its name. Dropping a degraded one would hide an
+ * installed marketplace from listing and recovery instead of diagnosing it.
+ */
+function isInstalledMarketplaceEntry(entry: Dirent<string>): boolean {
+  return (
+    isSafeMarketplaceName(entry.name) &&
+    (entry.isDirectory() || entry.isSymbolicLink())
+  );
+}
+
 export async function discoverInstalledMarketplaces(
   root: string,
 ): Promise<readonly MarketplaceCheckout[]> {
@@ -490,7 +503,7 @@ export async function discoverInstalledMarketplaces(
   }
 
   return entries
-    .filter((entry) => isSafeMarketplaceName(entry.name) && entry.isDirectory())
+    .filter(isInstalledMarketplaceEntry)
     .sort((left, right) =>
       left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
     )

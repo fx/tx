@@ -16,6 +16,7 @@ import {
   runGit,
 } from "../plugins/marketplace/manager.ts";
 import {
+  discoverInstalledMarketplaces,
   prepareMarketplace,
   readMarketplaceManifest,
   resolveMarketplaceDirectory,
@@ -1014,7 +1015,7 @@ describe("MarketplaceManager", () => {
     },
   );
 
-  test("lists valid directories in sorted order and tolerates corrupt entries", async () => {
+  test("lists directories and references in sorted order and tolerates corrupt entries", async () => {
     const temporaryRoot = await temporaryDirectory("tx-marketplace-list-");
     try {
       const root = join(temporaryRoot, "marketplaces");
@@ -1042,6 +1043,7 @@ describe("MarketplaceManager", () => {
 
       expect(await manager.list()).toEqual([
         { name: "alpha", source: "ssh://example/alpha.git" },
+        { name: "linked", source: join(root, "alpha") },
         { name: "zeta", source: "<unknown>" },
       ]);
       expect(calls).toEqual([
@@ -1087,6 +1089,113 @@ describe("MarketplaceManager", () => {
         "code",
         "ENOENT",
       );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+interface ReferenceFixture {
+  readonly root: string;
+  readonly source: string;
+  readonly missing: string;
+  readonly replacement: string;
+}
+
+/**
+ * Marketplace storage holding a clone beside three references: one to a
+ * directory, one whose target has gone, and one whose target is now a file.
+ * Every path lives under the caller's temporary directory.
+ */
+async function createReferenceStorage(
+  temporaryRoot: string,
+): Promise<ReferenceFixture> {
+  const fixture = {
+    root: join(temporaryRoot, "marketplaces"),
+    source: join(temporaryRoot, "source"),
+    missing: join(temporaryRoot, "moved-away"),
+    replacement: join(temporaryRoot, "replacement.txt"),
+  };
+  await Promise.all([
+    mkdir(join(fixture.root, "cloned"), { recursive: true }),
+    mkdir(fixture.source),
+  ]);
+  await Promise.all([
+    writeFile(join(fixture.source, "keep.txt"), "keep"),
+    writeFile(fixture.replacement, "not a checkout"),
+    writeFile(join(fixture.root, "plain-file"), "not a checkout"),
+  ]);
+  await Promise.all([
+    symlink(fixture.source, join(fixture.root, "linked")),
+    symlink(fixture.missing, join(fixture.root, "dangling")),
+    symlink(fixture.replacement, join(fixture.root, "replaced")),
+  ]);
+  return fixture;
+}
+
+describe("referenced marketplaces", () => {
+  test("discovers every reference whatever its target resolves to", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-discover-");
+    try {
+      const { root } = await createReferenceStorage(temporaryRoot);
+
+      expect(await discoverInstalledMarketplaces(root)).toEqual([
+        { name: "cloned", checkout: join(root, "cloned") },
+        { name: "dangling", checkout: join(root, "dangling") },
+        { name: "linked", checkout: join(root, "linked") },
+        { name: "replaced", checkout: join(root, "replaced") },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("lists the recorded target of a reference and the remote of a clone", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-reference-");
+    try {
+      const { root, source, missing, replacement } =
+        await createReferenceStorage(temporaryRoot);
+      const manager = new MarketplaceManager(root, {
+        runGit: async (args) => {
+          expect(args[1]).toBe(join(root, "cloned"));
+          return { stdout: "ssh://example/cloned.git\n" };
+        },
+      });
+
+      expect(await manager.list()).toEqual([
+        { name: "cloned", source: "ssh://example/cloned.git" },
+        { name: "dangling", source: missing },
+        { name: "linked", source },
+        { name: "replaced", source: replacement },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("removes a reference without touching what it points at", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-unlink-");
+    try {
+      const { root, source, replacement } =
+        await createReferenceStorage(temporaryRoot);
+      const manager = new MarketplaceManager(root);
+
+      for (const name of ["dangling", "linked", "replaced"]) {
+        await manager.remove(name);
+        await expect(lstat(join(root, name))).rejects.toHaveProperty(
+          "code",
+          "ENOENT",
+        );
+      }
+
+      expect((await lstat(source)).isDirectory()).toBe(true);
+      expect(await readdir(source)).toEqual(["keep.txt"]);
+      expect(await readFile(join(source, "keep.txt"), "utf8")).toBe("keep");
+      expect(await readFile(replacement, "utf8")).toBe("not a checkout");
+      expect((await readdir(root)).toSorted()).toEqual([
+        "cloned",
+        "plain-file",
+      ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

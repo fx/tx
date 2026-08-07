@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createMarketplacePlugin,
@@ -220,6 +220,75 @@ describe("first-party marketplace plugin", () => {
       expect(context.stdoutText()).toBe(
         "alpha\tssh://example/alpha.git\nbroken\t<unknown>\n",
       );
+      expect(context.stderrText()).toBe("");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("diagnoses degraded references while a healthy one still dispatches", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-stale-");
+    const dataHome = join(temporaryRoot, "data");
+    const storage = join(dataHome, "tx", "marketplaces");
+    try {
+      const source = join(temporaryRoot, "source");
+      await Promise.all([
+        mkdir(join(source, ".tx"), { recursive: true }),
+        mkdir(storage, { recursive: true }),
+        writeFile(join(temporaryRoot, "replacement.txt"), "not a checkout"),
+      ]);
+      await Promise.all([
+        writeFile(
+          join(source, "plugin.ts"),
+          `export default ({ command, context }) => {
+            command((namespace) => namespace
+              .command("run")
+              .action(() => context.stdout.write("linked\\n")));
+          };\n`,
+        ),
+        writeFile(
+          join(source, ".tx/config.json"),
+          '{"plugins":[{"name":"linked","entry":"plugin.ts"}]}',
+        ),
+      ]);
+      await Promise.all([
+        symlink(source, join(storage, "healthy")),
+        symlink(join(temporaryRoot, "moved-away"), join(storage, "dangling")),
+        symlink(
+          join(temporaryRoot, "replacement.txt"),
+          join(storage, "replaced"),
+        ),
+      ]);
+      const context = captureContext({ XDG_DATA_HOME: dataHome });
+
+      const { namespaces, failures } = await initializePlugins(
+        [createMarketplacePlugin({ manager: new RecordingManager() })],
+        { context },
+      );
+
+      const installed = { name: "installed", parent: { name: "marketplace" } };
+      expect(failures.map(({ identity }) => identity)).toEqual([
+        { name: "dangling", parent: installed },
+        { name: "replaced", parent: installed },
+      ]);
+      expect(failures[0]?.message).toBe(
+        'Marketplace "dangling" failed: Missing .tx/config.json. Run "tx marketplace remove dangling" to remove it.',
+      );
+      expect(failures[1]?.message).toStartWith(
+        'Marketplace "replaced" failed: Unable to read .tx/config.json',
+      );
+      expect(failures[1]?.message).toEndWith(
+        'Run "tx marketplace remove replaced" to remove it.',
+      );
+
+      expect(
+        await dispatch(
+          createRootProgram(coreDependencies, namespaces),
+          ["linked", "run"],
+          context,
+        ),
+      ).toEqual({ exitCode: EXIT_SUCCESS });
+      expect(context.stdoutText()).toBe("linked\n");
       expect(context.stderrText()).toBe("");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

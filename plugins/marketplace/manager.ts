@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import type { Stats } from "node:fs";
-import { lstat, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readlink, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -43,6 +43,7 @@ export interface MarketplaceManagerOptions {
 }
 
 const githubRepositoryPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
+const unknownSource = "<unknown>";
 
 export function normalizeMarketplaceRepository(repository: string): string {
   if (!githubRepositoryPattern.test(repository)) return repository;
@@ -145,13 +146,19 @@ export class MarketplaceManager implements MarketplaceOperations {
     return Promise.all(
       marketplaces.map(
         async ({ name, checkout }): Promise<MarketplaceListing> => {
-          let source = "<unknown>";
+          let source = unknownSource;
           try {
-            const result = await this.#runGit(
-              ["-C", checkout, "config", "--get", "remote.origin.url"],
-              { env: this.#env },
-            );
-            source = result.stdout.trim() || "<unknown>";
+            if ((await lstat(checkout)).isSymbolicLink()) {
+              // A reference reports the directory tx reads, not the remote
+              // that directory happens to have configured.
+              source = await readlink(checkout);
+            } else {
+              const result = await this.#runGit(
+                ["-C", checkout, "config", "--get", "remote.origin.url"],
+                { env: this.#env },
+              );
+              source = result.stdout.trim() || unknownSource;
+            }
           } catch {
             // A corrupt checkout remains visible and removable.
           }
