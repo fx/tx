@@ -118,19 +118,19 @@ The reference itself is a symbolic link at `<marketplaces>/<name>` pointing at t
   - [x] Add a recovery test asserting a degraded reference produces marketplace-aware recovery diagnostics naming its `marketplace remove` invocation, while a healthy marketplace installed alongside it still dispatches its commands (PR #25)
   - [x] Confirm `test/plugin-boundary.test.ts` still passes unmodified (PR #25)
 
-- [ ] Add local sources to `marketplace add`
-  - [ ] Add source classification to `MarketplaceManager.add`: an empty source rejected before anything is resolved, URL-scheme and SCP-style sources to Git, an existing directory to the local path, an existing non-directory rejected with a clear message, anything absent to Git
-  - [ ] Treat only `ENOENT` as absence during classification, reporting every other inspection failure as itself rather than falling through to Git, following `resolveExistingPath` in `plugins/marketplace/storage.ts`
-  - [ ] Derive a local marketplace's name from the final component of the resolved real path when `--name` is absent, taking that component as it is on disk rather than reusing `deriveMarketplaceName`'s `.git` stripping, and report that `--name` is required when no safe name can be derived
-  - [ ] Reject a name that is already installed, whether it holds a clone or a reference
-  - [ ] Update the `add` command's own description and `<repository>` argument help in `plugins/marketplace/index.ts`, which today name a Git repository only, so `tx marketplace add --help` does not contradict the input the command now accepts
-  - [ ] Record the reference against the source's fully resolved real path, and validate and install through the existing `prepareMarketplace` path against that same real path, publishing the reference only after both succeed
-  - [ ] Add a test that repoints an intermediate symbolic link after the marketplace is added and asserts the marketplace still resolves to the directory it was added from, proving the real path was pinned rather than the path as typed
-  - [ ] Ensure no tx-owned failure path deletes, empties, or rolls back the referenced directory, and test it — the guarantee covers tx's own cleanup, not what a trusted lifecycle script does to the tree it runs in
-  - [ ] Add tests covering classification of each source form, live re-reading of an edited entry without reinstalling, a local directory winning over `owner/repository` shorthand, a `file://` URL still cloning, an empty source being rejected without installing into or referencing the working directory, an existing non-directory being rejected, an inspection failure that is not `ENOENT` being reported rather than cloned, name derivation including `.`, a trailing separator, and a directory whose own name ends in `.git` (which keeps that suffix, unlike a Git source), and a rejected local source publishing nothing
-  - [ ] Add an end-to-end test that a plugin edited in a referenced source dispatches its new behavior on the next invocation
-  - [ ] Update `docs/manual/plugins.md` with local sources, the classification rule, the `file://` escape, dependency-installation timing, and the removal guarantee — in the pull request that implements this task, not a follow-up, since it documents behavior that pull request changes
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Add local sources to `marketplace add` (PR #27)
+  - [x] Add source classification to `MarketplaceManager.add`: an empty source rejected before anything is resolved, URL-scheme and SCP-style sources to Git, an existing directory to the local path, an existing non-directory rejected with a clear message, anything absent to Git (PR #27)
+  - [x] Treat only `ENOENT` as absence during classification, reporting every other inspection failure as itself rather than falling through to Git, following `resolveExistingPath` in `plugins/marketplace/storage.ts` (PR #27)
+  - [x] Derive a local marketplace's name from the final component of the resolved real path when `--name` is absent, taking that component as it is on disk rather than reusing `deriveMarketplaceName`'s `.git` stripping, and report that `--name` is required when no safe name can be derived (PR #27)
+  - [x] Reject a name that is already installed, whether it holds a clone or a reference (PR #27)
+  - [x] Update the `add` command's own description and `<repository>` argument help in `plugins/marketplace/index.ts`, which today name a Git repository only, so `tx marketplace add --help` does not contradict the input the command now accepts (PR #27)
+  - [x] Record the reference against the source's fully resolved real path, and validate and install through the existing `prepareMarketplace` path against that same real path, publishing the reference only after both succeed (PR #27)
+  - [x] Add a test that repoints an intermediate symbolic link after the marketplace is added and asserts the marketplace still resolves to the directory it was added from, proving the real path was pinned rather than the path as typed (PR #27)
+  - [x] Ensure no tx-owned failure path deletes, empties, or rolls back the referenced directory, and test it — the guarantee covers tx's own cleanup, not what a trusted lifecycle script does to the tree it runs in (PR #27)
+  - [x] Add tests covering classification of each source form, live re-reading of an edited entry without reinstalling, a local directory winning over `owner/repository` shorthand, a `file://` URL still cloning, an empty source being rejected without installing into or referencing the working directory, an existing non-directory being rejected, an inspection failure that is not `ENOENT` being reported rather than cloned, name derivation including `.`, a trailing separator, and a directory whose own name ends in `.git` (which keeps that suffix, unlike a Git source), and a rejected local source publishing nothing (PR #27)
+  - [x] Add an end-to-end test that a plugin edited in a referenced source dispatches its new behavior on the next invocation (PR #27)
+  - [x] Update `docs/manual/plugins.md` with local sources, the classification rule, the `file://` escape, dependency-installation timing, and the removal guarantee — in the pull request that implements this task, not a follow-up, since it documents behavior that pull request changes (PR #27)
+  - [x] Verify 100% coverage and `bun run check` (PR #27)
 
 ## Open Questions
 
