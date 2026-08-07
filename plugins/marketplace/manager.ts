@@ -58,6 +58,7 @@ const windowsDrivePattern = /^[A-Za-z]:[\\/]/;
 const unknownSource = "<unknown>";
 const defaultSshUser = "git";
 const batchModeSshCommand = "ssh -o BatchMode=yes";
+const sshCommandScopes = ["--global", "--system"] as const;
 
 export function normalizeMarketplaceRepository(repository: string): string {
   if (!githubRepositoryPattern.test(repository)) return repository;
@@ -441,20 +442,19 @@ export class MarketplaceManager implements MarketplaceOperations {
     // the source it came from has userinfo to leave out.
     const labels = [credentialFreeSource(repository), ...attempts.slice(1)];
     const redactions = credentialRedactions(repository);
-    // Git's own terminal prompt is off for every attempt, because a private
-    // HTTP(S) clone without a credential otherwise blocks on `/dev/tty` and
-    // the SSH retry never runs. Credential helpers and `GIT_ASKPASS` are
-    // deliberately untouched, so a credential the user did configure still
-    // resolves. Only the derived retry asks for more than that, and only
-    // once it is reached.
-    const promptless = { ...this.#env, GIT_TERMINAL_PROMPT: "0" };
+    // One environment, settled before the first attempt and used by all of
+    // them. Batch mode is deliberately not confined to the derived retry: an
+    // `url.<base>.insteadOf` rule rewrites an HTTP(S) source to SSH on the
+    // way into the *first* clone, and ssh(1) reads its own host-key and
+    // passphrase prompts straight from `/dev/tty`, where Git's
+    // `GIT_TERMINAL_PROMPT` cannot reach them — so scoping batch mode to the
+    // retry would hang the attempt before any retry could run. An SSH command
+    // is inert for a clone that really does speak HTTP(S), so applying it
+    // throughout costs nothing.
+    const env = await this.#cloneEnv();
     const failures: Error[] = [];
 
     for (const candidate of attempts) {
-      const env =
-        candidate === derived
-          ? await this.#sshAttemptEnv(promptless)
-          : promptless;
       const staging = await mkdtemp(join(parent, `.${name}-staging-`));
       try {
         await this.#runGit(["clone", "--", candidate, staging], { env });
@@ -468,39 +468,58 @@ export class MarketplaceManager implements MarketplaceOperations {
   }
 
   /**
-   * The environment for the derived SSH attempt: batch mode by default, so a
-   * missing key or an unknown host key fails rather than asking, but never in
-   * place of an SSH command the caller configured. Git takes one from
-   * `GIT_SSH_COMMAND`, from `GIT_SSH`, or from `core.sshCommand`, and each is
-   * a deliberate invocation — an identity file, an alternate config, a proxy
-   * command. Overriding one would drop the deploy key of exactly the setup
-   * this retry exists to serve.
+   * The environment every clone attempt runs in. Git's own terminal prompt is
+   * always off, because a private HTTP(S) clone without a credential would
+   * otherwise block on `/dev/tty` and the SSH retry would never run;
+   * credential helpers and `GIT_ASKPASS` stay untouched, so a credential the
+   * user did configure still resolves.
+   *
+   * On top of that, batch mode by default — a missing key or an unknown host
+   * key fails rather than asking — but never in place of an SSH command the
+   * caller configured. Git takes one from `GIT_SSH_COMMAND`, from `GIT_SSH`,
+   * or from `core.sshCommand`, and each is a deliberate invocation: an
+   * identity file, an alternate config, a proxy command. Overriding one would
+   * drop the deploy key of exactly the setup this retry exists to serve. The
+   * two environment variables settle the question without reading any
+   * configuration, so the probe below runs only when neither is set.
    */
-  async #sshAttemptEnv(
-    env: Readonly<Record<string, string | undefined>>,
-  ): Promise<Readonly<Record<string, string | undefined>>> {
-    const { GIT_SSH_COMMAND: sshCommand, GIT_SSH: sshProgram } = env;
-    if (sshCommand || sshProgram) return env;
-    if (await this.#hasConfiguredSshCommand()) return env;
-    return { ...env, GIT_SSH_COMMAND: batchModeSshCommand };
+  async #cloneEnv(): Promise<Readonly<Record<string, string | undefined>>> {
+    const promptless = { ...this.#env, GIT_TERMINAL_PROMPT: "0" };
+    const { GIT_SSH_COMMAND: sshCommand, GIT_SSH: sshProgram } = this.#env;
+    if (sshCommand || sshProgram) return promptless;
+    if (await this.#hasConfiguredSshCommand()) return promptless;
+    return { ...promptless, GIT_SSH_COMMAND: batchModeSshCommand };
   }
 
   /**
-   * Whether Git configuration names an SSH command. `git config --get` exits
-   * non-zero for a variable that is not set, which `runGit` reports as a
-   * failure, so an unset variable and an unreadable configuration are alike
-   * here: nothing is configured, and the default applies.
+   * Whether Git configuration names an SSH command in a scope a clone applies.
+   * Only the global and system files are read, and `--local` MUST NOT be added
+   * to them: `git clone` creates the repository it writes into, so it never
+   * applies the local configuration of whatever repository the caller happens
+   * to be standing in. Reading that scope would report a command the clone
+   * will not use, suppress batch mode for nothing, and leave ssh(1) free to
+   * block on the host-key prompt the default exists to prevent.
+   *
+   * Each scope is asked for separately rather than parsed out of
+   * `--show-scope`, which works on every Git version and leaves no output
+   * format to misread. `git config --get` exits non-zero for a variable that
+   * is not set, which `runGit` reports as a failure, so an unset variable and
+   * a configuration file that cannot be read are alike here: nothing is
+   * configured, and the default applies.
    */
   async #hasConfiguredSshCommand(): Promise<boolean> {
-    try {
-      const { stdout } = await this.#runGit(
-        ["config", "--get", "core.sshCommand"],
-        { env: this.#env },
-      );
-      return stdout.trim() !== "";
-    } catch {
-      return false;
+    for (const scope of sshCommandScopes) {
+      try {
+        const { stdout } = await this.#runGit(
+          ["config", scope, "--get", "core.sshCommand"],
+          { env: this.#env },
+        );
+        if (stdout.trim() !== "") return true;
+      } catch {
+        // Unset in this scope, or a file this process cannot read.
+      }
     }
+    return false;
   }
 
   /**
