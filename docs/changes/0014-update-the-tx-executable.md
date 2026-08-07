@@ -52,13 +52,13 @@ What implementing them requires of this change:
 
 ### Approach
 
-The participant answers three questions before it will do anything: is this a compiled `tx`, is there a published executable for this platform, and is the latest release newer than what is running. Any "no" reports an item with nothing to apply, which is a report rather than a failure — a user on an unsupported platform or a source checkout does not need `tx update` to exit non-zero over it.
+The participant answers three questions before it will do anything: is this a compiled `tx`, is there a published executable for this platform, and is the latest release newer than what is running. Any "no" reports an item with nothing to apply, which is a report rather than a failure — a user on an unsupported platform or a source checkout does not need `tx update` to exit non-zero over it. The first two are also why an available version is withheld rather than reported in those cases: the driver applies whatever is available, so offering a version this participant would only refuse would manufacture a failure. The newer release is still named, as detail.
 
-Gathering fetches the project's latest release, reads its tag, and compares it to the running version as a semantic version. Only a strictly greater published version produces an available version, so a locally built executable ahead of the last release is never dragged backwards.
+Gathering fetches the project's latest release, reads its tag, and compares it to the running version as a semantic version. Only a strictly greater published version, on an executable that could actually be replaced, produces an available version — so a locally built executable ahead of the last release is never dragged backwards.
 
-Applying resolves the real path of the running executable and asks whether a version manager owns it:
+Applying resolves the real path of the running executable and asks whether one of the two managers the project documents — mise and npm — owns it. A path neither owns is unmanaged, including one owned by some manager the participant cannot name: there is nothing to delegate to, and the replacement path below already reports an unwritable location rather than forcing past it.
 
-- Under a manager, the manager itself is asked which tool owns that path, and the manager's own upgrade command is run for that tool. Its output is reported. A manager that answers nothing usable is a failure, and the participant stops there rather than writing into a store it does not own.
+- Under a recognized manager, the manager itself is asked which tool owns that path, and the manager's own upgrade command is run for that tool. Its output is reported. A manager that answers nothing usable is a failure, and the participant stops there rather than writing into a store it does not own.
 - Otherwise the release's executable and checksum assets are downloaded, the digest is computed over the downloaded bytes and compared, the file is staged beside the target with the executable bit set, run once with the version flag and required to report the published version, and then moved onto the target in one rename. Same directory, so the rename is atomic, and the running process keeps the inode it is executing from.
 
 Every failure path removes the staged file, through a helper that swallows a refused removal so that cleanup cannot replace the failure the user needs to read — the shape [0010](./0010-retry-marketplace-clones-over-ssh.md) established for clone staging, for the same reason.
@@ -68,6 +68,10 @@ Every failure path removes the staged file, through a helper that swallows a ref
 - **Decision:** Delegate to the version manager that owns the executable instead of replacing the file, and do it without asking.
   - **Why:** Replacing a file inside a manager's store desynchronizes the manager from the disk: it keeps recording the old version, and its next install silently reverts the update. Refusing with instructions was the first proposal and is worse than delegating — the user typed `tx update` because they want `tx` updated, and printing a command for them to copy is an errand, not an answer.
   - **Alternatives considered:** Refusing with the manager's command printed was rejected as above. Replacing the file and then telling the manager about it was rejected: no manager has a stable interface for "I changed your store behind your back". Asking for confirmation was rejected as a prompt in a command whose whole purpose is the thing being confirmed.
+
+- **Decision:** Recognize exactly mise and npm, and treat every other location as unmanaged.
+  - **Why:** A requirement to delegate to "the version manager" without naming one is not implementable and not testable — there is no set to enumerate and no detection to write. mise and npm are the two paths [the installation guide](../../README.md#install) documents, so they are the two whose detection and upgrade commands can be verified. For anything else there is nothing to delegate *to*: the participant cannot run an upgrade for a manager it cannot name, and refusing on that manager's behalf would leave a user who installed `tx` some third way permanently unable to update it. The replacement path is the safe default there, and it reports an unwritable location instead of forcing one.
+  - **Alternatives considered:** Refusing whenever the path looks managed by anything was rejected as guessing at a manager's store layout in order to withhold the feature. Adding managers speculatively was rejected as detection rules only their own users could verify, and is recorded as an open question.
 
 - **Decision:** Ask the manager which tool owns the path, rather than reconstructing the tool's name from the path.
   - **Why:** The path encodes the tool name through a flattening that is not invertible — a backend and an owner and a repository collapse into one directory component with separators that also occur inside the names themselves. Guessing wrong means running an upgrade for a tool the user does not have, or for a different one they do. The manager already knows the answer and will report it.
@@ -124,11 +128,11 @@ Every failure path removes the staged file, through a helper that swallows a ref
 - [ ] Gather the executable item
   - [ ] Read the running version from injected dependencies and the latest published release from the project's releases
   - [ ] Send an authentication token when the environment supplies one
-  - [ ] Compare semantically and report an available version only when the release is strictly greater
-  - [ ] Report nothing to apply for a source checkout and for a platform with no published executable, naming the reason
+  - [ ] Compare semantically and report an available version only when the release is strictly greater and this executable could be replaced
+  - [ ] Report nothing to apply for a source checkout and for a platform with no published executable, naming the reason and still naming the newer release as detail
 
 - [ ] Apply through a version manager when one owns the executable
-  - [ ] Detect a manager from the resolved executable path
+  - [ ] Detect mise and npm from the resolved executable path, treating every other location as unmanaged
   - [ ] Ask the manager which tool owns that path and run its upgrade command for that tool
   - [ ] Report the command, its output, and its outcome, and fail without replacing anything when the manager cannot be interrogated
 

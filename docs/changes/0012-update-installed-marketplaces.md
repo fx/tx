@@ -32,7 +32,7 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 - Tests MUST create every marketplace root inside a temporary directory they own and MUST remove it afterwards.
 - The rollback requirement MUST have a test that fails against an implementation which moves the checkout and leaves it moved when preparation throws. Asserting only that the failure is reported does not cover it.
 - The blocked-checkout requirements MUST each have a test asserting that the checkout did not move: one for modified tracked files, one for a current commit that is not an ancestor of the target.
-- Untracked files MUST have a test asserting they do not block an update, since dependency installation creates them.
+- Untracked files MUST have a test asserting they do not block an update, since dependency installation creates them, and a second test asserting that an untracked file occupying a path the target commit tracks does block it and survives intact.
 - A test MUST assert that gathering leaves the checked-out commit and the working tree unchanged.
 - A test MUST assert that a referenced local marketplace is neither fetched nor modified, by failing if the injected Git runner is called for it at all.
 - Committed tests MUST NOT contain unjustified focused or skipped cases.
@@ -73,9 +73,9 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
   - **Why:** One operation then covers every case: an unpinned marketplace tracking a branch, a marketplace pinned to a tag by [0013](./0013-pin-marketplace-versions.md), and the rollback path that puts a specific commit back. A managed checkout has no reason to be on a branch — nothing commits into it, and an author who wants to commit uses a local reference, which is what [0008](./0008-link-local-marketplace-sources.md) added. Detaching also makes "did the checkout move" a single commit comparison instead of a question about branch state.
   - **Alternatives considered:** `merge --ff-only` was rejected because it cannot express a pin and does nothing for a detached checkout. `reset --hard` was rejected outright: it discards local modifications, which this change refuses to do, and it would make the blocking check the only thing standing between a user's edit and its destruction.
 
-- **Decision:** Refuse to update a checkout with modified tracked files, and ignore untracked ones.
-  - **Why:** A tracked modification is either a user's edit or a sign that something is wrong with the checkout, and both are worth stopping for. Untracked files cannot be treated the same way, because `bun install` writes `node_modules` into the checkout and a marketplace that does not ignore it would become permanently un-updatable — a blocking rule that fires on `tx`'s own side effect is a bug, not a safeguard.
-  - **Alternatives considered:** Stashing was rejected as `tx` taking custody of a user's work in a directory they may never look at again. Blocking on untracked files too was rejected for the reason above. Ignoring modifications entirely was rejected as data loss.
+- **Decision:** Refuse to update a checkout with modified tracked files; ignore untracked files except where one occupies a path the target commit tracks.
+  - **Why:** A tracked modification is either a user's edit or a sign that something is wrong with the checkout, and both are worth stopping for. Untracked files cannot be treated the same way, because `bun install` writes `node_modules` into the checkout and a marketplace that does not ignore it would become permanently un-updatable — a blocking rule that fires on `tx`'s own side effect is a bug, not a safeguard. The collision case is the exception the filesystem forces: a checkout that would have to write over an untracked file cannot proceed without destroying it, so it is reported as blocked with the path named. Nothing extra implements that — an ordinary checkout already refuses, and this change reports the refusal instead of forcing past it.
+  - **Alternatives considered:** Stashing was rejected as `tx` taking custody of a user's work in a directory they may never look at again. Blocking on untracked files generally was rejected for the reason above. Forcing the checkout past a collision was rejected as the data loss this whole rule exists to prevent. Ignoring modifications entirely was rejected for the same reason.
 
 - **Decision:** Refuse to move an unpinned marketplace when its current commit is not an ancestor of the target.
   - **Why:** That is what a force-push or a rewritten branch looks like, and moving anyway would silently discard the commit history the checkout was validated against — including, in the worst case, moving a user onto a completely unrelated tree that happens to be at the remote's branch. The condition is rare, so paying for it with a report and a remedy costs almost nothing; getting it wrong silently costs a marketplace nobody can explain. A pin is exempt because the user named the commit-ish, and naming an older tag is how a downgrade is spelled.
@@ -130,7 +130,7 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
   - [ ] Gather every installed marketplace in discovery order, reporting a live label for a reference and a commit label for a clone
   - [ ] Resolve the tracked target from the remote's default branch and report an available version only when it differs from the current commit
   - [ ] Report a blocking condition as item detail
-  - [ ] Re-check blocking conditions when applying and refuse without moving the checkout
+  - [ ] Re-check blocking conditions when applying, including an untracked file occupying a path the target tracks, and refuse without moving the checkout or discarding the file
   - [ ] Move the checkout, run the same preparation adding a marketplace runs, and report the new label
   - [ ] Restore the recorded commit when preparation fails, and state that installed dependencies were not restored
   - [ ] Report a corrupt or unreadable checkout as a failed item naming its `marketplace remove` remedy
@@ -140,7 +140,7 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
 
 - [ ] Cover the new behavior in `test/marketplaces.test.ts` and a new participant test
   - [ ] Gathering: a clone with and without an available commit, a live reference that reaches Git not at all, a corrupt checkout, and an assertion that nothing in the checkout changed
-  - [ ] Applying: a forward move with preparation, a no-op when nothing is available, a modified tracked file, an untracked file that does not block, a non-ancestor target, and a preparation failure that restores the previous commit
+  - [ ] Applying: a forward move with preparation, a no-op when nothing is available, a modified tracked file, an untracked file that does not block, an untracked file in the way of a tracked path that does, a non-ancestor target, and a preparation failure that restores the previous commit
   - [ ] Environment: a fetch running non-interactively, and `marketplace list` and dependency installation keeping the invoking environment
   - [ ] Ordering: marketplaces gathered and applied in sorted name order
   - [ ] Listing: the version column for a clone and for a reference, with no Git call reaching a remote

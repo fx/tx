@@ -47,7 +47,7 @@ What implementing them requires of this change:
 - **The public contract gains types only.** `UpdateItem`, `UpdateResult`, `UpdateParticipant`, and `UpdateParticipation` are declared in the public plugin module, which is the shared vocabulary an externalized plugin already imports type-only. No runtime API is added to `@fx/tx/plugin`.
 - **The driver is a bundled plugin, not core.** `tx update` is owned by a plugin under `plugins/`, composed in the root composition file alongside the marketplace plugin, and subject to the same boundary rules.
 - **This change ships a driver with nothing to drive.** With no participant contributed, `tx update` reports that there is nothing installed to update and exits zero. That is the correct behavior and it is what the tests assert; 0012 and 0014 supply participants.
-- **Composition order becomes observable.** Participant order follows plugin order at the composition root, which is what [0014](./0014-update-the-tx-executable.md) relies on to have the executable applied last. The composition root MUST make that ordering explicit rather than incidental.
+- **Composition order becomes observable.** Participant order follows the host's FIFO commit order, which for root definitions is composition order — the property [0014](./0014-update-the-tx-executable.md) relies on to have the executable applied after every other default plugin. It does not order a participant contributed by a *child* definition, which the host queues behind every root, and the spec says so rather than promising an ordering the host does not produce.
 
 ## Design
 

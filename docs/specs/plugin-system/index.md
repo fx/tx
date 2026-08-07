@@ -160,7 +160,7 @@ export interface UpdateParticipation {
 }
 ```
 
-The exact structural representation MAY vary, but it MUST preserve the owned contracts above. `available` absent means there is nothing to apply; every label is an opaque string chosen by the participant.
+The exact structural representation MAY vary, but it MUST preserve the owned contracts above. `available` absent means there is nothing to apply; every label is an opaque string chosen by the participant. A returned result means the participant handled the item — `applied` distinguishes having changed something from having deliberately changed nothing — and a thrown failure means it did not; [Updates: The Update Command](../updates/index.md#the-update-command) owns what a driver does with each.
 
 #### Scenario: Participant without commands
 

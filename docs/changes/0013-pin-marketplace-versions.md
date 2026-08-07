@@ -32,6 +32,7 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 - Every new observable parsing, resolution, recording, pinning, and update-interaction behavior MUST have automated tests.
 - Git execution MUST stay injected. No test may reach the network.
 - The suffix parser MUST have a table-driven test covering every source form the plugin accepts: bare shorthand, HTTP(S) with and without userinfo, SCP-style, `ssh://`, `file://`, a bare path, a Windows drive letter, and each of those with and without a suffix. A parser that mistakes `git@host:owner/repo.git` for a pinned source MUST fail that test.
+- A ref containing `/` MUST have a test asserting the suffix is rejected rather than read as part of the source, since that is the case the separator rule cannot represent.
 - The precedence rule MUST have a test using a real temporary directory whose name contains `@`, asserting it is added as a live local reference under its full name and that no ref is parsed.
 - The pin-survives-update requirement MUST have a test that fails against an implementation which moves a pinned checkout to the remote's default branch.
 - Committed tests MUST NOT contain unjustified focused or skipped cases.
@@ -53,11 +54,11 @@ What implementing them requires of this change:
 
 ### Approach
 
-Source parsing gains one function: given a Git source, return the source and its ref. It finds the last `@` that occurs after the last `/`; if there is none, the source has no ref. `git@github.com:owner/repo.git` has its `@` before the last `/` and parses as unpinned, and so does `https://token@github.com/owner/repo.git`; `fx/cc@1.4.0` and `git@github.com:owner/repo.git@v1.4.0` both parse as pinned. The rule needs no list of source forms and no second parse of the source it splits.
+Source parsing gains one function: given a Git source, return the source and its ref. It finds the last `@` that occurs after the last `/`; if there is none, the source has no ref. `git@github.com:owner/repo.git` has its `@` before the last `/` and parses as unpinned, and so does `https://token@github.com/owner/repo.git`; `fx/cc@1.4.0` and `git@github.com:owner/repo.git@v1.4.0` both parse as pinned. The rule needs no list of source forms and no second parse of the source it splits. It is also the reason the suffix cannot carry a ref containing `/`, which the spec states and `marketplace pin` covers.
 
 It runs after classification, so a local directory never reaches it, and `add` rejects a local source that carried a suffix rather than silently ignoring the version the user asked for.
 
-Resolving a ref in a fresh clone tries, in order: the ref as a tag, as a remote branch, and as a commit. If none resolves and the ref begins with a digit, `v` + the ref is tried the same way, so `@1.4.0` finds a `v1.4.0` tag — which is what the tags this project's own releases publish look like. A ref that resolves nowhere fails the addition, and staging is discarded exactly as it is for any other publication failure.
+Resolution follows the order the spec fixes — tag, branch, commit, then the `v`-prefixed retry for a ref beginning with a digit — against the staged clone, which already has the remote's refs and tags. A ref that resolves nowhere fails the addition, and staging is discarded exactly as it is for any other publication failure.
 
 The pin is recorded in the checkout's own Git configuration under a `tx` key. Reading it is one local Git call, which the participant makes while it is already reading that repository; removing the marketplace removes the pin with it, because it lives inside the directory being removed.
 
@@ -74,6 +75,10 @@ The update participant changes in one place: resolving the target. Unpinned, the
 - **Decision:** Split on the last `@` following the last `/`.
   - **Why:** Every `@` that is *not* a version separator in a Git source appears in the authority — `git@host:path`, `https://user@host/path` — which is always before the last `/`. Anchoring on position instead of on source shape means the rule is one comparison, holds for source forms nobody has thought of, and cannot be defeated by a credential containing `@`, which [0010](./0010-retry-marketplace-clones-over-ssh.md) already established is real.
   - **Alternatives considered:** Parsing the source as a URL first and taking the suffix from its path was rejected: SCP syntax and bare paths do not parse, so it would need the source-form list this rule avoids. Splitting on the first `@` was rejected because it eats an SSH source's user. Requiring the ref to look like a version was rejected: branch names and hashes are legitimate refs and look like nothing in particular.
+
+- **Decision:** A ref carried as a suffix may not contain `/`, and a slash-bearing ref is set with `marketplace pin` instead.
+  - **Why:** The separator is defined by position against the last `/`, so a ref spelling one — `release/1.4` — moves the last `/` past the `@` and defeats the rule that makes the suffix readable without parsing the source. The alternatives are all worse than a second command: an escape syntax nobody would remember, or a resolution attempt that decides which side of the `@` a slash belongs to by trying both and preferring whichever happens to exist. Rejecting the suffix explicitly means the user gets told, rather than watching `tx` clone a repository they did not name.
+  - **Alternatives considered:** Quoting or escaping the ref was rejected as syntax invented for one case. Splitting on the last `@` regardless of slashes was rejected because it breaks SCP-style sources, which is the case the position rule exists for. Probing both interpretations was rejected as behavior that depends on what exists remotely rather than on what the user typed.
 
 - **Decision:** Classification wins over suffix parsing.
   - **Why:** [0008](./0008-link-local-marketplace-sources.md) settled that a source naming an existing directory is that directory, and a directory whose name contains `@` is unremarkable — `tools@2`, `notes@work`. Parsing the suffix first would rename such a directory out from under the user and then fail to find it, reporting an error about a repository they never mentioned. Running classification first means a local path is never split, and a suffix on a local source is an explicit error rather than a silent one.
@@ -111,7 +116,7 @@ The update participant changes in one place: resolving the target. Unpinned, the
 ## Tasks
 
 - [ ] Specify pins
-  - [ ] Add [Updates: Marketplace Versions and Pins](../specs/updates/index.md#marketplace-versions-and-pins) covering the suffix, its precedence against classification, the separator rule, name derivation, pin recording, pin-aware gathering, the pin commands, and the version column
+  - [ ] Add [Updates: Marketplace Versions and Pins](../specs/updates/index.md#marketplace-versions-and-pins) covering the suffix, its precedence against classification, the separator rule and the `/` it cannot carry, ref resolution including the `v`-prefixed retry, name derivation, pin recording, pin-aware gathering, semantic-version tag comparison, the pin commands, and the version column
   - [ ] State in [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) that a pin may move a checkout in either direction
   - [ ] Add the pointer bullet to [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership)
   - [ ] Add scenarios for adding a pinned version, a pin surviving an update, a directory beating a suffix, and unpinning
@@ -119,7 +124,7 @@ The update participant changes in one place: resolving the target. Unpinned, the
 
 - [ ] Parse the version suffix in `plugins/marketplace/`
   - [ ] Split a Git source on the last `@` following its last `/`, returning the source unchanged when there is none
-  - [ ] Reject an empty ref
+  - [ ] Reject an empty ref, and reject a suffix whose ref contains `/` naming `marketplace pin` as the way to set one
   - [ ] Derive the marketplace name from the source without the suffix
   - [ ] Reject a local source that carried a suffix, naming the reason
 
