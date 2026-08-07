@@ -59,6 +59,8 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 - The silent failure MUST be covered: a package declaring an entry point *and* shipping a root `index.js` holding something else MUST resolve to its declared entry. This is the one case that reports no error before the fix, so a test asserting only that the import succeeds would pass against the defect; the test MUST assert which file was loaded.
 - Fixture packages MUST be written by the test rather than installed, so no test reaches the network or runs `bun install`.
 - Both the eager and the lazy import shape MUST be covered: a dependency imported as the entry module is evaluated, and one imported inside a command action, which is the shape that reported the defect.
+- Lazy evaluation MUST be pinned by a module that announces its own evaluation and a command that does not dispatch it. Resolving a plugin's graph ahead of time MUST NOT evaluate a module whose command was not invoked, and a test asserting only that the dispatched command works would not notice if it did.
+- A specifier assembled at runtime MUST be pinned by a test, so a later change to the build options cannot turn a plugin that loads and runs into one that fails to load at all.
 - A plugin whose dependency is genuinely absent MUST have a test that its failure names the unresolved specifier.
 - Tests MUST create every fixture inside a temporary directory they own and MUST remove it afterwards. No test may reach the network or run `bun install`.
 
@@ -88,14 +90,22 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 
 **Bundling applies uncompiled too.** Restricting it to a compiled executable would leave a plugin author's source-checkout runs more permissive than the executable their users install, which is the arrangement that hid this defect for six changes. The same module graph is built either way.
 
+**A lazily imported module is still evaluated lazily, but its graph is now resolved eagerly.** A plugin that defers work behind `await import('./mcp.ts')` does so to keep an expensive dependency off the path of its cheap commands. That deferral survives in the sense that matters: the module is evaluated when the action runs and not before, which a test pins by having a module announce its own evaluation and asserting the announcement is absent until its command is dispatched. What no longer waits is resolving and parsing the graph, which now happens once as the plugin loads, whichever command was invoked.
+
+That costs measurable startup time, and the cost scales with the graph rather than being a flat penalty. Against the released executable, `status` on a plugin whose only dependency is `date-fns` goes from 76.8ms to 83.9ms; on a plugin declaring `@modelcontextprotocol/sdk` and its 92 packages, from 56.3ms to 99.8ms. (The two baselines are not comparable with each other — different fixtures — only within each pair.) Dispatching the command that actually uses the SDK costs 117.9ms, the difference being the SDK evaluating.
+
+Caching the bundle would remove the repeated cost, and is deliberately not done here: a cache keyed well enough to stay correct against a live local marketplace is a larger design than this defect fix, and 43ms on the largest graph anyone has is not yet worth it. It is recorded as an open question.
+
+**A specifier assembled at runtime is left alone.** `await import(computed)` cannot be resolved ahead of time, and the bundler does not fail over it — it survives into the output as a runtime import, so the plugin loads and runs. It then meets the executable's own resolver, with exactly the behaviour it has today: a computed path resolves, a computed bare specifier does not. Nothing about this shape changes, and a test pins it so that a future change to the build options cannot quietly turn it into a plugin that fails to load at all.
+
 **Encapsulation is now enforced.** A specifier reaching past a package's `exports` map into a file it does not publish used to resolve, because the degraded resolver treated it as a path and never read the map. It now fails, as it does in Node and in Bun outside an executable. This is a behaviour change and it is the correct one; a plugin reaching into a dependency's internals was relying on the defect.
 
 **Bun's global types stay out of the plugin.** `test/plugin-consumer.test.ts` compiles the marketplace plugin inside a consumer project that installs `@fx/tx` and nothing else, where `@types/bun` is absent — the check that keeps the plugin externalizable. The two runtime entry points the loader needs are therefore declared locally and read off `globalThis`. The plugin already reaches the same runtime through Node's own `process.execPath` to install dependencies.
 
 ### Non-Goals
 
-- Resolving a specifier computed at runtime, rather than written literally, from inside a plugin's graph. It is not resolvable at bundle time and the runtime resolver it would fall to is the degraded one. No plugin does this.
-- Caching bundles between invocations. At about 12ms for a large graph it buys little and costs staleness against a live local marketplace.
+- Resolving a specifier computed at runtime rather than written literally. It is not resolvable at bundle time, and the resolver it falls to is the degraded one. The behaviour is unchanged by this fix and pinned by a test.
+- Caching bundles between invocations. It would remove the repeated resolution cost, but a cache key that stays correct against a live local marketplace has to cover the whole input set, which is a larger design than this fix.
 - Sharing one dependency instance between two plugins that install the same package. Per-plugin dependency isolation is already what [Change 0005](./0005-install-per-plugin-dependencies.md) specifies.
 - Fixing the executable's runtime resolver. It belongs to Bun; this change routes around it.
 
@@ -112,6 +122,8 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 
 - [ ] Should the host, rather than the marketplace plugin, own loading a plugin entry as a module? It is a host concern in principle, but the spec assigns dynamic import to the marketplace plugin today, and moving it would mean a new public runtime API rather than a defect fix.
 - [ ] Should a plugin be able to declare a dependency as external, so two plugins share one installed copy? Nothing wants it yet, and dependency isolation is the current contract.
+- [ ] Should resolved graphs be cached between invocations? It would return the startup time this change spends, and it needs a cache key covering every input a bundle drew on, so that a live local marketplace never serves a stale one. Worth revisiting if a plugin's graph grows past the 43ms measured here.
+- [ ] Should a plugin's own modules stay unbundled, so each is resolved only when its command runs? It would restore the deferral in full, but each would then bundle its own copy of every dependency it names, and two copies of a package like `zod` break value identity across the plugin's own files. Not worth that to save the startup time above.
 - [ ] Should the failure for an unresolved dependency suggest reinstalling the marketplace rather than removing it? The recovery advice is shared with every other plugin failure and is not specific to this one.
 
 ## References

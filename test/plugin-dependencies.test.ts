@@ -86,9 +86,14 @@ const dependencyTree: Readonly<Record<string, string>> = {
 };
 
 /**
- * A plugin importing its dependencies both ways a plugin can: eagerly, as the
- * entry module is evaluated, and lazily inside a command action, which is the
- * shape a plugin uses to keep an expensive dependency off the help path.
+ * A plugin importing its dependencies every way a plugin can: eagerly, as the
+ * entry module is evaluated; lazily inside a command action, which is the
+ * shape a plugin uses to keep an expensive dependency off the help path; and
+ * through a specifier assembled at runtime, which nothing can resolve ahead of
+ * time.
+ *
+ * `deferred.ts` is imported by a command this fixture never dispatches, and it
+ * announces its own evaluation. Nothing may make that announcement happen.
  */
 const pluginEntry = `import { main } from 'exports-only';
 import { leaf } from 'leaf';
@@ -101,6 +106,8 @@ export default ({ command, context }) => {
     namespace.description('Dependency fixture plugin');
     namespace.command('report').action(async () => {
       const { sub } = await import('exports-only/sub.js');
+      const computed = './comp' + 'uted.ts';
+      const { assembled } = await import(computed);
       context.stdout.write(JSON.stringify({
         main,
         leaf,
@@ -108,7 +115,12 @@ export default ({ command, context }) => {
         traced,
         scaled: numeric.scale(21),
         shadowed,
+        assembled,
       }) + '\\n');
+    });
+    namespace.command('deferred').action(async () => {
+      const { deferred } = await import('./deferred.ts');
+      context.stdout.write(deferred + '\\n');
     });
   });
 };
@@ -133,6 +145,12 @@ test("a plugin resolves its dependency tree by Node's rules", async () => {
         dependencies: { "exports-only": "*" },
       }),
       "deps/index.ts": pluginEntry,
+      "deps/computed.ts": "export const assembled = 'assembled at runtime';\n",
+      // Announces its own evaluation on standard error, which the dispatched
+      // command's assertions require to stay empty.
+      "deps/deferred.ts":
+        "process.stderr.write('deferred module evaluated\\n');\n" +
+        "export const deferred = 'deferred';\n",
       ...Object.fromEntries(
         Object.entries(dependencyTree).map(([path, contents]) => [
           `deps/${path}`,
@@ -153,6 +171,9 @@ test("a plugin resolves its dependency tree by Node's rules", async () => {
       { env: { ...process.env, DEV: "true", XDG_DATA_HOME: dataDirectory } },
     );
 
+    // Empty, and load-bearing twice over: `deferred.ts` announces itself on
+    // standard error, and it belongs to a command this invocation does not
+    // dispatch. Resolving the graph ahead of time must not evaluate it.
     expect(result.stderr.toString()).toBe("");
     expect(JSON.parse(result.stdout.toString())).toEqual({
       main: "main via leaf",
@@ -163,8 +184,21 @@ test("a plugin resolves its dependency tree by Node's rules", async () => {
       // Not "shadowing index.js": the declared entry wins over the root
       // `index.js` that path arithmetic reaches first.
       shadowed: "declared entry",
+      // A specifier assembled at runtime survives as a runtime import rather
+      // than failing the plugin it appears in.
+      assembled: "assembled at runtime",
     });
     expect(result.exitCode).toBe(0);
+
+    const deferred = Bun.spawnSync(
+      [join(repositoryRoot, "dist", "tx"), "deps", "deferred"],
+      { env: { ...process.env, DEV: "true", XDG_DATA_HOME: dataDirectory } },
+    );
+
+    // The same module, now that its command is the one dispatched.
+    expect(deferred.stderr.toString()).toBe("deferred module evaluated\n");
+    expect(deferred.stdout.toString()).toBe("deferred\n");
+    expect(deferred.exitCode).toBe(0);
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
