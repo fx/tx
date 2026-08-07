@@ -170,6 +170,13 @@ export interface CommandContext {
 - `.tx/config.json` MUST contain the marketplace `plugins` array, MAY contain additional repository configuration, and MUST resolve plugin entries relative to the repository root.
 - Installed marketplaces that predate `.tx/config.json` MUST remain loadable through the legacy root `tx.marketplace.json` manifest; when both files exist, `.tx/config.json` MUST take precedence.
 - `marketplace add` MUST accept Git clone sources and expand bare GitHub `owner/repository` shorthand to its HTTPS clone source.
+- A Git source that is HTTP(S), whether typed as such or produced by shorthand expansion, MUST be attempted over HTTP(S) first.
+- When that attempt fails, for any reason, `marketplace add` MUST retry the clone exactly once against the SSH source derived from it, under the same requested name and the same target path. A Git source that is not HTTP(S) MUST be attempted exactly once.
+- The derived SSH source MUST be `user@host:path` in SCP syntax, and MUST be `ssh://user@host:port/path` when the HTTP(S) source carries a port, because SCP syntax cannot express one. `user` MUST be the HTTP(S) source's userinfo user when it has one and MUST default to `git` otherwise. Any password the source carries MUST be dropped, and query and fragment MUST NOT be carried into the derived source.
+- Clone attempts MUST run Git non-interactively, so a missing HTTP(S) credential fails rather than blocking on a terminal prompt, which would otherwise keep the SSH retry from ever running. Configured credential helpers and askpass programs MUST remain in effect, and an SSH command supplied by the invoking environment MUST NOT be overridden. Non-interactive execution MUST apply to clone attempts only; `marketplace list` and dependency installation MUST keep the invoking environment unchanged.
+- Only the clone MUST be retried. A failure in manifest validation, dependency installation, or the installed-name check MUST NOT trigger another clone attempt.
+- When every attempt fails and more than one was made, the reported failure MUST name every attempted source and MUST preserve every underlying failure message. It MUST NOT contain any credential carried in a source's userinfo. When only one attempt was made, its failure MUST be reported as it is.
+- A marketplace installed through the SSH retry MUST report its SSH source in `marketplace list`, since that is the source it was cloned from.
 - For local directory sources, see [Local Marketplace Sources](#local-marketplace-sources). That section owns the requirement and states it in RFC 2119 terms; this bullet is a pointer to it, not a second statement of it.
 - Automatically loading `.tx/config.json` from the current working repository is out of scope. A working repository is loaded by adding it as a local marketplace source.
 - The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
@@ -183,7 +190,7 @@ export interface CommandContext {
 - A syntactically valid, repository-contained explicit `package` path whose file is genuinely absent MUST skip dependency installation. Before classifying it as absent, the deepest existing ancestor MUST resolve within the real checkout so a symbolic-link escape cannot become a skip.
 - Every selected package candidate that exists MUST resolve to a contained regular file. Existing manifests MUST be canonicalized by real path, installed at most once, and installed sequentially in the order of the first configured plugin selecting each manifest.
 - The marketplace manifest, every plugin entry, and every selected package candidate MUST be validated before the first installation starts. Each installation MUST run with the selected real manifest's containing directory as its working directory.
-- Cloned marketplace addition MUST remove staging and publish no checkout when validation or trusted dependency installation fails. A local source has no staging to remove; its failure contract is in [Local Marketplace Sources](#local-marketplace-sources).
+- Cloned marketplace addition MUST remove staging and publish no checkout when validation or trusted dependency installation fails. Each clone attempt MUST stage into its own fresh, empty directory, and every staging directory the addition creates MUST be removed on every exit path — an attempt that fails may leave a partial checkout behind, which the next attempt cannot clone into. A local source has no staging to remove; its failure contract is in [Local Marketplace Sources](#local-marketplace-sources).
 - In a compiled executable, the marketplace plugin MUST invoke Bun dependency installation through the running executable (`process.execPath`) with `BUN_BE_BUN=1` so installation does not depend on a separate `bun` executable on `PATH`.
 
 The marketplace plugin owns the detailed marketplace command, manifest, path-safety, installation, and recovery contracts. Core consumes only the generic child definitions it contributes.
@@ -247,6 +254,24 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 - **GIVEN** the compiled `tx` executable is running without a separate Bun executable on `PATH`
 - **WHEN** a selected per-plugin manifest requires dependency installation
 - **THEN** installation runs through the current executable in Bun mode from the selected manifest's directory and the marketplace can load
+
+#### Scenario: SSH retry after a failed HTTP(S) clone
+
+- **GIVEN** a marketplace is added by `owner/repository` shorthand or an HTTP(S) URL, and cloning it over HTTP(S) fails
+- **WHEN** the addition retries
+- **THEN** it clones the SSH source derived from that URL into a fresh staging directory, publishes the marketplace under the same name, and `marketplace list` reports the SSH source
+
+#### Scenario: One attempt for a source that is not HTTP(S)
+
+- **GIVEN** a marketplace is added by an `ssh://` URL, SCP-style syntax, or a `file://` URL, and cloning it fails
+- **WHEN** the addition aborts
+- **THEN** exactly one clone was attempted and the failure is reported as Git reported it
+
+#### Scenario: Both attempts reported without credentials
+
+- **GIVEN** an HTTP(S) source carrying a credential in its userinfo, and both the HTTP(S) clone and the SSH retry fail
+- **WHEN** the addition aborts
+- **THEN** the reported failure names both attempted sources and both underlying messages, contains no part of that credential, no staging directory remains, and no marketplace is published
 
 ### Local Marketplace Sources
 
@@ -355,6 +380,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0006: Isolate Plugin Failure Exit Codes](../../changes/0006-isolate-plugin-failure-exit-codes.md)
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
 - [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
+- [Change 0010: Retry Marketplace Clones Over SSH](../../changes/0010-retry-marketplace-clones-over-ssh.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -372,3 +398,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-04 | Extended plugin failure isolation to the process exit code | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
 | 2026-08-05 | Gave each plugin one identity-named namespace, replaced path registration with a host-supplied command builder, and injected the command parser | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
 | 2026-08-06 | Specified local marketplace sources as live references so authors can run uncommitted plugin work against the real executable | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
+| 2026-08-07 | Required a failed HTTP(S) marketplace clone to be retried once against its derived SSH source, non-interactively, staged per attempt, and reported without credentials | [0010-retry-marketplace-clones-over-ssh](../../changes/0010-retry-marketplace-clones-over-ssh.md) |
