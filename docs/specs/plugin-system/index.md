@@ -170,18 +170,20 @@ export interface CommandContext {
 - `.tx/config.json` MUST contain the marketplace `plugins` array, MAY contain additional repository configuration, and MUST resolve plugin entries relative to the repository root.
 - Installed marketplaces that predate `.tx/config.json` MUST remain loadable through the legacy root `tx.marketplace.json` manifest; when both files exist, `.tx/config.json` MUST take precedence.
 - `marketplace add` MUST accept Git clone sources and expand bare GitHub `owner/repository` shorthand to its HTTPS clone source.
-- Automatically loading `.tx/config.json` from the current working repository is out of scope.
+- For local directory sources, see [Local Marketplace Sources](#local-marketplace-sources) — specified, not yet implemented. That section owns the requirement and states it in RFC 2119 terms; this bullet is a pointer to it, not a second statement of it.
+- Automatically loading `.tx/config.json` from the current working repository is out of scope. Once local sources land, a working repository is loaded by adding it as a local marketplace source.
 - The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
 - The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
 - Marketplace discovery, import, or initialization failures MUST be mapped by the marketplace plugin into marketplace-aware diagnostics while preserving generic host failure isolation.
 - Removing a broken marketplace MUST remain possible because the marketplace management commands are committed independently of discovered child failures.
+- `marketplace list` MUST list every installed marketplace, including one whose source cannot be determined. A marketplace whose source is undeterminable MUST be listed with an explicit unknown-source placeholder rather than omitted, and MUST NOT fail the listing. The placeholder's spelling is implementation-defined, but it MUST be non-empty and MUST be the same for every such marketplace, so the listing never leaves a source column blank or varies its wording between rows.
 - Each configured plugin entry MAY declare an optional `package` field containing a repository-relative path to the exact `package.json` selected for that plugin.
 - Without `package`, the selected candidate MUST be `package.json` in the directory containing the plugin's real, fully resolved entry path. A nested entry MUST NOT search parent directories or fall back to the marketplace root.
 - An explicit `package` value MUST be a non-empty string, MUST be repository-relative, MUST remain within the real marketplace checkout, and MUST name `package.json` exactly. Absolute paths, lexical escapes, directories, other filenames, and symbolic links resolving outside the checkout MUST be rejected.
 - A syntactically valid, repository-contained explicit `package` path whose file is genuinely absent MUST skip dependency installation. Before classifying it as absent, the deepest existing ancestor MUST resolve within the real checkout so a symbolic-link escape cannot become a skip.
 - Every selected package candidate that exists MUST resolve to a contained regular file. Existing manifests MUST be canonicalized by real path, installed at most once, and installed sequentially in the order of the first configured plugin selecting each manifest.
 - The marketplace manifest, every plugin entry, and every selected package candidate MUST be validated before the first installation starts. Each installation MUST run with the selected real manifest's containing directory as its working directory.
-- Marketplace addition MUST remove staging and publish no checkout when validation or trusted dependency installation fails.
+- Cloned marketplace addition MUST remove staging and publish no checkout when validation or trusted dependency installation fails. A local source has no staging to remove; its failure contract is in [Local Marketplace Sources](#local-marketplace-sources).
 - In a compiled executable, the marketplace plugin MUST invoke Bun dependency installation through the running executable (`process.execPath`) with `BUN_BE_BUN=1` so installation does not depend on a separate `bun` executable on `PATH`.
 
 The marketplace plugin owns the detailed marketplace command, manifest, path-safety, installation, and recovery contracts. Core consumes only the generic child definitions it contributes.
@@ -246,6 +248,62 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 - **WHEN** a selected per-plugin manifest requires dependency installation
 - **THEN** installation runs through the current executable in Bun mode from the selected manifest's directory and the marketplace can load
 
+### Local Marketplace Sources
+
+The local-source model below is specified but **not yet implemented**. It is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md). Until that change lands, `marketplace add` sends every source to `git clone`: a local path that is itself a Git repository is installed as a snapshot of its checked-out commit, and a local directory that is not a repository fails, because cloning is the only thing `add` knows how to do with it.
+
+A plugin author needs to run their uncommitted work through the real `tx` executable. Cloning cannot serve that: a clone captures a commit, so every edit would have to be committed and reinstalled before it could be run. A local source is therefore a live reference to a directory the author owns, not a copy of it.
+
+- `marketplace add` MUST accept a local directory as a source.
+- An empty source MUST be rejected before classification begins. Resolving an empty path against the working directory yields that directory, so classifying it would silently install and reference whatever directory the user happens to be standing in.
+- Source classification MUST be decided without network access and MUST be deterministic. Exactly three outcomes exist, and every non-empty source MUST fall into one of them:
+  - A source that carries neither a URL scheme nor SCP-style Git syntax and resolves, relative to the working directory, to an existing directory MUST be classified as local.
+  - A source that carries a URL scheme or SCP-style Git syntax, or that is genuinely absent from the filesystem, MUST keep Git handling, so `owner/repository` shorthand and `file://` URLs are unaffected. Absent means absent — an inspection that fails for any other reason is not this case, per the rule below.
+  - A source that carries neither and resolves to an existing non-directory MUST be rejected, rather than reinterpreted as a Git source.
+- Only genuine absence MUST count as absence. If inspecting a scheme-free source fails for any other reason — an unreadable ancestor, a symbolic-link cycle, or any other filesystem error — classification MUST report that failure rather than treat the source as missing and hand it to Git, where it would resurface as an unrelated clone error.
+- Where a bare `owner/repository` argument also names an existing local directory, the local directory MUST win. The Git source remains reachable by its full URL.
+- A local source MUST be recorded as a live reference to the directory, never as a copy. Every later invocation MUST read that directory's current contents, so an author's uncommitted edits take effect on the next run with no reinstall.
+- The reference MUST be recorded against the source's fully resolved real path at the time it is added, so a later working-directory change or an edit to an intermediate symbolic link cannot redirect it.
+- A local source MUST be validated, and its selected dependency manifests installed, exactly as a cloned marketplace is. Installation MUST run in the author's own directory; the source MUST NOT be copied in order to install it.
+- If validation or installation of a local source fails, no reference MUST be published, and `tx` MUST NOT delete, empty, or roll back the referenced directory. It is the author's working tree; only the reference is withheld. This binds `tx`'s own cleanup, and only that: dependency installation and its lifecycle scripts are trusted code running with `tx`'s permissions, so whatever they do to that tree is outside any guarantee the host can make.
+- Adding a local source MUST reject a name that is already installed, whether that name holds a clone or a reference.
+- Without `--name`, a local marketplace's name MUST be derived from the final component of the resolved real path, so `.` and a trailing-separator path name the directory they resolve to. The component MUST be taken as it is on disk; a `.git` suffix MUST NOT be stripped, because a local source names a directory rather than a repository URL, and a directory called `tools.git` is called that. A name that cannot be derived safely MUST be reported as requiring `--name`, exactly as for a Git source.
+- Marketplace discovery MUST include every reference it holds, whatever that reference now resolves to — a directory, a non-directory, or nothing at all. A reference that occupies a name MUST stay visible under that name; discovery MUST NOT drop one because its target degraded, which would leave the name installed and unusable while `marketplace list` reports nothing holding it, recoverable only by an author who still remembers the name.
+- `marketplace list` MUST report a referenced marketplace's recorded target path as its source, including when that target no longer resolves to a usable directory.
+- `marketplace remove` MUST remove only the reference. It MUST NOT delete, empty, or otherwise modify the referenced directory.
+- A reference whose target no longer exists, no longer resolves to a directory, or no longer holds a valid manifest MUST be reported through the marketplace plugin's recovery diagnostics while marketplace management commands and healthy marketplaces stay available. Classifying that failure is loading's job, not discovery's.
+- Dependency installation for a referenced marketplace MUST happen only when it is added. Dependencies the author adds to the source afterwards are the author's to install; `tx` MUST NOT reinstall them on later invocations.
+
+#### Scenario: Uncommitted edits run against the real executable
+
+- **GIVEN** an author adds their working repository as a local marketplace source
+- **WHEN** they edit a plugin entry and run its command again without committing, pushing, or reinstalling
+- **THEN** the edited behavior runs
+
+#### Scenario: Local directory beats repository shorthand
+
+- **GIVEN** a bare `owner/repository` argument that also names an existing directory relative to the working directory
+- **WHEN** the marketplace is added
+- **THEN** the local directory is referenced, and the remote repository remains reachable by its full URL
+
+#### Scenario: Removal leaves the author's tree intact
+
+- **GIVEN** an installed marketplace that references a local directory
+- **WHEN** it is removed
+- **THEN** the reference is gone and the referenced directory and its contents are unchanged
+
+#### Scenario: Stale reference stays recoverable
+
+- **GIVEN** a referenced local directory is moved, deleted, or replaced by a non-directory after it was added
+- **WHEN** `tx` runs
+- **THEN** the stale marketplace is reported through marketplace-aware recovery diagnostics, still appears in `marketplace list` with its recorded target, is removable, and does not prevent healthy marketplaces from loading
+
+#### Scenario: Rejected local source publishes nothing
+
+- **GIVEN** a local source whose manifest, entries, package selections, or dependency installation fails
+- **WHEN** addition aborts
+- **THEN** no marketplace is published and `tx` leaves the referenced directory where it is, neither deleting nor rolling it back
+
 ### Composition and Boundaries
 
 - The repository composition root outside `src/` MUST provide the ordered default plugin definitions to the generic host.
@@ -280,7 +338,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 ## Constraints
 
 - Plugin sandboxing, signing, provenance, rollback, catalogs, and automatic updates are out of scope.
-- One installed checkout represents a marketplace's current version.
+- One installed checkout represents a cloned marketplace's current version. A referenced local marketplace has no pinned version; its current version is whatever its directory holds when `tx` runs.
 - Dependency environment isolation between plugins is not required.
 - Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
 
@@ -298,6 +356,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0005: Install Per-Plugin Dependencies](../../changes/0005-install-per-plugin-dependencies.md)
 - [Change 0006: Isolate Plugin Failure Exit Codes](../../changes/0006-isolate-plugin-failure-exit-codes.md)
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
+- [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -314,3 +373,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-04 | Added safe, ordered, deduplicated per-plugin dependency manifest installation | [0005-install-per-plugin-dependencies](../../changes/0005-install-per-plugin-dependencies.md) |
 | 2026-08-04 | Extended plugin failure isolation to the process exit code | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
 | 2026-08-05 | Gave each plugin one identity-named namespace, replaced path registration with a host-supplied command builder, and injected the command parser | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
+| 2026-08-06 | Specified local marketplace sources as live references so authors can run uncommitted plugin work against the real executable — planned, not yet implemented | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |

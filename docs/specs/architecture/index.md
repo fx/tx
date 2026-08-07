@@ -65,6 +65,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - The initial supported platform is Linux x64 with glibc and the Bun baseline CPU target.
 - The deterministic production build MUST create the standalone executable at `dist/tx` using `bun-linux-x64-baseline`.
 - A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage.
+- Loading from a location that plugin-owned storage references, rather than from that storage itself, is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md) and not yet implemented.
 - The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist.
 - GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend.
 - `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
@@ -86,6 +87,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - Mutable feature state MUST live outside the executable.
 - Generic core modules MUST NOT own marketplace storage locations, manifests, names, discovery, Git operations, or dependency installation.
 - A plugin MAY own mutable state and resolve its own platform-appropriate data paths through standard Node.js or Bun APIs.
+- Plugin-owned state MAY reference a directory outside it that the user supplied. Removing that state MUST remove only the reference, never the referenced directory. This is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md) and not yet implemented; no plugin holds such a reference today.
 - Removing plugin-owned state MAY reset that plugin's installed data without changing the generic host contract.
 - The initial architecture MUST NOT require a database.
 
@@ -249,6 +251,7 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 - [Plugin System](../plugin-system/)
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
+- [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Change 0009: Skip Quality Commands for Documentation](../../changes/0009-skip-quality-commands-for-documentation.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
 
@@ -264,4 +267,5 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-03 | Defined scoped package publishing, Linux x64 release assets, version invariants, manual Release Please approvals, and exact-head dispatched CI | [0004-automate-versioning-and-publishing](../../changes/0004-automate-versioning-and-publishing.md) |
 | 2026-08-04 | Limited plugin initialization failures to standard-error diagnostics without changing dispatched exit codes | [0006-isolate-plugin-failure-exit-codes](../../changes/0006-isolate-plugin-failure-exit-codes.md) |
 | 2026-08-05 | Delegated everything after the plugin namespace to its owner, settled the parser question, and collapsed usage and runtime failures onto one exit code | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
+| 2026-08-06 | Allowed plugin-owned storage to reference a user-supplied directory outside it, and required removal to drop only the reference — planned, not yet implemented | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
 | 2026-08-06 | Exempted documentation-only runs from the CI quality commands while still reporting the required check | [0009-skip-quality-commands-for-documentation](../../changes/0009-skip-quality-commands-for-documentation.md) |

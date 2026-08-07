@@ -67,6 +67,14 @@ changes:
     status: complete
     depends_on:
       - "0006"
+  - id: "0008"
+    name: link-local-marketplace-sources
+    path: changes/0008-link-local-marketplace-sources.md
+    description: Add a local directory as a live marketplace reference so authors can run uncommitted plugin work against the real executable.
+    spec: plugin-system
+    status: draft
+    depends_on:
+      - "0007"
   - id: "0009"
     name: skip-quality-commands-for-documentation
     path: changes/0009-skip-quality-commands-for-documentation.md
