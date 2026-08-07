@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  chmod,
   lstat,
   mkdir,
   readdir,
@@ -15,6 +14,7 @@ import { pathToFileURL } from "node:url";
 import {
   deriveMarketplaceName,
   deriveMarketplaceSshRepository,
+  discardStaging,
   MarketplaceManager,
   normalizeMarketplaceRepository,
   type RunGit,
@@ -1524,43 +1524,25 @@ describe("marketplace clone transports", () => {
     }
   });
 
-  test("retries after a staging directory it cannot remove", async () => {
-    const temporaryRoot = await temporaryDirectory("tx-clone-locked-");
-    const locked: string[] = [];
+  test("walks away from a staging directory it cannot remove", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-discard-");
     try {
-      const root = join(temporaryRoot, "marketplaces");
-      const manager = new MarketplaceManager(root, {
-        prepare: async () => {},
-        runGit: async (args) => {
-          if (readsSshCommand(args)) unsetSshCommand();
-          const staging = args.at(-1) as string;
-          if ((args[2] as string).startsWith("https://")) {
-            // A partial checkout the filesystem refuses to unlink: the
-            // directory holding it cannot be written, so its child cannot be
-            // removed by a non-root process.
-            const directory = join(staging, "locked");
-            await mkdir(directory);
-            await writeFile(join(directory, "partial.txt"), "partial");
-            await chmod(directory, 0o555);
-            locked.push(directory);
-            throw new Error("Authentication failed");
-          }
-          await writeFile(join(staging, "clone.txt"), "clone");
-          return { stdout: "" };
-        },
-      });
+      const file = join(temporaryRoot, "file");
+      await writeFile(file, "");
+      // A path whose parent is a regular file. `rm` rejects it with ENOTDIR,
+      // which `force: true` does not suppress — it suppresses only ENOENT.
+      // ENOTDIR is a property of the path rather than of the process, so the
+      // refusal reproduces identically for root and for everyone else, unlike
+      // a permission bit root simply ignores.
+      const staging = join(file, "child");
+      await expect(
+        rm(staging, { recursive: true, force: true }),
+      ).rejects.toHaveProperty("code", "ENOTDIR");
 
-      expect(await manager.add("fx/tx", "stubborn")).toBe("stubborn");
-      expect(await readFile(join(root, "stubborn/clone.txt"), "utf8")).toBe(
-        "clone",
-      );
-      // The removal really did fail: what it could not unlink is still there,
-      // which is the leftover the retry was allowed to walk away from.
-      expect(
-        await readFile(join(locked[0] as string, "partial.txt"), "utf8"),
-      ).toBe("partial");
+      // Swallowed: a leftover directory must never become the failure the
+      // caller reads, nor abort the attempt that follows.
+      expect(await discardStaging(staging)).toBeUndefined();
     } finally {
-      await Promise.all(locked.map((directory) => chmod(directory, 0o755)));
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });

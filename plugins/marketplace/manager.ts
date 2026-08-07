@@ -313,7 +313,7 @@ function cloneFailure(
  * this whole path exists for, would lose the failure the user needs and the
  * install they asked for while leaving the directory behind anyway.
  */
-async function discardStaging(staging: string): Promise<void> {
+export async function discardStaging(staging: string): Promise<void> {
   try {
     await rm(staging, { recursive: true, force: true });
   } catch {
