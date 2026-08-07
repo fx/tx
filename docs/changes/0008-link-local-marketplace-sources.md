@@ -109,14 +109,14 @@ The reference itself is a symbolic link at `<marketplaces>/<name>` pointing at t
 
 ## Tasks
 
-- [ ] Make marketplace discovery, listing, and removal reference-aware
-  - [ ] Replace the `Dirent`-type filter in `discoverInstalledMarketplaces` (`plugins/marketplace/storage.ts`) with classification that accepts a real directory or any symbolic link, preserving the existing safe-name filter and sorted order
-  - [ ] Retain every degraded reference as a discovered marketplace — dangling, and resolving to a non-directory — so a stale reference stays listable and removable instead of occupying a name the CLI cannot see
-  - [ ] Report the recorded target as the source for a referenced marketplace in `MarketplaceManager.list` (`plugins/marketplace/manager.ts`), keeping the Git-derived source for clones and the existing unknown-source fallback for a corrupt checkout
-  - [ ] Add tests in `test/marketplaces.test.ts` covering discovery of a linked marketplace, discovery of a dangling reference, discovery of a reference whose target is now a file, listing of each, and removal of each
-  - [ ] Add a removal test asserting the referenced directory and its contents still exist after `remove` returns
-  - [ ] Add a recovery test asserting a degraded reference produces marketplace-aware recovery diagnostics naming its `marketplace remove` invocation, while a healthy marketplace installed alongside it still dispatches its commands
-  - [ ] Confirm `test/plugin-boundary.test.ts` still passes unmodified
+- [x] Make marketplace discovery, listing, and removal reference-aware (PR #25)
+  - [x] Replace the `Dirent`-type filter in `discoverInstalledMarketplaces` (`plugins/marketplace/storage.ts`) with classification that accepts a real directory or any symbolic link, preserving the existing safe-name filter and sorted order (PR #25)
+  - [x] Retain every degraded reference as a discovered marketplace — dangling, and resolving to a non-directory — so a stale reference stays listable and removable instead of occupying a name the CLI cannot see (PR #25)
+  - [x] Report the recorded target as the source for a referenced marketplace in `MarketplaceManager.list` (`plugins/marketplace/manager.ts`), keeping the Git-derived source for clones and the existing unknown-source fallback for a corrupt checkout (PR #25)
+  - [x] Add tests in `test/marketplaces.test.ts` covering discovery of a linked marketplace, discovery of a dangling reference, discovery of a reference whose target is now a file, listing of each, and removal of each (PR #25)
+  - [x] Add a removal test asserting the referenced directory and its contents still exist after `remove` returns (PR #25)
+  - [x] Add a recovery test asserting a degraded reference produces marketplace-aware recovery diagnostics naming its `marketplace remove` invocation, while a healthy marketplace installed alongside it still dispatches its commands (PR #25)
+  - [x] Confirm `test/plugin-boundary.test.ts` still passes unmodified (PR #25)
 
 - [ ] Add local sources to `marketplace add`
   - [ ] Add source classification to `MarketplaceManager.add`: an empty source rejected before anything is resolved, URL-scheme and SCP-style sources to Git, an existing directory to the local path, an existing non-directory rejected with a clear message, anything absent to Git
