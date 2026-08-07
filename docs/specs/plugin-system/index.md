@@ -250,8 +250,6 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 
 ### Local Marketplace Sources
 
-The local-source model below is specified but **not yet implemented**. It is planned in [Change 0008](../../changes/0008-link-local-marketplace-sources.md). Until that change lands, `marketplace add` sends every source to `git clone`: a local path that is itself a Git repository is installed as a snapshot of its checked-out commit, and a local directory that is not a repository fails, because cloning is the only thing `add` knows how to do with it.
-
 A plugin author needs to run their uncommitted work through the real `tx` executable. Cloning cannot serve that: a clone captures a commit, so every edit would have to be committed and reinstalled before it could be run. A local source is therefore a live reference to a directory the author owns, not a copy of it.
 
 - `marketplace add` MUST accept a local directory as a source.

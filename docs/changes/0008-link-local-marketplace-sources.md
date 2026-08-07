@@ -5,7 +5,7 @@
 Let `tx marketplace add` take a local directory and record it as a live reference to the author's working tree instead of cloning it. A plugin author can then run their uncommitted work against the real `tx` executable: edit, rerun, repeat — with no commit, no push, no merge to a repository's default branch, and no reinstall.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0007
 
 ## Motivation

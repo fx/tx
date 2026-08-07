@@ -6,16 +6,38 @@ Install the Linux x64 standalone release with `mise use -g github:fx/tx`. Plugin
 
 ## Install and manage marketplaces
 
-A marketplace is a Git repository containing one or more plugins.
+A marketplace is a Git repository containing one or more plugins, or a local directory referenced live.
 
 ```sh
 tx marketplace add owner/repository
 tx marketplace add https://example.com/tools.git --name tools
+tx marketplace add ./my-plugins
 tx marketplace list
 tx marketplace remove tools
 ```
 
-`add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL. The installed name is derived from the repository unless `--name` supplies one. The current repository is not auto-loaded; install it as a marketplace if you want `tx` to load its configuration.
+`add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+
+## Local sources
+
+`add` classifies its argument before doing anything else, without touching the network:
+
+- An empty source is rejected, because resolving it would name whatever directory you are standing in.
+- A source carrying a URL scheme or SCP-style `host:path` syntax — a colon ahead of the first slash, as Git itself reads one — goes to Git. A directory whose own name contains such a colon stays reachable as a local source through a path, such as `./host:path`.
+- Otherwise the source is resolved against the working directory: an existing directory is a local source, an existing non-directory is an error, and a path that is genuinely absent goes to Git — which is what keeps `owner/repository` shorthand working. Only a missing path counts as absent; an unreadable ancestor or a link cycle is reported as itself rather than handed to `git clone`.
+- Where a bare `owner/repository` argument also names an existing directory, the directory wins. The remote stays reachable by its full URL.
+
+A local source is recorded as a live reference to the directory, never as a copy, so every later `tx` invocation reads whatever is on disk right now — edit a plugin and rerun it, with no commit, push, or reinstall. The reference is recorded against the source's fully resolved real path, so moving to another directory or repointing an intermediate symbolic link afterwards cannot redirect it. Without `--name`, the name comes from the final component of that real path exactly as it is on disk, so a directory called `tools.git` installs as `tools.git`.
+
+`tx marketplace add ./repo` used to hand the path to `git clone`, installing a snapshot of the repository's checked-out commit. It now records a reference instead. To keep the old behavior, add the same path as a `file://` URL — classification leaves it with Git:
+
+```sh
+tx marketplace add "file://$PWD/repo"
+```
+
+A local source is validated and has its selected dependency manifests installed exactly as a clone does, except that `bun install` runs in your own directory rather than in a copy — that is the point of a live reference. It runs only when the marketplace is added; dependencies you add to the source afterwards are yours to install. If validation or installation fails, no reference is published and `tx` neither deletes nor rolls back your directory. That guarantee covers `tx`'s own cleanup only: install lifecycle scripts are trusted code running with `tx`'s permissions, so what they do to the tree they run in is outside it.
+
+`marketplace list` reports a reference's recorded target path as its source, and `marketplace remove` removes only the reference, leaving the directory and its contents untouched. A reference whose target has been moved, deleted, or replaced stays listed and removable, and is reported through the recovery diagnostics that name its `marketplace remove` invocation.
 
 Marketplaces and their plugins execute in deterministic order: installed marketplace names are sorted, entries retain their manifest order, and the host initializes roots followed by contributed children in FIFO order.
 

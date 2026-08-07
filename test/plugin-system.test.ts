@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { lstat, readdir, rm } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { createGitRepository, temporaryDirectory } from "./helpers.ts";
 
@@ -105,7 +112,7 @@ describe("source CLI marketplace installation failures", () => {
       error: "Bun dependency installation failed",
     },
   ])(
-    "cleans staging and final paths after $label",
+    "publishes nothing and leaves no staging after $label",
     async ({ name, files, error }) => {
       const root = await temporaryDirectory(`tx-plugin-system-${name}-`);
       try {
@@ -148,6 +155,72 @@ describe("source CLI marketplace installation failures", () => {
       expect(result.stdout).toBe("");
       expect(result.stderr).toContain("Git command failed");
       await expectNoMarketplaceArtifacts(dataHome, "clone-failure");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("source CLI local marketplace sources", () => {
+  test("dispatches an uncommitted edit on the next invocation", async () => {
+    const root = await temporaryDirectory("tx-plugin-system-live-");
+    try {
+      const dataHome = join(root, "data");
+      // A plain directory, never a Git repository and never committed: the
+      // author's working tree is the marketplace.
+      const source = join(root, "workspace");
+      const writePlugin = (output: string) =>
+        writeFile(
+          join(source, "plugin.ts"),
+          `export default ({ command, context }) => {
+            command((namespace) => namespace
+              .command("run")
+              .action(() => context.stdout.write("${output}\\n")));
+          };\n`,
+        );
+      await mkdir(join(source, ".tx"), { recursive: true });
+      await Promise.all([
+        writePlugin("original"),
+        writeFile(join(source, ".tx/config.json"), manifest("live")),
+      ]);
+
+      expect(runCli(dataHome, "marketplace", "add", source)).toEqual({
+        exitCode: 0,
+        stdout: 'Added marketplace "workspace".\n',
+        stderr: "",
+      });
+      expect(
+        (
+          await lstat(join(dataHome, "tx", "marketplaces", "workspace"))
+        ).isSymbolicLink(),
+      ).toBe(true);
+      expect(runCli(dataHome, "marketplace", "list").stdout).toBe(
+        `workspace\t${source}\n`,
+      );
+      expect(runCli(dataHome, "live", "run")).toEqual({
+        exitCode: 0,
+        stdout: "original\n",
+        stderr: "",
+      });
+
+      await writePlugin("edited");
+
+      expect(runCli(dataHome, "live", "run")).toEqual({
+        exitCode: 0,
+        stdout: "edited\n",
+        stderr: "",
+      });
+
+      expect(runCli(dataHome, "marketplace", "remove", "workspace")).toEqual({
+        exitCode: 0,
+        stdout: 'Removed marketplace "workspace".\n',
+        stderr: "",
+      });
+      await expectNoMarketplaceArtifacts(dataHome, "workspace");
+      expect((await readdir(source)).toSorted()).toEqual([".tx", "plugin.ts"]);
+      expect(await readFile(join(source, "plugin.ts"), "utf8")).toContain(
+        'context.stdout.write("edited\\n")',
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
