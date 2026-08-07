@@ -144,7 +144,7 @@ The marketplace plugin contributes one participant covering every installed mark
 - "Higher" MUST mean higher as a semantic version. Only a tag that parses as one may be reported as higher, and only a pin that parses as one may be compared against; a pin to a tag that is not a semantic version reports no comparison at all. Creation time, lexical order, and reachability each order tags differently, and only one of the four answers the question a user asks about a release.
 - A tag carrying a pre-release component MUST NOT be reported as higher, whatever the pin is. A user pinned to a release is not asking to hear about `1.5.0-beta.1`, and a pre-release is precisely the version its publisher has not offered yet. A pin MAY itself name a pre-release, and the first ordinary release above it is then reported normally.
 - `marketplace pin` MUST set an installed marketplace's pin to a given ref, and MUST take effect on the next update rather than moving the checkout itself. `marketplace unpin` MUST clear it, returning the marketplace to tracking its remote's default branch.
-- Pinning MUST reject a ref the remote does not publish, and MUST leave the previous pin in place when it does.
+- Pinning MUST reject a ref the remote does not publish. A rejected pin MUST leave the previous pin exactly as it was, so a mistyped ref never silently unpins a marketplace.
 - Pinning a referenced local marketplace MUST be rejected for the same reason a local source cannot carry a version suffix.
 - `marketplace list` MUST report each marketplace's version label alongside its name and source, and MUST report a referenced local marketplace as live. Listing MUST NOT contact any remote.
 
@@ -246,7 +246,7 @@ That is a statement about root definitions only. The host queues a plugin's chil
 
 ## Constraints
 
-- Automatic checking is not merely disabled; it is not implemented. See [Never Automatic](#never-automatic).
+- Automatic checking is prohibited by [Never Automatic](#never-automatic), which owns the rule. It is not a feature left out, and adding one would require changing that requirement rather than writing code against it.
 - Rollback of a marketplace update, beyond restoring the previous commit when preparation fails, is out of scope. A user reaches an older version by pinning to it.
 - Signing and provenance verification remain out of scope for marketplaces, unchanged by this spec. The executable's published checksum is an integrity check on a download, not a signature.
 - Updating one plugin inside a marketplace independently of the rest is out of scope. A marketplace is one Git checkout and moves as one.
