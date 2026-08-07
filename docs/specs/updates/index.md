@@ -41,7 +41,7 @@ This spec describes the desired state. None of it is implemented yet; [Change 00
 - An item that reports its own failure MUST be reported as failed, MUST make the command exit non-zero, and MUST NOT be applied. Its siblings MUST be reported and applied normally: one unusable installation among several is not a reason to withhold the others, and it is exactly what a user runs an update to find out about.
 - A participant that fails while applying one item MUST NOT prevent the remaining items, of its own or of any other participant, from being applied. Each failure MUST be reported against the item it belongs to and MUST make the command exit non-zero.
 - `tx update` MUST exit zero when every in-scope item either applied successfully or had nothing to apply, and non-zero when any gather or apply failed.
-- `tx update --dry-run` MUST exit zero when gathering succeeded, whether or not updates are available. An available update is not a failure, and a dry run that exits non-zero for one cannot be used to check anything.
+- `tx update --dry-run` MUST exit zero when gathering succeeded, whether or not updates are available. An available update is not a failure, and a dry run that exits non-zero for one cannot be used to check anything. Gathering succeeded only when no participant failed and no item came back carrying a failure; either one exits non-zero in a dry run exactly as it does in a real one.
 - Progress and results MUST be written through the injected context streams. Results MUST go to standard output and failures to standard error, so a user can pipe one without losing the other.
 - A committed participant MUST be able to gather and apply while the things it manages are broken. What it reports MUST come from what it reads out of storage, never from a plugin having loaded successfully, because updating is how a user fixes a marketplace whose current commit does not load. A plugin that fails its own initialization contributes no participant at all, per [Plugin System: Update Participation](../plugin-system/index.md#update-participation) — which is why a participant covering installed things is contributed by the plugin that owns their storage rather than by the plugins loaded out of them.
 
@@ -236,7 +236,7 @@ It also decides where version comparison lives. The driver treats a version as a
 
 ### Why the Executable Is a Plugin
 
-The executable updater could have been part of the update plugin, and is not. Keeping it separate means the update plugin has exactly one job and no privileged participant, and it makes the composition root — not the driver — decide that the executable is applied last. It also demonstrates the contract the spec claims: a plugin that contributes a participant and no commands.
+The executable updater could have been part of the update plugin, and is not. Keeping it separate means the update plugin has exactly one job and no privileged participant, and it leaves the composition root — not the driver — deciding where the executable falls among the default plugins' own participants. It also demonstrates the contract the spec claims: a plugin that contributes a participant and no commands.
 
 ### Ordering
 
