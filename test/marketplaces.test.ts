@@ -1416,6 +1416,90 @@ describe("marketplace clone transports", () => {
     }
   });
 
+  test("omits a token in the username position from a host-only Git failure", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-token-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          if (!(args[2] as string).startsWith("https://")) {
+            throw new Error(
+              "Git command failed: Permission denied (publickey)",
+            );
+          }
+          // A source with a username and no password leaves Git asking for
+          // the password, and with prompts disabled it names the credential
+          // through `credential_describe`, which omits the path unless
+          // `credential.useHttpPath` is set. The URL it quotes is therefore
+          // host-only, and matches no whole-URL spelling of the source.
+          throw new Error(
+            "Git command failed: fatal: could not read Password for 'https://ghp_REALTOKEN@github.com': terminal prompts disabled",
+          );
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("https://ghp_REALTOKEN@github.com/acme/private.git", "private")
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const { message, cause } = failure as Error;
+      expect(message).not.toContain("ghp_REALTOKEN");
+      expect(message).toContain(
+        "could not read Password for 'https://github.com'",
+      );
+      expect(message).toContain('"https://github.com/acme/private.git"');
+      expect(message).toContain('"git@github.com:acme/private.git"');
+      expect(cause).toBeInstanceOf(AggregateError);
+      for (const preserved of (cause as AggregateError).errors as Error[]) {
+        expect(preserved.message).not.toContain("ghp_REALTOKEN");
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps a repository name its password also spells intact", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-password-path-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        // Git strips the password component before it quotes the URL back.
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          throw new Error(
+            `Git command failed: fatal: unable to access '${(args[2] as string).replace(":tools@", "@")}/': 403`,
+          );
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("https://user:tools@github.com/acme/tools.git", "collide")
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const { message } = failure as Error;
+      expect(message).not.toContain("user@");
+      expect(message).not.toContain("user:tools@");
+      // A password that is also an ordinary word — a repository name, an org,
+      // a deploy password reusing either — must not be taken out of the text
+      // around it, or the failure names repositories that do not exist.
+      expect(message).toContain(
+        "unable to access 'https://github.com/acme/tools.git/'",
+      );
+      expect(message).toContain(
+        "unable to access 'git@github.com:acme/tools.git/'",
+      );
+      expect(message).toContain('"https://github.com/acme/tools.git"');
+      expect(message).toContain('"git@github.com:acme/tools.git"');
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test.each([
     ["pa@ss", "ss@example"],
     ["s p", "s p@example"],
@@ -1497,7 +1581,7 @@ describe("marketplace clone transports", () => {
     },
   );
 
-  test("omits a password Git quotes outside a URL", async () => {
+  test("leaves an account name spelled without its userinfo run", async () => {
     const temporaryRoot = await temporaryDirectory("tx-clone-bare-");
     try {
       const root = join(temporaryRoot, "marketplaces");
@@ -1505,8 +1589,13 @@ describe("marketplace clone transports", () => {
         prepare: async () => {},
         runGit: async (args) => {
           if (readsSshCommand(args)) unsetSshCommand();
+          if (!(args[2] as string).startsWith("https://")) {
+            throw new Error(
+              "Git command failed: Permission denied (publickey)",
+            );
+          }
           throw new Error(
-            "Git command failed: fatal: Authentication failed for user 'alice' with password 'ghp_LOOSE'",
+            "Git command failed: remote: HTTP Basic: Access denied for user alice\nfatal: Authentication failed for 'https://alice@example.com/me/r.git/'",
           );
         },
       });
@@ -1518,11 +1607,58 @@ describe("marketplace clone transports", () => {
       expect(failure).toBeInstanceOf(Error);
       const { message, cause } = failure as Error;
       expect(message).not.toContain("ghp_LOOSE");
-      expect(message).toContain("Authentication failed for user 'alice'");
+      expect(message).not.toContain("alice@");
+      expect(message).toContain(
+        "Authentication failed for 'https://example.com/me/r.git/'",
+      );
+      // Accepted and documented: a userinfo user a server message spells
+      // without its `@` stays. Deleting a bare identifier is what rewrites the
+      // text around it and fabricates sources the user never typed, and the
+      // password is covered regardless, because Git never spells one outside
+      // a userinfo run.
+      expect(message).toContain("Access denied for user alice");
       expect(cause).toBeInstanceOf(AggregateError);
       for (const preserved of (cause as AggregateError).errors as Error[]) {
-        expect(preserved.message).not.toContain("ghp_LOOSE");
+        expect(preserved.message).not.toContain("alice@");
       }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps the derived SSH name intact when the source's user is git", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-clone-git-user-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          throw new Error(
+            `Git command failed: fatal: unable to access '${args[2] as string}/': 403`,
+          );
+        },
+      });
+
+      const failure: unknown = await manager
+        .add("https://git:tok@github.com/acme/tools.git", "gituser")
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      const { message } = failure as Error;
+      expect(message).not.toContain("tok");
+      // The names the failure reports are composed from the source rather
+      // than scrubbed, so no removal can reach them.
+      expect(message).toContain(
+        'Cloning "https://github.com/acme/tools.git" failed and the SSH retry "git@github.com:acme/tools.git" failed too',
+      );
+      // `git` is a real HTTPS username (Gitea, GitLab deploy tokens), so
+      // `git@` is a userinfo run to remove — and it is also how Git spells the
+      // derived candidate in its own quoted output. Losing it there is
+      // cosmetic and confined to text Git quoted.
+      expect(message).toContain(
+        "unable to access 'github.com:acme/tools.git/'",
+      );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -1706,6 +1842,7 @@ describe("marketplace clone transports", () => {
       }
     },
   );
+
 });
 
 /**

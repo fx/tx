@@ -178,12 +178,6 @@ function credentialFreeSource(repository: string): string {
   return url.href;
 }
 
-interface RawUserinfo {
-  readonly prefix: string;
-  readonly userinfo: string;
-  readonly suffix: string;
-}
-
 /**
  * A source's userinfo exactly as the source spells it, read from the string
  * rather than from a parsed `URL`: `URL` percent-encodes what it parses, while
@@ -195,7 +189,7 @@ interface RawUserinfo {
  * userinfo is everything before its last `@`, since an unescaped `@` inside a
  * password is precisely the case the parse cannot describe.
  */
-function rawUserinfo(repository: string): RawUserinfo | undefined {
+function rawUserinfo(repository: string): string | undefined {
   const scheme = repository.indexOf("://");
   if (scheme < 0) return undefined;
   const start = scheme + 3;
@@ -203,57 +197,52 @@ function rawUserinfo(repository: string): RawUserinfo | undefined {
   const end = delimiter < 0 ? repository.length : start + delimiter;
   const separator = repository.slice(start, end).lastIndexOf("@");
   if (separator < 0) return undefined;
-  return {
-    prefix: repository.slice(0, start),
-    userinfo: repository.slice(start, start + separator),
-    suffix: repository.slice(start + separator + 1),
-  };
+  return repository.slice(start, start + separator);
 }
 
 /**
- * What to take out of Git's own output for a source that carries a credential,
- * as `[literal, replacement]` pairs applied longest first.
+ * The literals to delete from Git's own output for a source that carries a
+ * credential, longest first: the userinfo run including its trailing `@`, and
+ * the same run with the password component dropped.
  *
- * Git repeats the clone URL it was given, so the thing to remove is that whole
- * URL rather than a fragment of it: the source as it was handed over, and the
- * same source with its password component dropped, which is the form Git
- * echoes. Both are replaced by the credential-free label, so the message still
- * names the repository. The password alone follows as a safety net for output
- * that quotes it outside a URL.
+ * Git only ever spells a credential as a `userinfo@host` run, and it spells it
+ * that way in every shape it prints — the URL it was handed, the URL it echoes
+ * with the password stripped, and the host-only form `credential_describe`
+ * produces when it has a username but no password ("could not read Password
+ * for 'https://<token>@host'", which omits the path unless
+ * `credential.useHttpPath` is set). Anchoring on the run rather than
+ * enumerating whole URL shapes therefore covers all of them, the host-only one
+ * included, and the trailing `@` keeps a literal from colliding with host or
+ * path text, which carries none.
  *
- * The bare username is deliberately never removed. It is an identifier rather
- * than the secret, and removing it is what corrupts the surrounding text. The
- * accepted cost is cosmetic: if Git quotes a password-stripped URL in some
- * third form, the username may survive in it.
+ * Two losses are accepted, both better than the alternative:
+ *
+ * - A userinfo *user* quoted without its `@` — a server message naming the
+ *   account — survives. Deleting a bare identifier is exactly what rewrites the
+ *   text around it and reports repositories nobody typed. The password is
+ *   covered regardless, because Git never spells one outside a userinfo run.
+ * - When the source's user is literally `git`, deleting `git@` also takes it
+ *   out of Git's own quoted SSH output (`git@host:path` becomes `host:path`).
+ *   Cosmetic, confined to text Git quoted, and the reported SSH name is
+ *   composed separately and stays exact.
  */
-function credentialRedactions(
-  repository: string,
-): readonly (readonly [string, string])[] {
-  const raw = rawUserinfo(repository);
-  if (raw === undefined) return [];
+function credentialRedactions(repository: string): readonly string[] {
+  const userinfo = rawUserinfo(repository);
+  if (userinfo === undefined) return [];
 
-  const label = credentialFreeSource(repository);
-  const separator = raw.userinfo.indexOf(":");
-  const password = separator < 0 ? "" : raw.userinfo.slice(separator + 1);
-  const redactions: (readonly [string, string])[] = [[repository, label]];
-  if (password) {
-    const user = raw.userinfo.slice(0, separator);
-    redactions.push(
-      [`${raw.prefix}${user}@${raw.suffix}`, label],
-      [password, ""],
-    );
-  }
-  return redactions.sort(([left], [right]) => right.length - left.length);
+  const separator = userinfo.indexOf(":");
+  const user = separator < 0 ? userinfo : userinfo.slice(0, separator);
+  const runs = new Set([`${userinfo}@`, `${user}@`]);
+  return [...runs].sort((left, right) => right.length - left.length);
 }
 
 /** Text with every one of a source's credential literals taken out of it. */
 function withoutCredentials(
   text: string,
-  redactions: readonly (readonly [string, string])[],
+  redactions: readonly string[],
 ): string {
   return redactions.reduce(
-    (redacted, [literal, replacement]) =>
-      redacted.split(literal).join(replacement),
+    (redacted, literal) => redacted.split(literal).join(""),
     text,
   );
 }
@@ -266,7 +255,7 @@ function withoutCredentials(
  */
 function withoutCredentialsInFailure(
   failure: Error,
-  redactions: readonly (readonly [string, string])[],
+  redactions: readonly string[],
 ): Error {
   const message = withoutCredentials(failure.message, redactions);
   return message === failure.message ? failure : new Error(message);
@@ -286,7 +275,7 @@ function withoutCredentialsInFailure(
 function cloneFailure(
   labels: readonly string[],
   failures: readonly Error[],
-  redactions: readonly (readonly [string, string])[],
+  redactions: readonly string[],
 ): unknown {
   if (failures.length < 2) return failures.at(0);
 
