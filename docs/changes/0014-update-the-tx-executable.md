@@ -54,6 +54,8 @@ What implementing them requires of this change:
 
 The participant answers three questions before it will do anything: is this a compiled `tx`, is there a published executable for this platform, and is the latest release newer than what is running. Any "no" reports an item with nothing to apply, which is a report rather than a failure — a user on an unsupported platform or a source checkout does not need `tx update` to exit non-zero over it. The first two are also why an available version is withheld rather than reported in those cases: the driver applies whatever is available, so offering a version this participant would only refuse would manufacture a failure. The newer release is still named, as detail.
 
+Those two are the *only* gates on availability, and both are facts about the running program that cannot change while the command runs. Everything else that can stop an update — an unwritable target, a manager that will not answer, a checksum that does not match — is checked when applying and reported as a failure, because each can change between gathering and applying and each is something the user can act on. Probing writability during gathering would also mean answering a question whose answer is stale by the time it matters.
+
 Gathering fetches the project's latest release, reads its tag, and compares it to the running version as a semantic version. Only a strictly greater published version, on an executable that could actually be replaced, produces an available version — so a locally built executable ahead of the last release is never dragged backwards.
 
 Applying resolves the real path of the running executable and asks whether one of the two managers the project documents — mise and npm — owns it. A path neither owns is unmanaged, including one owned by some manager the participant cannot name: there is nothing to delegate to, and the replacement path below already reports an unwritable location rather than forcing past it.
@@ -93,9 +95,9 @@ Every failure path removes the staged file, through a helper that swallows a ref
   - **Why:** The project's versions are semantic and released by Release Please, so ordering them is well defined. Comparing as strings would misorder `1.10.0` against `1.9.0`; comparing only for inequality would offer a "update" that downgrades a locally built executable, which contributors run constantly.
   - **Alternatives considered:** String equality was rejected for the downgrade. Trusting the release marked latest to always be newer was rejected because it says nothing about what is running.
 
-- **Decision:** Send an authentication token when the environment supplies one, and work without one.
-  - **Why:** The release assets are public, so no token is required; unauthenticated API access is rate limited per address, which a shared network can exhaust. Using a token that is already in the environment removes that failure for nothing, and the request goes to the same host the token belongs to.
-  - **Alternatives considered:** Always requiring a token was rejected as making a public download need credentials. Never sending one was rejected as leaving a rate-limit failure with no remedy.
+- **Decision:** Send a token from `GH_TOKEN` or `GITHUB_TOKEN`, in that order, and from nothing else.
+  - **Why:** The release assets are public, so no token is required; unauthenticated API access is rate limited per address, which a shared network can exhaust. Those two variables are what the GitHub CLI reads and what CI sets, so using them removes that failure for free. Naming them exactly is the point — "a token when the environment supplies one" would leave an implementation free to pick up something like the `read:packages` credential the installation guide has users configure for the npm registry, and send it to a host and endpoint it was never issued for. The precedence follows `gh`'s so that a user who overrode one deliberately gets the same result they get everywhere else.
+  - **Alternatives considered:** Always requiring a token was rejected as making a public download need credentials. Never sending one was rejected as leaving a rate-limit failure with no remedy. Scanning the environment for anything token-shaped was rejected as exfiltration by accident.
 
 - **Decision:** A separate bundled plugin rather than a participant inside the update plugin.
   - **Why:** The update plugin must have no privileged participant, or the extensibility [0011](./0011-add-generic-update-lifecycle.md) exists for is a claim rather than a demonstration. Separating them also puts "the executable is applied last" in the composition root, where ordering is already explicit, instead of inside the driver's logic.
@@ -127,7 +129,7 @@ Every failure path removes the staged file, through a helper that swallows a ref
 
 - [ ] Gather the executable item
   - [ ] Read the running version from injected dependencies and the latest published release from the project's releases
-  - [ ] Send an authentication token when the environment supplies one
+  - [ ] Send a token from `GH_TOKEN`, then `GITHUB_TOKEN`, and from no other variable
   - [ ] Compare semantically and report an available version only when the release is strictly greater and this executable could be replaced
   - [ ] Report nothing to apply for a source checkout and for a platform with no published executable, naming the reason and still naming the newer release as detail
 
@@ -145,7 +147,7 @@ Every failure path removes the staged file, through a helper that swallows a ref
   - [ ] Remove every staged file on every exit path through a helper whose refused removal does not replace the failure that preceded it
 
 - [ ] Cover the new behavior in a new test module
-  - [ ] Gathering: newer, equal, older, and unparseable published versions; a token present and absent; a lookup failure
+  - [ ] Gathering: newer, equal, older, and unparseable published versions; each recognized token variable present, both present, neither present, and an unrelated token-shaped variable that MUST NOT be sent; a lookup failure
   - [ ] Guards: a source checkout and an unsupported platform, asserting nothing is downloaded, executed, or replaced
   - [ ] Delegation: a manager-owned path, a manager that answers nothing usable, and an unowned path
   - [ ] Replacement against real files in a temporary directory: a successful swap, a checksum mismatch, a staged file whose version does not match, an unwritable target, and a refused cleanup that does not mask its failure

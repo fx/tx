@@ -187,7 +187,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 Generic core implementation in `src/` has four responsibilities:
 
 1. Initialize generic plugin definitions and isolate failures.
-2. Atomically commit commands and lazy child definitions contributed by each successful plugin.
+2. Atomically commit every contribution a successful plugin staged — commands, lazy child definitions, and the update participants specified by [Plugin System: Update Participation](../plugin-system/index.md#update-participation).
 3. Build one root program in which each plugin owns a namespace named after its identity.
 4. Resolve the first argument to a namespace, delegate the rest to its owner, and map the outcome to an exit code.
 
