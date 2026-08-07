@@ -134,12 +134,12 @@ An item is in scope when no names were given, or when its name is one of them. A
   - [ ] Reject item names that match nothing before applying anything
   - [ ] Apply in-scope items sequentially, skipping every apply on a dry run
   - [ ] Report results on standard output and failures on standard error through the injected context streams
-  - [ ] Isolate each participant call so one failure neither aborts the run nor hides the remaining items, and exit non-zero when anything failed
+  - [ ] Isolate each participant call so one failure neither aborts the run nor hides the remaining items, report an item that carries its own failure as failed without applying it, and exit non-zero when anything failed
   - [ ] Compose the plugin in `cli.ts` after the marketplace plugin, with the ordering stated
 
 - [ ] Cover the new behavior in tests
   - [ ] Extend `test/plugins.test.ts` with staging, commit-order, late-contribution, and failure-drop cases for participants
-  - [ ] Add `test/update-plugin.test.ts` driving stub participants: gather-only dry runs, applied runs, selection by name, an unmatched name, gather failures, apply failures, mixed outcomes, and exit codes
+  - [ ] Add `test/update-plugin.test.ts` driving stub participants: gather-only dry runs, applied runs, selection by name, an unmatched name, gather failures, apply failures, an item carrying its own failure alongside healthy siblings that still apply, an applied-nothing result that does not fail the run, mixed outcomes, and exit codes
   - [ ] Assert a dry run calls no participant's apply
   - [ ] Assert the driver never imports marketplace or executable modules, through `test/plugin-boundary.test.ts`
   - [ ] Assert `tx update` with no participants reports nothing to update and exits zero

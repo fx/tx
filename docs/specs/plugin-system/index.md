@@ -130,7 +130,8 @@ A plugin that installs something on the user's behalf can be asked what it would
 - The host MUST make committed participants readable through the initialization API, in the deterministic FIFO order in which they were committed.
 - Reading participants MUST reflect what is committed at the moment of the call. A plugin that reads them during its own initialization sees only what was committed before it, which is why the driver reads them when its command runs rather than when it initializes.
 - The host MUST NOT call a participant. It stores and hands them over; invoking one is the driver's business, and the host has no update vocabulary beyond the contract's shape.
-- A participant reports items and applies them. The host MUST NOT interpret an item's name, version labels, or detail, and MUST NOT decide whether an item is out of date.
+- A participant reports items and applies them. The host MUST NOT interpret an item's name, version labels, detail, or failure, and MUST NOT decide whether an item is out of date.
+- An item MUST be able to carry its own failure, so a participant covering several things can report one of them as failed while still reporting the rest. Throwing is the participant's way of saying it could not report at all; a failed item is its way of saying one thing it found is unusable.
 - Contributing a participant MUST NOT claim a namespace, and MUST NOT require the contributing plugin to define any command.
 
 Conceptual public shape:
@@ -141,6 +142,7 @@ export interface UpdateItem {
   readonly current: string
   readonly available?: string
   readonly detail?: string
+  readonly failure?: string
 }
 
 export interface UpdateResult {

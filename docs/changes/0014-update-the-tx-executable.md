@@ -43,7 +43,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 What implementing them requires of this change:
 
-- **A second bundled plugin, contributing a participant and no commands.** It is composed after the marketplace plugin, which is what makes the executable the last thing applied.
+- **A second bundled plugin, contributing a participant and no commands.** It is composed after the marketplace plugin, which puts the executable after every participant the default plugins contribute themselves. It does not put it after a participant contributed by a plugin installed *through* a marketplace — the host commits those behind every root — and [Updates: The Update Command](../specs/updates/index.md#the-update-command) says so rather than promising otherwise.
 - **This plugin is deliberately not externalizable.** The marketplace plugin could be copied to another repository; this one is about *this* executable and names this project's repository and asset names. That is a property of what it owns, not a boundary violation, and the boundary rules it must still satisfy — no import from `src/` implementation, public types type-only — are unchanged.
 - **The running version comes from injected dependencies.** `CoreDependencies` already carries it, so the participant never reads a package manifest.
 - **Every effect is injected.** Network access, subprocess execution, and the resolved executable path are constructor options with real defaults, following the marketplace manager's existing shape.
@@ -100,7 +100,7 @@ Every failure path removes the staged file, through a helper that swallows a ref
   - **Alternatives considered:** Always requiring a token was rejected as making a public download need credentials. Never sending one was rejected as leaving a rate-limit failure with no remedy. Scanning the environment for anything token-shaped was rejected as exfiltration by accident.
 
 - **Decision:** A separate bundled plugin rather than a participant inside the update plugin.
-  - **Why:** The update plugin must have no privileged participant, or the extensibility [0011](./0011-add-generic-update-lifecycle.md) exists for is a claim rather than a demonstration. Separating them also puts "the executable is applied last" in the composition root, where ordering is already explicit, instead of inside the driver's logic.
+  - **Why:** The update plugin must have no privileged participant, or the extensibility [0011](./0011-add-generic-update-lifecycle.md) exists for is a claim rather than a demonstration. Separating them also puts "the executable goes after the other default plugins" in the composition root, where ordering is already explicit, instead of inside the driver's logic.
   - **Alternatives considered:** Building it into the driver was rejected for both reasons. Putting it in the marketplace plugin was rejected as unrelated ownership.
 
 ### Non-Goals

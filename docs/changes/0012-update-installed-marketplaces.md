@@ -133,13 +133,13 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
   - [ ] Re-check blocking conditions when applying, including an untracked file occupying a path the target tracks, and refuse without moving the checkout or discarding the file
   - [ ] Move the checkout, run the same preparation adding a marketplace runs, and report the new label
   - [ ] Restore the recorded commit when preparation fails, and state that installed dependencies were not restored
-  - [ ] Report a corrupt or unreadable checkout as a failed item naming its `marketplace remove` remedy
+  - [ ] Report a corrupt or unreadable checkout as a failed item naming its `marketplace remove` remedy, without failing the participant or hiding the marketplaces around it
   - [ ] Contribute the participant from `plugins/marketplace/index.ts` during initialization
 
 - [ ] Add the version column to `marketplace list` without contacting any remote
 
 - [ ] Cover the new behavior in `test/marketplaces.test.ts` and a new participant test
-  - [ ] Gathering: a clone with and without an available commit, a live reference that reaches Git not at all, a corrupt checkout, and an assertion that nothing in the checkout changed
+  - [ ] Gathering: a clone with and without an available commit, a live reference that reaches Git not at all, a corrupt checkout reported as a failed item beside healthy ones that still report and still apply, and an assertion that nothing in the checkout changed
   - [ ] Applying: a forward move with preparation, a no-op when nothing is available, a modified tracked file, an untracked file that does not block, an untracked file in the way of a tracked path that does, a non-ancestor target, and a preparation failure that restores the previous commit
   - [ ] Environment: a fetch running non-interactively, and `marketplace list` and dependency installation keeping the invoking environment
   - [ ] Ordering: marketplaces gathered and applied in sorted name order

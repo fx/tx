@@ -126,7 +126,7 @@ The update participant changes in one place: resolving the target. Unpinned, the
   - [ ] Update the spec's references and changelog, and both documentation indexes
 
 - [ ] Parse the version suffix in `plugins/marketplace/`
-  - [ ] Split a Git source on the last `@` outside its authority, reusing the authority boundary the plugin already computes, and return the source unchanged when there is none
+  - [ ] Introduce the authority boundary — first `/` after `://`, the colon in SCP syntax, absent otherwise — and split a Git source on the last `@` outside it, returning the source unchanged when there is none
   - [ ] Reject an empty ref
   - [ ] Derive the marketplace name from the source without the suffix
   - [ ] Reject a local source that carried a suffix, naming the reason
