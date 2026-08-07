@@ -275,4 +275,7 @@ That is a statement about root definitions only. The host queues a plugin's chil
 
 | Date | Change | Document |
 |------|--------|----------|
-| 2026-08-07 | Initial desired update lifecycle, marketplace updates and pins, and executable self-update | [0011-add-generic-update-lifecycle](../../changes/0011-add-generic-update-lifecycle.md) |
+| 2026-08-07 | Initial desired update lifecycle: the never-automatic prohibition, the `tx update` command surface, and the participant-facing contract | [0011-add-generic-update-lifecycle](../../changes/0011-add-generic-update-lifecycle.md) |
+| 2026-08-07 | Specified marketplace updating: version labels, live references, non-interactive fetching, forward-only movement, blocked checkouts, and restoration | [0012-update-installed-marketplaces](../../changes/0012-update-installed-marketplaces.md) |
+| 2026-08-07 | Specified marketplace version pins: the source suffix, ref resolution, pin recording, pin-aware gathering, and the pin commands | [0013-pin-marketplace-versions](../../changes/0013-pin-marketplace-versions.md) |
+| 2026-08-07 | Specified executable self-update: release lookup, availability gating, manager delegation, download verification, and atomic replacement | [0014-update-the-tx-executable](../../changes/0014-update-the-tx-executable.md) |

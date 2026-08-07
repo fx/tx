@@ -116,11 +116,11 @@ Every failure path removes the staged file, through a helper that swallows a ref
 
 ## Tasks
 
-- [ ] Specify executable updating
-  - [ ] Add [Updates: Executable Updates](../specs/updates/index.md#executable-updates) covering the item, version comparison, the compiled-program and platform guards, manager delegation, download verification, atomic replacement, cleanup, and reporting
-  - [ ] Record in [Architecture: Runtime and Distribution](../specs/architecture/index.md#runtime-and-distribution) that the published executable and checksum are the self-update source
-  - [ ] Add scenarios for direct replacement, delegation, a checksum mismatch, a source checkout, and an unwritable path
-  - [ ] Update the specs' references and changelogs, and both documentation indexes
+- [x] Specify executable updating (PR #30)
+  - [x] Add [Updates: Executable Updates](../specs/updates/index.md#executable-updates) covering the item, version comparison, the compiled-program and platform guards, manager delegation, download verification, atomic replacement, cleanup, and reporting (PR #30)
+  - [x] Record in [Architecture: Runtime and Distribution](../specs/architecture/index.md#runtime-and-distribution) that the published executable and checksum are the self-update source (PR #30)
+  - [x] Add scenarios for direct replacement, delegation, a checksum mismatch, a source checkout, and an unwritable path (PR #30)
+  - [x] Update the specs' references and changelogs, and both documentation indexes (PR #30)
 
 - [ ] Add the bundled executable plugin under `plugins/executable/`
   - [ ] Contribute an update participant and claim no namespace

@@ -118,12 +118,12 @@ The update participant changes in one place: resolving the target. Unpinned, the
 
 ## Tasks
 
-- [ ] Specify pins
-  - [ ] Add [Updates: Marketplace Versions and Pins](../specs/updates/index.md#marketplace-versions-and-pins) covering the suffix, its precedence against classification, the authority-excluding separator rule, ref resolution including the `v`-prefixed retry, name derivation, pin recording, pin-aware gathering and re-resolution, semantic-version tag comparison, the pin commands, and the version column
-  - [ ] State in [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) that a pin may move a checkout in either direction
-  - [ ] Add the pointer bullet to [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership)
-  - [ ] Add scenarios for adding a pinned version, a pin surviving an update, a directory beating a suffix, and unpinning
-  - [ ] Update the spec's references and changelog, and both documentation indexes
+- [x] Specify pins (PR #30)
+  - [x] Add [Updates: Marketplace Versions and Pins](../specs/updates/index.md#marketplace-versions-and-pins) covering the suffix, its precedence against classification, the authority-excluding separator rule, ref resolution including the `v`-prefixed retry, name derivation, pin recording, pin-aware gathering and re-resolution, semantic-version tag comparison, the pin commands, and the version column (PR #30)
+  - [x] State in [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) that a pin may move a checkout in either direction (PR #30)
+  - [x] Add the pointer bullet to [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) (PR #30)
+  - [x] Add scenarios for adding a pinned version, a pin surviving an update, a directory beating a suffix, and unpinning (PR #30)
+  - [x] Update the spec's references and changelog, and both documentation indexes (PR #30)
 
 - [ ] Parse the version suffix in `plugins/marketplace/`
   - [ ] Introduce the authority boundary — first `/` after `://`, the colon in SCP syntax, absent otherwise — and split a Git source on the last `@` outside it, returning the source unchanged when there is none

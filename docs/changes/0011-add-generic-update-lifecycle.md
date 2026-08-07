@@ -111,13 +111,13 @@ An item is in scope when no names were given, or when its name is one of them. A
 
 ## Tasks
 
-- [ ] Specify the update lifecycle
-  - [ ] Add [Updates](../specs/updates/) covering the never-automatic prohibition, the command surface, and the participant-facing contract
-  - [ ] Add [Plugin System: Update Participation](../specs/plugin-system/index.md#update-participation) with the contribution mechanics, isolation, ordering, and public type shape
-  - [ ] Extend the Plugin System's atomic-staging requirement and scenario to cover participants
-  - [ ] Record in [Architecture: Composition Root](../specs/architecture/index.md#composition-root) that composition order fixes participant order
-  - [ ] Replace the Architecture and Plugin System statements that automatic updates are out of scope with pointers to the prohibition
-  - [ ] Update the specs' references and changelogs, and both documentation indexes
+- [x] Specify the update lifecycle (PR #30)
+  - [x] Add [Updates](../specs/updates/) covering the never-automatic prohibition, the command surface, and the participant-facing contract (PR #30)
+  - [x] Add [Plugin System: Update Participation](../specs/plugin-system/index.md#update-participation) with the contribution mechanics, isolation, ordering, and public type shape (PR #30)
+  - [x] Extend the Plugin System's atomic-staging requirement and scenario to cover participants (PR #30)
+  - [x] Record in [Architecture: Composition Root](../specs/architecture/index.md#composition-root) that composition order fixes participant order (PR #30)
+  - [x] Replace the Architecture and Plugin System statements that automatic updates are out of scope with pointers to the prohibition (PR #30)
+  - [x] Update the specs' references and changelogs, and both documentation indexes (PR #30)
 
 - [ ] Add the participant contract to the public plugin module
   - [ ] Declare `UpdateItem`, `UpdateResult`, `UpdateParticipant`, and `UpdateParticipation` in `src/plugin.ts`

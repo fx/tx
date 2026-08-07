@@ -114,11 +114,11 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
 
 ## Tasks
 
-- [ ] Specify marketplace updating
-  - [ ] Add [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) covering version labels, live references, gathering without modification, non-interactive fetching, forward-only movement, blocked checkouts, preparation, and restoration
-  - [ ] Add the pointer bullets and the non-interactive network-operation requirement to [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership)
-  - [ ] Add scenarios for a forward move, an untouched live reference, both blocked cases, and a restored commit
-  - [ ] Update the specs' references and changelogs, and both documentation indexes
+- [x] Specify marketplace updating (PR #30)
+  - [x] Add [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) covering version labels, live references, gathering without modification, non-interactive fetching, forward-only movement, blocked checkouts, preparation, and restoration (PR #30)
+  - [x] Add the pointer bullets and the non-interactive network-operation requirement to [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) (PR #30)
+  - [x] Add scenarios for a forward move, an untouched live reference, both blocked cases, and a restored commit (PR #30)
+  - [x] Update the specs' references and changelogs, and both documentation indexes (PR #30)
 
 - [ ] Extend the marketplace manager's Git surface in `plugins/marketplace/manager.ts`
   - [ ] Export the non-interactive environment so cloning and fetching share one definition, without changing what cloning does with it
