@@ -87,6 +87,6 @@ changes:
     path: changes/0010-retry-marketplace-clones-over-ssh.md
     description: Retry a failed HTTP(S) marketplace clone once against the SSH source derived from it so private repositories install.
     spec: plugin-system
-    status: draft
+    status: complete
     depends_on:
       - "0008"

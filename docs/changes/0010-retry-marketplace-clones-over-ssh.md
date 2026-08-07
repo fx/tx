@@ -5,7 +5,7 @@
 Let `tx marketplace add` reach a private repository. An HTTP(S) source is still attempted over HTTP(S) first, exactly as it is today; when that clone fails, the addition derives the SSH source from it and retries the clone once. A user with an SSH key and no HTTPS credential — the ordinary case on a developer machine and in CI — installs a private marketplace without typing a different URL.
 
 **Spec:** [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0008
 
 ## Motivation
@@ -135,39 +135,39 @@ When every attempt fails and there was more than one, the reported error names b
 
 ## Tasks
 
-- [ ] Specify the SSH retry in [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership)
-  - [ ] State the transport sequence in RFC 2119 terms: an HTTP(S) source attempted over HTTP(S) first, retried exactly once against its derived SSH source on any failure, with the same requested name and target path
-  - [ ] State the derivation rules: `git@host:path` in SCP syntax always, with the source's userinfo and port carried into neither, its percent-escaped path decoded, and a path that cannot be decoded deriving nothing
-  - [ ] State that a Git source that is not HTTP(S) is attempted exactly once
-  - [ ] State that Git's terminal prompt is disabled for every clone attempt, that credential helpers and askpass stay in effect, that every attempt runs in batch mode by default because Git can rewrite an HTTP(S) source to SSH before the first one dials, and that an SSH command configured through `GIT_SSH_COMMAND`, `GIT_SSH`, or `core.sshCommand` in a scope a clone applies — command scope in the environment as well as the global and system files, its key matched case-insensitively — is used as it stands and may still prompt, a repository-local `core.sshCommand` counting for nothing
-  - [ ] State that a combined failure names both attempted sources, preserves both underlying messages, and carries neither the password nor any quoted `userinfo@` run anywhere — not in the names, not in the quoted Git output, not in the attached cause — while a bare userinfo user may remain and a lone failure is reported unredacted
-  - [ ] Extend the staging requirement to bind every staging directory the addition creates, each fresh and empty per attempt and removed on every exit path, with a refused removal masking neither the clone failure nor the remaining attempt
-  - [ ] Add scenarios for the SSH fallback, the single attempt for a non-HTTP(S) source, and the credential-free combined failure
-  - [ ] Add the change to the spec's references and changelog
+- [x] Specify the SSH retry in [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) (PR #28)
+  - [x] State the transport sequence in RFC 2119 terms: an HTTP(S) source attempted over HTTP(S) first, retried exactly once against its derived SSH source on any failure, with the same requested name and target path (PR #28)
+  - [x] State the derivation rules: `git@host:path` in SCP syntax always, with the source's userinfo and port carried into neither, its percent-escaped path decoded, and a path that cannot be decoded deriving nothing (PR #28)
+  - [x] State that a Git source that is not HTTP(S) is attempted exactly once (PR #28)
+  - [x] State that Git's terminal prompt is disabled for every clone attempt, that credential helpers and askpass stay in effect, that every attempt runs in batch mode by default because Git can rewrite an HTTP(S) source to SSH before the first one dials, and that an SSH command configured through `GIT_SSH_COMMAND`, `GIT_SSH`, or `core.sshCommand` in a scope a clone applies — command scope in the environment as well as the global and system files, its key matched case-insensitively — is used as it stands and may still prompt, a repository-local `core.sshCommand` counting for nothing (PR #28)
+  - [x] State that a combined failure names both attempted sources, preserves both underlying messages, and carries neither the password nor any quoted `userinfo@` run anywhere — not in the names, not in the quoted Git output, not in the attached cause — while a bare userinfo user may remain and a lone failure is reported unredacted (PR #28)
+  - [x] Extend the staging requirement to bind every staging directory the addition creates, each fresh and empty per attempt and removed on every exit path, with a refused removal masking neither the clone failure nor the remaining attempt (PR #28)
+  - [x] Add scenarios for the SSH fallback, the single attempt for a non-HTTP(S) source, and the credential-free combined failure (PR #28)
+  - [x] Add the change to the spec's references and changelog (PR #28)
 
-- [ ] Implement the fallback in `plugins/marketplace/manager.ts`
-  - [ ] Derive `git@host:path` from a normalized HTTP(S) repository, dropping userinfo and port, decoding the path, and returning nothing for every other source form
-  - [ ] Disable Git's terminal prompt for clone attempts only, leaving `marketplace list` and dependency installation with the manager's environment by reference
-  - [ ] Add a batch-mode SSH command to every clone attempt, settled once before the loop, and only when neither `GIT_SSH_COMMAND`, nor `GIT_SSH`, nor `core.sshCommand` in the environment's command scope or in the global or system files configures one, scanning the environment first and reading the files through the injected Git runner
-  - [ ] Clone in a bounded loop over the candidate sources, staging each attempt in its own fresh directory and removing it through one helper on every exit path, the publication `finally` included, without letting a refused removal mask the failure that preceded it or cancel the retry
-  - [ ] Keep preparation, the duplicate-name check, and publication outside the retry
-  - [ ] Report a combined failure naming both attempts with both underlying messages and an `AggregateError` cause, rethrowing a lone failure unchanged
-  - [ ] Remove the source's anchored `userinfo@` runs from the whole combined failure, quoted Git output and attached cause included, without removing any bare identifier
-  - [ ] Confirm nothing under `src/` changes and `test/plugin-boundary.test.ts` passes unmodified
+- [x] Implement the fallback in `plugins/marketplace/manager.ts` (PR #28)
+  - [x] Derive `git@host:path` from a normalized HTTP(S) repository, dropping userinfo and port, decoding the path, and returning nothing for every other source form (PR #28)
+  - [x] Disable Git's terminal prompt for clone attempts only, leaving `marketplace list` and dependency installation with the manager's environment by reference (PR #28)
+  - [x] Add a batch-mode SSH command to every clone attempt, settled once before the loop, and only when neither `GIT_SSH_COMMAND`, nor `GIT_SSH`, nor `core.sshCommand` in the environment's command scope or in the global or system files configures one, scanning the environment first and reading the files through the injected Git runner (PR #28)
+  - [x] Clone in a bounded loop over the candidate sources, staging each attempt in its own fresh directory and removing it through one helper on every exit path, the publication `finally` included, without letting a refused removal mask the failure that preceded it or cancel the retry (PR #28)
+  - [x] Keep preparation, the duplicate-name check, and publication outside the retry (PR #28)
+  - [x] Report a combined failure naming both attempts with both underlying messages and an `AggregateError` cause, rethrowing a lone failure unchanged (PR #28)
+  - [x] Remove the source's anchored `userinfo@` runs from the whole combined failure, quoted Git output and attached cause included, without removing any bare identifier (PR #28)
+  - [x] Confirm nothing under `src/` changes and `test/plugin-boundary.test.ts` passes unmodified (PR #28)
 
-- [ ] Cover the new behavior in `test/marketplaces.test.ts`
-  - [ ] Add a derivation table covering the SCP form, a dropped userinfo, a dropped port, a decoded path, a malformed escape, a dropped query, and every source form that derives nothing
-  - [ ] Add tests for the retry after a failed HTTPS clone including the listed SSH remote, no retry after a successful clone, and exactly one attempt for each non-HTTP(S) source form with its message unwrapped
-  - [ ] Add a test that both failures are reported together with an `AggregateError` cause and no staging left behind
-  - [ ] Add tests whose injected Git failure quotes the source URL in each form Git prints it, the host-only form for a source with no password included, asserting the token appears in neither the message nor the attached cause while the derived attempt carries no credential and a password that also spells a repository name leaves that name intact
-  - [ ] Add a test that the second attempt stages into a different, empty directory after the first attempt left a partial checkout behind
-  - [ ] Add a test that a removal the filesystem refuses is swallowed, forced by a path whose parent is a regular file so the refusal holds for root as well, and a test that a publication failure survives such a refusal rather than being replaced by it
-  - [ ] Add tests that a configured `GIT_SSH_COMMAND`, `GIT_SSH`, `core.sshCommand` in command scope, or `core.sshCommand` in a file suppresses the batch-mode default, that nothing configured produces it on every attempt, that the probe reads `--global` and `--system` and no other scope, and that no probe runs at all when the environment already answers
-  - [ ] Give every stub that reaches a clone its own answer to the `core.sshCommand` probe, so no test reports a configured command by accident and lands on the wrong branch
-  - [ ] Relax the environment test so a clone call is asserted by content and the `config --get` call keeps its reference-identity assertion
+- [x] Cover the new behavior in `test/marketplaces.test.ts` (PR #28)
+  - [x] Add a derivation table covering the SCP form, a dropped userinfo, a dropped port, a decoded path, a malformed escape, a dropped query, and every source form that derives nothing (PR #28)
+  - [x] Add tests for the retry after a failed HTTPS clone including the listed SSH remote, no retry after a successful clone, and exactly one attempt for each non-HTTP(S) source form with its message unwrapped (PR #28)
+  - [x] Add a test that both failures are reported together with an `AggregateError` cause and no staging left behind (PR #28)
+  - [x] Add tests whose injected Git failure quotes the source URL in each form Git prints it, the host-only form for a source with no password included, asserting the token appears in neither the message nor the attached cause while the derived attempt carries no credential and a password that also spells a repository name leaves that name intact (PR #28)
+  - [x] Add a test that the second attempt stages into a different, empty directory after the first attempt left a partial checkout behind (PR #28)
+  - [x] Add a test that a removal the filesystem refuses is swallowed, forced by a path whose parent is a regular file so the refusal holds for root as well, and a test that a publication failure survives such a refusal rather than being replaced by it (PR #28)
+  - [x] Add tests that a configured `GIT_SSH_COMMAND`, `GIT_SSH`, `core.sshCommand` in command scope, or `core.sshCommand` in a file suppresses the batch-mode default, that nothing configured produces it on every attempt, that the probe reads `--global` and `--system` and no other scope, and that no probe runs at all when the environment already answers (PR #28)
+  - [x] Give every stub that reaches a clone its own answer to the `core.sshCommand` probe, so no test reports a configured command by accident and lands on the wrong branch (PR #28)
+  - [x] Relax the environment test so a clone call is asserted by content and the `config --get` call keeps its reference-identity assertion (PR #28)
 
-- [ ] Document the fallback in `docs/manual/plugins.md`, in the pull request that implements it
-- [ ] Verify 100% coverage and `bun run check`
+- [x] Document the fallback in `docs/manual/plugins.md`, in the pull request that implements it (PR #28)
+- [x] Verify 100% coverage and `bun run check` (PR #28)
 
 ## Open Questions
 
