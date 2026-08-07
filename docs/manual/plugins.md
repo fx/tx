@@ -78,6 +78,8 @@ A plugin needs no build step or package manifest. Without `package`, `tx` looks 
 
 Before installing anything, `tx` validates all entries and selected package candidates. Existing manifests are resolved to regular contained files, deduplicated by real path, and installed sequentially in first plugin occurrence order with `bun install` running from each manifest's directory. Dependencies and install lifecycle scripts execute unsandboxed with `tx`'s permissions.
 
+Imports in your plugin resolve exactly as they do in any other Bun or Node program: `exports` maps with their subpaths and conditions, `imports` maps, `main`, directory indexes, and the `node_modules` walk, with each dependency resolving its own dependencies the same way. Import a package by the name its `exports` map publishes rather than by a file path inside it — reaching past the map into a file the package does not publish fails, as it does everywhere else. Only literal specifiers resolve; one assembled at runtime has nothing to resolve against. Nothing is written to your marketplace directory to make this work, `import.meta` still names your own file, and resolution is the same whether `tx` is the released executable or a source checkout.
+
 ## Write a plugin
 
 A plugin entry is a TypeScript module with a default export. Import the public contract as types only; `@fx/tx/plugin` does not provide a runtime API.
