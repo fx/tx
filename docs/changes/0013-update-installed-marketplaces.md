@@ -1,4 +1,4 @@
-# 0012: Update Installed Marketplaces
+# 0013: Update Installed Marketplaces
 
 ## Summary
 
@@ -6,7 +6,7 @@ Let the marketplace plugin participate in `tx update`. Every installed marketpla
 
 **Spec:** [Updates](../specs/updates/)
 **Status:** draft
-**Depends On:** 0011
+**Depends On:** 0012
 
 ## Motivation
 
@@ -14,7 +14,7 @@ A cloned marketplace is frozen at the commit it was installed from. The author o
 
 Remove-and-add is also not a correct update even when a user does it. It re-clones the whole repository over the network for what is usually a few commits, and it goes through the "already installed" check by first destroying the installation, so a failure at any point between the two commands leaves the user with no marketplace at all rather than the old one. An update should be the operation that cannot end in less than what you started with.
 
-The pieces are already here. The marketplace plugin owns the checkout, knows the remote it cloned from, and already validates a manifest and installs dependency manifests as part of adding one — updating is those same steps against a commit that moved. What is missing is somewhere to put them, which [0011](./0011-add-generic-update-lifecycle.md) supplies.
+The pieces are already here. The marketplace plugin owns the checkout, knows the remote it cloned from, and already validates a manifest and installs dependency manifests as part of adding one — updating is those same steps against a commit that moved. What is missing is somewhere to put them, which [0012](./0012-add-generic-update-lifecycle.md) supplies.
 
 One decision deserves stating up front because it shapes everything else: an update is not allowed to lose work. An installed checkout is `tx`'s to manage, but a user who edited a file in it did so for a reason, and a marketplace whose upstream history was rewritten is a situation `tx` cannot resolve by guessing. Both are reported and refused rather than resolved.
 
@@ -70,7 +70,7 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
 ### Decisions
 
 - **Decision:** Move the checkout by detaching onto the target commit, rather than fast-forwarding a branch.
-  - **Why:** One operation then covers every case: an unpinned marketplace tracking a branch, a marketplace pinned to a tag by [0013](./0013-pin-marketplace-versions.md), and the rollback path that puts a specific commit back. A managed checkout has no reason to be on a branch — nothing commits into it, and an author who wants to commit uses a local reference, which is what [0008](./0008-link-local-marketplace-sources.md) added. Detaching also makes "did the checkout move" a single commit comparison instead of a question about branch state.
+  - **Why:** One operation then covers every case: an unpinned marketplace tracking a branch, a marketplace pinned to a tag by [0014](./0014-pin-marketplace-versions.md), and the rollback path that puts a specific commit back. A managed checkout has no reason to be on a branch — nothing commits into it, and an author who wants to commit uses a local reference, which is what [0008](./0008-link-local-marketplace-sources.md) added. Detaching also makes "did the checkout move" a single commit comparison instead of a question about branch state.
   - **Alternatives considered:** `merge --ff-only` was rejected because it cannot express a pin and does nothing for a detached checkout. `reset --hard` was rejected outright: it discards local modifications, which this change refuses to do, and it would make the blocking check the only thing standing between a user's edit and its destruction.
 
 - **Decision:** Refuse to update a checkout with modified tracked files; ignore untracked files except where one occupies a path the target commit tracks.
@@ -103,8 +103,8 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
 
 ### Non-Goals
 
-- Pins and version suffixes. [0013](./0013-pin-marketplace-versions.md) adds them; this change resolves the tracked target as the remote's default branch and is written so that a pin replaces only that resolution.
-- Updating the executable. [0014](./0014-update-the-tx-executable.md) covers it.
+- Pins and version suffixes. [0014](./0014-pin-marketplace-versions.md) adds them; this change resolves the tracked target as the remote's default branch and is written so that a pin replaces only that resolution.
+- Updating the executable. [0015](./0015-update-the-tx-executable.md) covers it.
 - Any per-plugin update within a marketplace. A marketplace is one checkout and moves as one.
 - Re-cloning a marketplace whose upstream was rewritten, or converting a clone's remote between transports.
 - Applying the [0010](./0010-retry-marketplace-clones-over-ssh.md) SSH fallback to a fetch.
@@ -157,6 +157,6 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
 ## References
 
 - Spec: [Updates](../specs/updates/), [Plugin System](../specs/plugin-system/)
-- Related changes: [0011-add-generic-update-lifecycle](./0011-add-generic-update-lifecycle.md), [0008-link-local-marketplace-sources](./0008-link-local-marketplace-sources.md), [0010-retry-marketplace-clones-over-ssh](./0010-retry-marketplace-clones-over-ssh.md)
+- Related changes: [0012-add-generic-update-lifecycle](./0012-add-generic-update-lifecycle.md), [0008-link-local-marketplace-sources](./0008-link-local-marketplace-sources.md), [0010-retry-marketplace-clones-over-ssh](./0010-retry-marketplace-clones-over-ssh.md)
 - Manual: [Plugins](../manual/plugins.md)
 - External: [`git fetch`](https://git-scm.com/docs/git-fetch), [`git describe`](https://git-scm.com/docs/git-describe), [`git remote set-head`](https://git-scm.com/docs/git-remote#Documentation/git-remote.txt-emset-headem)

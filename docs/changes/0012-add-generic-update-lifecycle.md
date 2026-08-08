@@ -1,8 +1,8 @@
-# 0011: Add a Generic Update Lifecycle
+# 0012: Add a Generic Update Lifecycle
 
 ## Summary
 
-Give the host one more generic contribution — an update participant — and add a bundled `update` plugin that drives whatever has been contributed. `tx update` gathers what could change and applies it; `tx update --dry-run` gathers and stops. Neither the host nor the driver knows what a marketplace or an executable is; the plugins that own those contribute participants in [0012](./0012-update-installed-marketplaces.md) and [0014](./0014-update-the-tx-executable.md).
+Give the host one more generic contribution — an update participant — and add a bundled `update` plugin that drives whatever has been contributed. `tx update` gathers what could change and applies it; `tx update --dry-run` gathers and stops. Neither the host nor the driver knows what a marketplace or an executable is; the plugins that own those contribute participants in [0013](./0013-update-installed-marketplaces.md) and [0015](./0015-update-the-tx-executable.md).
 
 **Spec:** [Updates](../specs/updates/)
 **Status:** draft
@@ -46,8 +46,8 @@ What implementing them requires of this change:
 - **The host gains a third contribution and no vocabulary.** `src/` learns that a participant is a value with a `gather` and an `apply`, that it is staged like a command, and that it is handed back with its owner's identity. It learns nothing about versions, networks, marketplaces, or executables, and `src/` MUST NOT name any of them.
 - **The public contract gains types only.** `UpdateItem`, `UpdateResult`, `UpdateParticipant`, and `UpdateParticipation` are declared in the public plugin module, which is the shared vocabulary an externalized plugin already imports type-only. No runtime API is added to `@fx/tx/plugin`.
 - **The driver is a bundled plugin, not core.** `tx update` is owned by a plugin under `plugins/`, composed in the root composition file alongside the marketplace plugin, and subject to the same boundary rules.
-- **This change ships a driver with nothing to drive.** With no participant contributed, `tx update` reports that there is nothing installed to update and exits zero. That is the correct behavior and it is what the tests assert; 0012 and 0014 supply participants.
-- **Composition order becomes observable.** Participant order follows the host's FIFO commit order, which for root definitions is composition order — the property [0014](./0014-update-the-tx-executable.md) relies on to have the executable applied after every other default plugin. It does not order a participant contributed by a *child* definition, which the host queues behind every root, and the spec says so rather than promising an ordering the host does not produce.
+- **This change ships a driver with nothing to drive.** With no participant contributed, `tx update` reports that there is nothing installed to update and exits zero. That is the correct behavior and it is what the tests assert; 0013 and 0015 supply participants.
+- **Composition order becomes observable.** Participant order follows the host's FIFO commit order, which for root definitions is composition order — the property [0015](./0015-update-the-tx-executable.md) relies on to have the executable applied after every other default plugin. It does not order a participant contributed by a *child* definition, which the host queues behind every root, and the spec says so rather than promising an ordering the host does not produce.
 
 ## Design
 
@@ -101,7 +101,7 @@ An item is in scope when no names were given, or when its name is one of them. A
 
 ### Non-Goals
 
-- Any participant. This change adds the mechanism and the command; 0012 and 0014 add the things to update.
+- Any participant. This change adds the mechanism and the command; 0013 and 0015 add the things to update.
 - Machine-readable output. Recorded as an open question in [Updates](../specs/updates/index.md#open-questions); line-oriented output is what `marketplace list` already produces and greps the same way.
 - Progress reporting while a participant applies. A result per item is what the contract carries today.
 - Concurrency. Participants apply sequentially, and a run that installs dependencies has output a user needs to read in order.
@@ -158,5 +158,5 @@ An item is in scope when no names were given, or when its name is one of them. A
 ## References
 
 - Spec: [Updates](../specs/updates/), [Plugin System](../specs/plugin-system/)
-- Related changes: [0007-delegate-dispatch-to-plugins](./0007-delegate-dispatch-to-plugins.md), [0012-update-installed-marketplaces](./0012-update-installed-marketplaces.md), [0014-update-the-tx-executable](./0014-update-the-tx-executable.md)
+- Related changes: [0007-delegate-dispatch-to-plugins](./0007-delegate-dispatch-to-plugins.md), [0013-update-installed-marketplaces](./0013-update-installed-marketplaces.md), [0015-update-the-tx-executable](./0015-update-the-tx-executable.md)
 - Manual: [Plugins](../manual/plugins.md)

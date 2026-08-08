@@ -1,4 +1,4 @@
-# 0014: Update the tx Executable
+# 0015: Update the tx Executable
 
 ## Summary
 
@@ -6,11 +6,11 @@ Make `tx` able to update itself. A bundled plugin that defines no commands contr
 
 **Spec:** [Updates](../specs/updates/)
 **Status:** draft
-**Depends On:** 0011
+**Depends On:** 0012
 
 ## Motivation
 
-A user who installed `tx` with `mise use -g github:fx/tx` has a way to update it and probably does not remember what it is. A user who downloaded the release asset directly has none at all. Meanwhile `tx update` — after [0011](./0011-add-generic-update-lifecycle.md) and [0012](./0012-update-installed-marketplaces.md) — updates everything the user installed *through* `tx` while leaving `tx` itself behind, which is the one thing it would be strange for an update command not to cover.
+A user who installed `tx` with `mise use -g github:fx/tx` has a way to update it and probably does not remember what it is. A user who downloaded the release asset directly has none at all. Meanwhile `tx update` — after [0012](./0012-add-generic-update-lifecycle.md) and [0013](./0013-update-installed-marketplaces.md) — updates everything the user installed *through* `tx` while leaving `tx` itself behind, which is the one thing it would be strange for an update command not to cover.
 
 The release side of this already exists and is strict. [Architecture: Runtime and Distribution](../specs/architecture/index.md#runtime-and-distribution) requires the tag, the `package.json` version, the compiled `tx --version`, the published package, and the release assets to be one identical version, and it requires the release to carry the executable alongside a SHA-256 checksum file. So the artifact to install, the version to expect, and the way to verify it are all already published — there is nothing to design about the source of truth, only about how to consume it.
 
@@ -100,7 +100,7 @@ Every failure path removes the staged file, through a helper that swallows a ref
   - **Alternatives considered:** Always requiring a token was rejected as making a public download need credentials. Never sending one was rejected as leaving a rate-limit failure with no remedy. Scanning the environment for anything token-shaped was rejected as exfiltration by accident.
 
 - **Decision:** A separate bundled plugin rather than a participant inside the update plugin.
-  - **Why:** The update plugin must have no privileged participant, or the extensibility [0011](./0011-add-generic-update-lifecycle.md) exists for is a claim rather than a demonstration. Separating them also puts "the executable goes after the other default plugins" in the composition root, where ordering is already explicit, instead of inside the driver's logic.
+  - **Why:** The update plugin must have no privileged participant, or the extensibility [0012](./0012-add-generic-update-lifecycle.md) exists for is a claim rather than a demonstration. Separating them also puts "the executable goes after the other default plugins" in the composition root, where ordering is already explicit, instead of inside the driver's logic.
   - **Alternatives considered:** Building it into the driver was rejected for both reasons. Putting it in the marketplace plugin was rejected as unrelated ownership.
 
 ### Non-Goals
@@ -167,6 +167,6 @@ Every failure path removes the staged file, through a helper that swallows a ref
 ## References
 
 - Spec: [Updates](../specs/updates/), [Architecture](../specs/architecture/)
-- Related changes: [0011-add-generic-update-lifecycle](./0011-add-generic-update-lifecycle.md), [0004-automate-versioning-and-publishing](./0004-automate-versioning-and-publishing.md)
+- Related changes: [0012-add-generic-update-lifecycle](./0012-add-generic-update-lifecycle.md), [0004-automate-versioning-and-publishing](./0004-automate-versioning-and-publishing.md)
 - Manual: [Plugins](../manual/plugins.md)
 - External: [GitHub Releases API](https://docs.github.com/en/rest/releases/releases), [Bun single-file executables](https://bun.sh/docs/bundler/executables), [mise tool management](https://mise.jdx.dev/cli/upgrade.html)

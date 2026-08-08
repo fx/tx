@@ -253,7 +253,7 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
 - [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Change 0009: Skip Quality Commands for Documentation](../../changes/0009-skip-quality-commands-for-documentation.md)
-- [Change 0014: Update the tx Executable](../../changes/0014-update-the-tx-executable.md)
+- [Change 0014: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
 
 ## Changelog
@@ -270,4 +270,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-05 | Delegated everything after the plugin namespace to its owner, settled the parser question, and collapsed usage and runtime failures onto one exit code | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
 | 2026-08-06 | Allowed plugin-owned storage to reference a user-supplied directory outside it, and required removal to drop only the reference | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
 | 2026-08-06 | Exempted documentation-only runs from the CI quality commands while still reporting the required check | [0009-skip-quality-commands-for-documentation](../../changes/0009-skip-quality-commands-for-documentation.md) |
-| 2026-08-07 | Made composition order observable through update-participant ordering, and made the published release assets the executable's own update source | [0014-update-the-tx-executable](../../changes/0014-update-the-tx-executable.md) |
+| 2026-08-07 | Made composition order observable through update-participant ordering, and made the published release assets the executable's own update source | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |

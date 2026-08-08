@@ -1,4 +1,4 @@
-# 0013: Pin Marketplace Versions
+# 0014: Pin Marketplace Versions
 
 ## Summary
 
@@ -6,7 +6,7 @@ Let a user say which version of a marketplace they want. `tx marketplace add fx/
 
 **Spec:** [Updates](../specs/updates/)
 **Status:** draft
-**Depends On:** 0012
+**Depends On:** 0013
 
 ## Motivation
 
@@ -48,7 +48,7 @@ What implementing them requires of this change:
 
 - **Classification runs first and is not modified.** [Plugin System: Local Marketplace Sources](../specs/plugin-system/index.md#local-marketplace-sources) decides local-versus-Git from the argument exactly as typed. Only a source it hands to Git is examined for a suffix, which is what keeps a directory named `tools@2` addable and keeps this change from touching a contract 0008 settled.
 - **The pin is marketplace-plugin state.** Nothing about it reaches `src/`, and no new storage format is introduced for it.
-- **A pin changes only which commit the update participant targets.** Everything else 0012 specified — blocking checks, preparation, restoration, reporting — applies to a pinned marketplace unchanged, except that a pinned marketplace may move backwards because the user named the commit-ish.
+- **A pin changes only which commit the update participant targets.** Everything else 0013 specified — blocking checks, preparation, restoration, reporting — applies to a pinned marketplace unchanged, except that a pinned marketplace may move backwards because the user named the commit-ish.
 - **Adding at a ref is still one clone.** The clone is unchanged, including the [0010](./0010-retry-marketplace-clones-over-ssh.md) SSH retry; only what is checked out afterwards differs, and a ref that does not resolve fails the addition before anything is published.
 
 ## Design
@@ -65,7 +65,7 @@ Resolution follows the order the spec fixes — tag, branch, commit, then the `v
 
 The pin is recorded in the checkout's own Git configuration under a `tx` key. Reading it is one local Git call, which the participant makes while it is already reading that repository; removing the marketplace removes the pin with it, because it lives inside the directory being removed.
 
-The update participant changes in one place: resolving the target. Unpinned, the target is the remote's default branch as 0012 specified. Pinned, the target is what the recorded ref resolves to against the freshly fetched remote — a hash is the same commit every time, a branch moves with the branch, and a tag moves if the remote moved it, which the pin follows because it names the ref rather than a commit. When the pin is a tag and the remote publishes a higher release tag, that tag is reported as detail and nothing is applied.
+The update participant changes in one place: resolving the target. Unpinned, the target is the remote's default branch as 0013 specified. Pinned, the target is what the recorded ref resolves to against the freshly fetched remote — a hash is the same commit every time, a branch moves with the branch, and a tag moves if the remote moved it, which the pin follows because it names the ref rather than a commit. When the pin is a tag and the remote publishes a higher release tag, that tag is reported as detail and nothing is applied.
 
 `marketplace pin` resolves the ref against the fetched remote before recording it, so a typo is rejected while the previous pin stands. It does not move the checkout: pinning states an intention, and `tx update` is where intentions become checkouts. `marketplace unpin` deletes the key.
 
@@ -167,6 +167,6 @@ The update participant changes in one place: resolving the target. Unpinned, the
 ## References
 
 - Spec: [Updates](../specs/updates/), [Plugin System](../specs/plugin-system/)
-- Related changes: [0012-update-installed-marketplaces](./0012-update-installed-marketplaces.md), [0008-link-local-marketplace-sources](./0008-link-local-marketplace-sources.md), [0010-retry-marketplace-clones-over-ssh](./0010-retry-marketplace-clones-over-ssh.md)
+- Related changes: [0013-update-installed-marketplaces](./0013-update-installed-marketplaces.md), [0008-link-local-marketplace-sources](./0008-link-local-marketplace-sources.md), [0010-retry-marketplace-clones-over-ssh](./0010-retry-marketplace-clones-over-ssh.md)
 - Manual: [Plugins](../manual/plugins.md)
 - External: [`git rev-parse` revisions](https://git-scm.com/docs/gitrevisions), [`git config`](https://git-scm.com/docs/git-config)

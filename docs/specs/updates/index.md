@@ -6,7 +6,7 @@
 
 The command belongs to a bundled update plugin that knows nothing about marketplaces or executables. It drives *update participants* contributed by other plugins through the generic host contribution mechanism owned by [Plugin System: Update Participation](../plugin-system/index.md#update-participation). Two bundled plugins participate: the marketplace plugin, which owns installed marketplace checkouts, and the executable plugin, which owns the running `tx` binary and claims no namespace of its own.
 
-This spec describes the desired state. None of it is implemented yet; [Change 0011](../../changes/0011-add-generic-update-lifecycle.md) through [Change 0014](../../changes/0014-update-the-tx-executable.md) implement it in that order.
+This spec describes the desired state. None of it is implemented yet; [Change 0012](../../changes/0012-add-generic-update-lifecycle.md) through [Change 0015](../../changes/0015-update-the-tx-executable.md) implement it in that order.
 
 ## Requirements
 
@@ -264,10 +264,10 @@ That is a statement about root definitions only. The host queues a plugin's chil
 
 - [Plugin System](../plugin-system/)
 - [Architecture](../architecture/)
-- [Change 0011: Add a Generic Update Lifecycle](../../changes/0011-add-generic-update-lifecycle.md)
-- [Change 0012: Update Installed Marketplaces](../../changes/0012-update-installed-marketplaces.md)
-- [Change 0013: Pin Marketplace Versions](../../changes/0013-pin-marketplace-versions.md)
-- [Change 0014: Update the tx Executable](../../changes/0014-update-the-tx-executable.md)
+- [Change 0012: Add a Generic Update Lifecycle](../../changes/0012-add-generic-update-lifecycle.md)
+- [Change 0013: Update Installed Marketplaces](../../changes/0013-update-installed-marketplaces.md)
+- [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
+- [Change 0015: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
 - [Git fast-forward merges](https://git-scm.com/docs/git-merge#_fast_forward_merge)
 - [GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
 
@@ -275,7 +275,7 @@ That is a statement about root definitions only. The host queues a plugin's chil
 
 | Date | Change | Document |
 |------|--------|----------|
-| 2026-08-07 | Initial desired update lifecycle: the never-automatic prohibition, the `tx update` command surface, and the participant-facing contract | [0011-add-generic-update-lifecycle](../../changes/0011-add-generic-update-lifecycle.md) |
-| 2026-08-07 | Specified marketplace updating: version labels, live references, non-interactive fetching, forward-only movement, blocked checkouts, and restoration | [0012-update-installed-marketplaces](../../changes/0012-update-installed-marketplaces.md) |
-| 2026-08-07 | Specified marketplace version pins: the source suffix, ref resolution, pin recording, pin-aware gathering, and the pin commands | [0013-pin-marketplace-versions](../../changes/0013-pin-marketplace-versions.md) |
-| 2026-08-07 | Specified executable self-update: release lookup, availability gating, manager delegation, download verification, and atomic replacement | [0014-update-the-tx-executable](../../changes/0014-update-the-tx-executable.md) |
+| 2026-08-07 | Initial desired update lifecycle: the never-automatic prohibition, the `tx update` command surface, and the participant-facing contract | [0012-add-generic-update-lifecycle](../../changes/0012-add-generic-update-lifecycle.md) |
+| 2026-08-07 | Specified marketplace updating: version labels, live references, non-interactive fetching, forward-only movement, blocked checkouts, and restoration | [0013-update-installed-marketplaces](../../changes/0013-update-installed-marketplaces.md) |
+| 2026-08-07 | Specified marketplace version pins: the source suffix, ref resolution, pin recording, pin-aware gathering, and the pin commands | [0014-pin-marketplace-versions](../../changes/0014-pin-marketplace-versions.md) |
+| 2026-08-07 | Specified executable self-update: release lookup, availability gating, manager delegation, download verification, and atomic replacement | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |
