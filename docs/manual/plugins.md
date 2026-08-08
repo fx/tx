@@ -16,7 +16,7 @@ tx marketplace list
 tx marketplace remove tools
 ```
 
-`add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+`list` prints one tab-separated line per marketplace: its name, its version label, and its source. `add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
 
 ## Private repositories over SSH
 
@@ -51,7 +51,7 @@ tx marketplace add "file://$PWD/repo"
 
 A local source is validated and has its selected dependency manifests installed exactly as a clone does, except that `bun install` runs in your own directory rather than in a copy — that is the point of a live reference. It runs only when the marketplace is added; dependencies you add to the source afterwards are yours to install. If validation or installation fails, no reference is published and `tx` neither deletes nor rolls back your directory. That guarantee covers `tx`'s own cleanup only: install lifecycle scripts are trusted code running with `tx`'s permissions, so what they do to the tree they run in is outside it.
 
-`marketplace list` reports a reference's recorded target path as its source, and `marketplace remove` removes only the reference, leaving the directory and its contents untouched. A reference whose target has been moved, deleted, or replaced stays listed and removable, and is reported through the recovery diagnostics that name its `marketplace remove` invocation.
+`marketplace list` reports a reference's recorded target path as its source and `live` as its version, and `marketplace remove` removes only the reference, leaving the directory and its contents untouched. A reference whose target has been moved, deleted, or replaced stays listed and removable, and is reported through the recovery diagnostics that name its `marketplace remove` invocation.
 
 Marketplaces and their plugins execute in deterministic order: installed marketplace names are sorted, entries retain their manifest order, and the host initializes roots followed by contributed children in FIFO order.
 
@@ -71,6 +71,26 @@ Results go to standard output and failures to standard error, so you can pipe on
 
 `tx` never checks for updates on its own. No other invocation contacts a remote to learn what is available, caches a result, or prints a notice, and there is no flag or configuration key that turns such a check on.
 
+### Updating marketplaces
+
+Every installed marketplace is one item in `tx update`, named as it is installed. A cloned one reports the commit its checkout holds — a tag reachable from that commit where the repository publishes tags, an abbreviated hash where it does not — and what its remote's default branch now offers. A marketplace referenced from a local directory reports `live` and has nothing to apply: its contents are whatever the directory holds when you run `tx`, so nothing is fetched, moved, or modified. `marketplace list` reports the same label as its middle column, without contacting anything.
+
+```
+$ tx update --dry-run
+tools	v1.4.0	-> v1.5.0
+mine	live	up to date
+```
+
+Gathering fetches, because there is no way to learn what a remote has without asking it, and a dry run whose answer is "probably" is not worth running. The fetch writes remote-tracking refs and the objects behind them and nothing else, so the checkout, the working tree, and the dependencies installed beside them come out of a dry run untouched. Fetching runs non-interactively, exactly as cloning does — an update walks every marketplace you have, and one credential or host-key prompt would stall the whole run. Reading Git configuration, `marketplace list`, and dependency installation keep your environment as it is.
+
+Applying moves the checkout onto the target commit, detached, then validates the marketplace and installs its selected dependency manifests exactly as adding it would — the new commit may declare different plugins or different dependencies. A marketplace whose checkout did not move is not revalidated. If validation or installation fails, the checkout is put back on the commit it held and the marketplace is reported as failed; what a trusted installation already wrote is not put back with it, and `tx` says so rather than claiming otherwise.
+
+Two situations stop an update, and both are reported as detail on a dry run before they refuse anything for real:
+
+- **A tracked file you edited.** The edit is yours and is never discarded. Resolve it in the checkout and run the update again. Untracked files are ignored, because `bun install` writes them into every checkout — except one occupying a path the new commit tracks, which cannot be kept and moved onto: that collision is reported with the path, and the file survives.
+- **A rewritten upstream.** If the commit you have is no longer an ancestor of the remote's, the branch was force-pushed or rebuilt, and moving anyway would silently discard the history the checkout was validated against. `tx marketplace remove` and add it again is the remedy.
+
+A marketplace whose plugins fail to load updates like any other — the participant reads storage rather than depending on a marketplace having loaded, which is what makes `tx update` the way out of a broken commit. A checkout `tx` cannot read at all is reported as one failed item naming its `marketplace remove` remedy, while the marketplaces around it still report and still update.
 ### Updating tx itself
 
 One of the items `tx update` gathers is `tx`, contributed by a bundled plugin that owns the running executable and defines no commands of its own. It compares the running version against the project's latest published release as a semantic version and offers only a strictly newer one, so a locally built executable is never dragged backwards. The lookup sends a token when `GH_TOKEN` or `GITHUB_TOKEN` is set — the first of those two that is non-empty, and no other variable is ever sent as one — which raises the rate limit; the release is public, so it works without either.

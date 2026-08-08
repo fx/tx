@@ -5,7 +5,7 @@
 Let the marketplace plugin participate in `tx update`. Every installed marketplace is gathered as one item: a cloned one reports the commit it holds and the commit its remote offers, a referenced local one reports that it is live and has nothing to apply. Applying moves a clone's checkout forward and reinstalls its dependencies exactly as adding it would, refuses to touch a checkout carrying local modifications, and puts the previous commit back if the new one fails to validate.
 
 **Spec:** [Updates](../specs/updates/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0012
 
 ## Motivation
@@ -120,33 +120,33 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
   - [x] Add scenarios for a forward move, an untouched live reference, both blocked cases, and a restored commit (PR #30)
   - [x] Update the specs' references and changelogs, and both documentation indexes (PR #30)
 
-- [ ] Extend the marketplace manager's Git surface in `plugins/marketplace/manager.ts`
-  - [ ] Export the non-interactive environment so cloning and fetching share one definition, without changing what cloning does with it
-  - [ ] Add reads for the current commit, its label preferring a reachable tag, tracked-file modifications, and ancestry between two commits
-  - [ ] Add the fetch, including tags and re-resolution of the remote's default branch
-  - [ ] Add the checkout move, used for both applying and restoring
+- [x] Extend the marketplace manager's Git surface in `plugins/marketplace/manager.ts`
+  - [x] Export the non-interactive environment so cloning and fetching share one definition, without changing what cloning does with it
+  - [x] Add reads for the current commit, its label preferring a reachable tag, tracked-file modifications, and ancestry between two commits
+  - [x] Add the fetch, including tags and re-resolution of the remote's default branch
+  - [x] Add the checkout move, used for both applying and restoring
 
-- [ ] Add the update participant under `plugins/marketplace/`
-  - [ ] Gather every installed marketplace in discovery order, reporting a live label for a reference and a commit label for a clone
-  - [ ] Resolve the tracked target from the remote's default branch and report an available version only when it differs from the current commit
-  - [ ] Report a blocking condition as item detail
-  - [ ] Re-check blocking conditions when applying, including an untracked file occupying a path the target tracks, and refuse without moving the checkout or discarding the file
-  - [ ] Move the checkout, run the same preparation adding a marketplace runs, and report the new label
-  - [ ] Restore the recorded commit when preparation fails, and state that installed dependencies were not restored
-  - [ ] Report a corrupt or unreadable checkout as a failed item naming its `marketplace remove` remedy, without failing the participant or hiding the marketplaces around it
-  - [ ] Contribute the participant from `plugins/marketplace/index.ts` during initialization
+- [x] Add the update participant under `plugins/marketplace/`
+  - [x] Gather every installed marketplace in discovery order, reporting a live label for a reference and a commit label for a clone
+  - [x] Resolve the tracked target from the remote's default branch and report an available version only when it differs from the current commit
+  - [x] Report a blocking condition as item detail
+  - [x] Re-check blocking conditions when applying, including an untracked file occupying a path the target tracks, and refuse without moving the checkout or discarding the file
+  - [x] Move the checkout, run the same preparation adding a marketplace runs, and report the new label
+  - [x] Restore the recorded commit when preparation fails, and state that installed dependencies were not restored
+  - [x] Report a corrupt or unreadable checkout as a failed item naming its `marketplace remove` remedy, without failing the participant or hiding the marketplaces around it
+  - [x] Contribute the participant from `plugins/marketplace/index.ts` during initialization
 
-- [ ] Add the version column to `marketplace list` without contacting any remote
+- [x] Add the version column to `marketplace list` without contacting any remote
 
-- [ ] Cover the new behavior in `test/marketplaces.test.ts` and a new participant test
-  - [ ] Gathering: a clone with and without an available commit, a live reference that reaches Git not at all, a corrupt checkout reported as a failed item beside healthy ones that still report and still apply, and an assertion that nothing in the checkout changed
-  - [ ] Applying: a forward move with preparation, a no-op when nothing is available, a modified tracked file, an untracked file that does not block, an untracked file in the way of a tracked path that does, a non-ancestor target, and a preparation failure that restores the previous commit
-  - [ ] Environment: a fetch running non-interactively, and `marketplace list` and dependency installation keeping the invoking environment
-  - [ ] Ordering: marketplaces gathered and applied in sorted name order
-  - [ ] Listing: the version column for a clone and for a reference, with no Git call reaching a remote
+- [x] Cover the new behavior in `test/marketplaces.test.ts` and a new participant test
+  - [x] Gathering: a clone with and without an available commit, a live reference that reaches Git not at all, a corrupt checkout reported as a failed item beside healthy ones that still report and still apply, and an assertion that nothing in the checkout changed
+  - [x] Applying: a forward move with preparation, a no-op when nothing is available, a modified tracked file, an untracked file that does not block, an untracked file in the way of a tracked path that does, a non-ancestor target, and a preparation failure that restores the previous commit
+  - [x] Environment: a fetch running non-interactively, and `marketplace list` and dependency installation keeping the invoking environment
+  - [x] Ordering: marketplaces gathered and applied in sorted name order
+  - [x] Listing: the version column for a clone and for a reference, with no Git call reaching a remote
 
-- [ ] Document updating marketplaces in `docs/manual/plugins.md`, in the pull request that implements it
-- [ ] Verify 100% coverage and `bun run check`
+- [x] Document updating marketplaces in `docs/manual/plugins.md`, in the pull request that implements it
+- [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 

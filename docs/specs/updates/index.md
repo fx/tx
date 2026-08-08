@@ -6,7 +6,7 @@
 
 The command belongs to a bundled update plugin that knows nothing about marketplaces or executables. It drives *update participants* contributed by other plugins through the generic host contribution mechanism owned by [Plugin System: Update Participation](../plugin-system/index.md#update-participation). Two bundled plugins participate: the marketplace plugin, which owns installed marketplace checkouts, and the executable plugin, which owns the running `tx` binary and claims no namespace of its own.
 
-[Never Automatic](#never-automatic) and [The Update Command](#the-update-command) are implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md), which ships the driver with nothing to drive: no participant is contributed yet, so `tx update` reports that there is nothing installed to update. The rest describes the desired state, and [Change 0013](../../changes/0013-update-installed-marketplaces.md) through [Change 0015](../../changes/0015-update-the-tx-executable.md) supply the participants in that order.
+[Never Automatic](#never-automatic) and [The Update Command](#the-update-command) are implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md), which ships the driver, and [Marketplace Updates](#marketplace-updates) in [Change 0013](../../changes/0013-update-installed-marketplaces.md), which contributes the first participant to it. The rest describes the desired state, and [Change 0014](../../changes/0014-pin-marketplace-versions.md) and [Change 0015](../../changes/0015-update-the-tx-executable.md) supply pins and the executable.
 
 ## Requirements
 
