@@ -5,7 +5,7 @@
 Let a user say which version of a marketplace they want. `tx marketplace add fx/cc@1.4.0` installs that version and records the pin; `tx update` then keeps the marketplace there, while still reporting a newer tag when the remote publishes one. `tx marketplace pin` and `tx marketplace unpin` change the decision afterwards.
 
 **Spec:** [Updates](../specs/updates/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0013
 
 ## Motivation
@@ -107,6 +107,18 @@ The update participant changes in one place: resolving the target. Unpinned, the
   - **Why:** Moving a checkout runs validation and a trusted dependency installation, which is `tx update`'s job and carries `tx update`'s failure handling and restoration. A pin command that quietly did all that would be an update with a different name, and its failure modes would have to be specified twice.
   - **Alternatives considered:** Pinning and applying in one step was rejected for that reason; a user who wants both types two commands, and the second one is the one they already know.
 
+- **Decision:** Unify the authority *rule* rather than the parsers, settling the open question [0010](./0010-retry-marketplace-clones-over-ssh.md) recorded.
+  - **Why:** The boundary is the one thing `carriesGitSyntax` and the suffix parser genuinely share, and a disagreement between them is exactly how an SSH login becomes a version. One function answers it for both, so classification and versioning cannot drift apart. Name derivation and SSH derivation answer different questions under their own contracts — what a source is called, and how else it can be reached — and folding them into one `parseGitSource` would produce a single function with three result shapes and three sets of edge cases, which unifies nothing.
+  - **Alternatives considered:** One `parseGitSource` returning every reading of a source was rejected for that reason. Leaving the boundary duplicated was rejected because the two rules would then be free to disagree, which is the defect this change exists to avoid.
+
+- **Decision:** Fetch tags forced.
+  - **Why:** A pin to a tag follows the tag, so the local answer for that ref has to be what the remote publishes now. An unforced `fetch --tags` refuses to update a tag it already holds *and* fails the whole fetch for it, so a publisher moving one tag would have reported every marketplace on that remote as unreachable — the pin requirement exposes an existing fetch that could not survive a moved tag. Tag immutability is the remote's contract rather than tx's, and the checkout is tx's own.
+  - **Alternatives considered:** Resolving a pinned tag through a separate `ls-remote` was rejected as a second network round trip for something the fetch is already carrying.
+
+- **Decision:** Admit `@` in an installed marketplace's name.
+  - **Why:** [Local Marketplace Sources](../specs/plugin-system/index.md#local-marketplace-sources) derives a reference's name from the directory on disk, and this change requires a directory named `tools@2` to be added under that name. Without it the precedence rule would resolve correctly and then refuse to name the result, sending the user to `--name` for a directory that is unremarkable. The character is inert for path safety: a name is still one component, with no separator and no leading dot. Manifest plugin names are unaffected — they have no directory to agree with, so they keep the narrower rule.
+  - **Alternatives considered:** Reporting `tools@2` as unnameable was rejected as failing the scenario for a reason that has nothing to do with versions.
+
 ### Non-Goals
 
 - Version ranges, semantic-version constraints, or any resolution policy beyond an exact ref. Recorded as an open question in [Updates](../specs/updates/index.md#open-questions).
@@ -125,38 +137,38 @@ The update participant changes in one place: resolving the target. Unpinned, the
   - [x] Add scenarios for adding a pinned version, a pin surviving an update, a directory beating a suffix, and unpinning (PR #30)
   - [x] Update the spec's references and changelog, and both documentation indexes (PR #30)
 
-- [ ] Parse the version suffix in `plugins/marketplace/`
-  - [ ] Introduce the authority boundary — first `/` after `://`, the colon in SCP syntax, absent otherwise — and split a Git source on the last `@` outside it, returning the source unchanged when there is none
-  - [ ] Reject an empty ref
-  - [ ] Derive the marketplace name from the source without the suffix
-  - [ ] Reject a local source that carried a suffix, naming the reason
+- [x] Parse the version suffix in `plugins/marketplace/`
+  - [x] Introduce the authority boundary — first `/` after `://`, the colon in SCP syntax, absent otherwise — and split a Git source on the last `@` outside it, returning the source unchanged when there is none
+  - [x] Reject an empty ref
+  - [x] Derive the marketplace name from the source without the suffix
+  - [x] Reject a local source that carried a suffix, naming the reason
 
-- [ ] Resolve and record the pin when adding
-  - [ ] Resolve a ref in the staged clone as a tag, then a remote branch, then a commit, retrying with a `v` prefix for a ref beginning with a digit
-  - [ ] Check out the resolved commit in staging and fail the addition when the ref resolves nowhere, discarding staging as any other publication failure does
-  - [ ] Record the pin as the user spelled it, in the checkout's Git configuration
+- [x] Resolve and record the pin when adding
+  - [x] Resolve a ref in the staged clone as a tag, then a remote branch, then a commit, retrying with a `v` prefix for a ref beginning with a digit
+  - [x] Check out the resolved commit in staging and fail the addition when the ref resolves nowhere, discarding staging as any other publication failure does
+  - [x] Record the pin as the user spelled it, in the checkout's Git configuration
 
-- [ ] Make the update participant pin-aware
-  - [ ] Read the pin and target what it resolves to after the fetch, keeping the default-branch target for an unpinned marketplace
-  - [ ] Allow a pinned marketplace to move in either direction while keeping the ancestry requirement for an unpinned one
-  - [ ] Report the pin, and report a higher release tag published by the remote as detail, excluding pre-releases, without proposing to apply it
+- [x] Make the update participant pin-aware
+  - [x] Read the pin and target what it resolves to after the fetch, keeping the default-branch target for an unpinned marketplace
+  - [x] Allow a pinned marketplace to move in either direction while keeping the ancestry requirement for an unpinned one
+  - [x] Report the pin, and report a higher release tag published by the remote as detail, excluding pre-releases, without proposing to apply it
 
-- [ ] Add `marketplace pin` and `marketplace unpin`
-  - [ ] Resolve the ref against the fetched remote before recording, leaving the previous pin in place on failure
-  - [ ] Reject pinning a referenced local marketplace
-  - [ ] Record without moving the checkout, and report what the next update will do
-  - [ ] Clear the pin on `unpin`, returning the marketplace to the remote's default branch
+- [x] Add `marketplace pin` and `marketplace unpin`
+  - [x] Resolve the ref against the fetched remote before recording, leaving the previous pin in place on failure
+  - [x] Reject pinning a referenced local marketplace
+  - [x] Record without moving the checkout, and report what the next update will do
+  - [x] Clear the pin on `unpin`, returning the marketplace to the remote's default branch
 
-- [ ] Cover the new behavior in tests
-  - [ ] A table-driven suffix parser test over every accepted source form, with and without a suffix
-  - [ ] Precedence: a real temporary directory whose name contains `@` added as a live reference
-  - [ ] Adding: a tag, a branch, a commit, a `v`-prefixed fallback, an unresolvable ref that publishes nothing, and a name derived without the suffix
-  - [ ] Updating: a tag pin that does not move, a branch pin that does, a tag the remote moved that is followed, a backwards pin that is allowed, an unpinned non-ancestor that is not, and the newer-tag detail including a non-semantic-version tag that produces no comparison
-  - [ ] Pinning: an accepted ref, a rejected ref leaving the previous pin, a rejected local reference, and an unpin that resumes tracking
-  - [ ] Listing: a pinned marketplace's version label
+- [x] Cover the new behavior in tests
+  - [x] A table-driven suffix parser test over every accepted source form, with and without a suffix
+  - [x] Precedence: a real temporary directory whose name contains `@` added as a live reference
+  - [x] Adding: a tag, a branch, a commit, a `v`-prefixed fallback, an unresolvable ref that publishes nothing, and a name derived without the suffix
+  - [x] Updating: a tag pin that does not move, a branch pin that does, a tag the remote moved that is followed, a backwards pin that is allowed, an unpinned non-ancestor that is not, and the newer-tag detail including a non-semantic-version tag that produces no comparison
+  - [x] Pinning: an accepted ref, a rejected ref leaving the previous pin, a rejected local reference, and an unpin that resumes tracking
+  - [x] Listing: a pinned marketplace's version label
 
-- [ ] Document pins in `docs/manual/plugins.md` and the version syntax in `README.md`, in the pull request that implements them
-- [ ] Verify 100% coverage and `bun run check`
+- [x] Document pins in `docs/manual/plugins.md` and the version syntax in `README.md`, in the pull request that implements them
+- [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 

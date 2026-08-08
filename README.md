@@ -55,9 +55,12 @@ Extend `tx` by installing a trusted Git marketplace:
 
 ```sh
 tx marketplace add owner/repository
+tx marketplace add owner/repository@1.4.0
 tx marketplace list
 tx marketplace remove repository
 ```
+
+A source may carry a version, `<source>@<ref>`, naming a tag, a branch, or a commit the remote publishes; the marketplace stays there until you `tx marketplace pin` it elsewhere or `tx marketplace unpin` it. The separator is the last `@` outside the source's host, so `git@github.com:owner/repository.git` is an ordinary unpinned source.
 
 Plugin authors import the public contract as types only:
 

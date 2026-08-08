@@ -13,10 +13,12 @@ tx marketplace add owner/repository
 tx marketplace add https://example.com/tools.git --name tools
 tx marketplace add ./my-plugins
 tx marketplace list
+tx marketplace pin tools v1.4.0
+tx marketplace unpin tools
 tx marketplace remove tools
 ```
 
-`list` prints one tab-separated line per marketplace: its name, its version label, and its source. `add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+`list` prints one tab-separated line per marketplace: its name, its version label, and its source. `add` accepts any Git clone source, optionally with the `@<ref>` version described in [Marketplace versions](#marketplace-versions). Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
 
 ## Private repositories over SSH
 
@@ -55,6 +57,31 @@ A local source is validated and has its selected dependency manifests installed 
 
 Marketplaces and their plugins execute in deterministic order: installed marketplace names are sorted, entries retain their manifest order, and the host initializes roots followed by contributed children in FIFO order.
 
+## Marketplace versions
+
+`add` takes a version on the source, spelled the way every package manager spells one:
+
+```sh
+tx marketplace add fx/cc@1.4.0
+tx marketplace add fx/cc@release/1.4
+tx marketplace add git@github.com:fx/cc.git@v1.4.0
+```
+
+The ref is a commit-ish the remote publishes, resolved as a tag, then a branch, then a commit. A ref beginning with a digit is tried once more with a `v` prefix, so `@1.4.0` finds the `v1.4.0` tag almost every repository publishes, this project included. A ref that resolves nowhere fails the addition and installs nothing. The version never reaches the name: `fx/cc@1.4.0` installs as `cc`.
+
+The separator is the last `@` outside the source's authority — the part Git reads to find the host — so an SSH login and an HTTP(S) credential are never read as one: `git@github.com:fx/cc.git` and `https://token@example.com/fx/cc.git` are unpinned sources. That is also what lets a ref contain `/`. A ref whose own *name* contains `@` cannot be written as a suffix, because nothing can tell which `@` you meant; give it to `tx marketplace pin`, where the ref is an argument of its own. Nothing is unreachable, and the failure is loud either way: the addition fails against the source it actually tried.
+
+Classification runs first, so a version is only ever read from a source that is going to Git. A directory named `tools@2` is added as a live reference under that name, and `./tools@v1.0.0` beside a `./tools` directory is an error rather than a clone — a reference is live, so there is no version to pin it to.
+
+A pin changes afterwards, and takes effect on the next update rather than moving the checkout itself:
+
+```sh
+tx marketplace pin cc v1.5.0
+tx marketplace unpin cc
+```
+
+`pin` fetches first and refuses a ref the remote does not publish, leaving the previous pin exactly as it was, so a mistyped ref never silently unpins anything. It records without checking anything out, because moving a checkout runs validation and a trusted dependency installation — that is `tx update`'s job, and it carries `tx update`'s failure handling. `unpin` clears the pin and the marketplace tracks its remote's default branch again.
+
 ## Update what is installed
 
 `tx update` updates everything `tx` has installed. `tx update --dry-run` reports exactly the same thing and applies nothing, and positional names limit a run to the items you name.
@@ -86,6 +113,15 @@ Gathering fetches, because there is no way to learn what a remote has without as
 Applying moves the checkout onto the target commit, detached, then validates the marketplace and installs its selected dependency manifests exactly as adding it would — the new commit may declare different plugins or different dependencies. A marketplace whose checkout did not move is not revalidated. If validation or installation fails, the checkout is put back on the commit it held and the marketplace is reported as failed. Putting it back discards whatever the failed preparation rewrote — an install that rewrites a committed lockfile before failing would otherwise strand the marketplace on the commit that just failed — and nothing of yours is in that set, because the update refused to start unless the checkout was clean. What a trusted installation already wrote outside the checkout's tracked files is not put back, and `tx` says so rather than claiming otherwise.
 
 A fetch that fails is reported as Git reported it, with the credential of the recorded remote taken out of the message, so a marketplace installed from a source carrying a token does not print that token when its remote goes unreachable.
+
+A [pinned](#marketplace-versions) marketplace targets what its pin resolves to now, rather than the remote's default branch. The pin names a ref and is re-resolved on every run, so a pin to a hash never moves, a pin to a branch moves with that branch, and a pin to a tag moves if its publisher moves the tag — tag immutability is the remote's contract, not `tx`'s. Every run reports the pin, and reports the highest release the remote publishes above it as detail, without proposing to apply it: you pinned a version, and being moved off it unasked would defeat the pin. "Higher" means higher as a semantic version, so a tag that is not one is never reported and a pin that is not one is compared against nothing; a pre-release is never reported, though you may pin to one and hear about the first ordinary release above it.
+
+```
+$ tx update --dry-run
+tools	v1.4.0	up to date	pinned to v1.4.0; the remote publishes v1.5.0
+```
+
+A pin may move a checkout in either direction, because you named the commit — going back to the last version that worked is most of the reason to set one. Only an unpinned marketplace is held to moving forward. A pin naming a ref the remote has stopped publishing is reported as a failed item pointing at `tx marketplace pin` and `tx marketplace unpin`, not at removing the marketplace.
 
 Two situations stop an update, and both are reported as detail on a dry run before they refuse anything for real:
 
