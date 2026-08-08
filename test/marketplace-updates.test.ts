@@ -3,7 +3,10 @@ import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { UpdateItem } from "@fx/tx/plugin";
-import type { RunGit } from "../plugins/marketplace/manager.ts";
+import {
+  MarketplaceManager,
+  type RunGit,
+} from "../plugins/marketplace/manager.ts";
 import { MarketplaceUpdater } from "../plugins/marketplace/updater.ts";
 import {
   commitFixtureFiles,
@@ -62,6 +65,12 @@ async function publishSecondVersion(
 
 function headOf(checkout: string): string {
   return fixtureGit(checkout, ["rev-parse", "HEAD"]);
+}
+
+/** Pins an installed checkout the way `marketplace add` and `marketplace pin`
+ * record one: in the checkout's own Git configuration. */
+function pin(checkout: string, ref: string): void {
+  fixtureGit(checkout, ["config", "--local", "tx.pin", ref]);
 }
 
 /** Gathering never prepares anything, so a gather-only test says so. */
@@ -469,6 +478,230 @@ describe("marketplace update application", () => {
   });
 });
 
+describe("pinned marketplace updates", () => {
+  test("keeps a tag pin where it is and notes the newer tag", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-pinned-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      await publishSecondVersion(remote);
+      const before = headOf(checkout);
+      const participant = updater(root, async () => {
+        throw new Error("Preparation must not run for a pinned checkout");
+      });
+
+      // Reported, because a user who pinned a version still wants to learn a
+      // newer one exists; not applied, because moving them off the version
+      // they pinned without being asked would defeat the pin.
+      expect(await participant.gather()).toEqual([
+        {
+          name: "tools",
+          current: "v1.0.0",
+          detail: "pinned to v1.0.0; the remote publishes v2.0.0",
+        },
+      ]);
+      expect(
+        await participant.apply({ name: "tools", current: "v1.0.0" }),
+      ).toEqual({ applied: false });
+      expect(headOf(checkout)).toBe(before);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports the highest release above the pin, and no pre-release", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-higher-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      await commitFixtureFiles(remote, { "README.txt": "second\n" }, "second");
+      // Higher, lower than the highest, not a version at all, and one the
+      // publisher has not offered yet: only one of these is reportable.
+      for (const tag of [
+        "v10.0.0",
+        "v1.5.0+build-7",
+        "nightly",
+        "v11.0.0-rc.1",
+      ]) {
+        fixtureGit(remote, ["tag", tag]);
+      }
+
+      expect(gathered(await updater(root, unprepared).gather()).detail).toBe(
+        "pinned to v1.0.0; the remote publishes v10.0.0",
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports no comparison for a pre-release above the pin", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-prerelease-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      await commitFixtureFiles(remote, { "README.txt": "second\n" }, "second");
+      fixtureGit(remote, ["tag", "v2.0.0-beta.1"]);
+
+      expect(await updater(root, unprepared).gather()).toEqual([
+        { name: "tools", current: "v1.0.0", detail: "pinned to v1.0.0" },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports the first ordinary release above a pre-release pin", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-beta-pin-");
+    try {
+      const { remote, root, checkout } = await installClone(
+        temporaryRoot,
+        "tools",
+        false,
+      );
+      fixtureGit(remote, ["tag", "v1.0.0-beta.1"]);
+      pin(checkout, "v1.0.0-beta.1");
+      await publishSecondVersion(remote);
+      // The release the pre-release led to is higher than it, and the ordinary
+      // tag above them both is what a user is told about.
+      fixtureGit(remote, ["tag", "v1.0.0"]);
+
+      expect(gathered(await updater(root, unprepared).gather()).detail).toBe(
+        "pinned to v1.0.0-beta.1; the remote publishes v2.0.0",
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("compares nothing for a pin that is not a semantic version", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-branch-pin-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      const branch = fixtureGit(remote, ["symbolic-ref", "--short", "HEAD"]);
+      fixtureGit(remote, ["checkout", "--quiet", "-b", "release/1.4"]);
+      const target = await commitFixtureFiles(
+        remote,
+        { "README.txt": "release\n" },
+        "release",
+      );
+      fixtureGit(remote, ["checkout", "--quiet", branch]);
+      await publishSecondVersion(remote);
+      pin(checkout, "release/1.4");
+      const participant = updater(root, async () => {});
+
+      const item = gathered(await participant.gather());
+      // A branch pin follows its branch rather than the default one, and a pin
+      // that is not a semantic version is compared against nothing.
+      expect(item.detail).toBe("pinned to release/1.4");
+      expect((await participant.apply(item)).applied).toBe(true);
+      expect(headOf(checkout)).toBe(target);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("follows a tag the remote moved", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-moved-tag-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      const target = await commitFixtureFiles(
+        remote,
+        { "README.txt": "second\n" },
+        "second",
+      );
+      // The pin names the ref, so it is whatever `v1.0.0` is now.
+      fixtureGit(remote, ["tag", "--force", "v1.0.0"]);
+      const participant = updater(root, async () => {});
+
+      const item = gathered(await participant.gather());
+      expect(item.available).toBe("v1.0.0");
+      expect((await participant.apply(item)).applied).toBe(true);
+      expect(headOf(checkout)).toBe(target);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("moves a pinned checkout backwards, which an unpinned one is refused", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-backwards-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      const first = headOf(checkout);
+      await publishSecondVersion(remote);
+      const participant = updater(root, async () => {});
+
+      // Forward first, unpinned, exactly as any marketplace moves.
+      await participant.apply(gathered(await participant.gather()));
+      expect(headOf(checkout)).not.toBe(first);
+
+      pin(checkout, "v1.0.0");
+      const item = gathered(await participant.gather());
+      expect(item).toEqual({
+        name: "tools",
+        current: "v2.0.0",
+        available: "v1.0.0",
+        detail: "pinned to v1.0.0; the remote publishes v2.0.0",
+      });
+      expect(await participant.apply(item)).toEqual({
+        applied: true,
+        version: "v1.0.0",
+      });
+      expect(headOf(checkout)).toBe(first);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports a pin the remote no longer publishes, naming the pin commands", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-lost-pin-");
+    try {
+      const { root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v9.9.9");
+
+      expect(await updater(root, unprepared).gather()).toEqual([
+        {
+          name: "tools",
+          current: "v1.0.0",
+          failure:
+            'Version "v9.9.9" is not published by the remote. Run "tx marketplace pin tools <ref>" or "tx marketplace unpin tools".',
+        },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("resumes tracking the default branch once the pin is cleared", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-unpinned-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      const target = await publishSecondVersion(remote);
+      const participant = updater(root, async () => {});
+
+      await new MarketplaceManager(root, {
+        env: process.env,
+        prepare: async () => {},
+      }).unpin("tools");
+
+      const item = gathered(await participant.gather());
+      expect(item).toEqual({
+        name: "tools",
+        current: "v1.0.0",
+        available: "v2.0.0",
+      });
+      expect(await participant.apply(item)).toEqual({
+        applied: true,
+        version: "v2.0.0",
+      });
+      expect(headOf(checkout)).toBe(target);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("marketplace update environment", () => {
   test("fetches non-interactively and reads everything else as tx was invoked", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-env-");
@@ -512,11 +745,14 @@ describe("marketplace update environment", () => {
         ["-C", checkout, "config", "--local", "--get", "core.sshCommand"],
         ["config", "--global", "--get", "core.sshCommand"],
         ["config", "--system", "--get", "core.sshCommand"],
-        ["-C", checkout, "fetch", "--tags", "origin"],
+        // Forced, so a tag the remote moved is taken as the remote publishes
+        // it now rather than failing the fetch for clobbering a local one.
+        ["-C", checkout, "fetch", "--tags", "--force", "origin"],
         ["-C", checkout, "remote", "set-head", "origin", "--auto"],
         // Read again now the fetch has brought the tags in, since a tag added
         // to the installed commit changes what it is called.
         ["-C", checkout, "describe", "--tags", "--always", "aaaa"],
+        ["-C", checkout, "config", "--local", "--get", "tx.pin"],
         ["-C", checkout, "rev-parse", "refs/remotes/origin/HEAD"],
         ["-C", checkout, "diff", "--name-only", "HEAD", "--"],
         ["-C", checkout, "rev-list", "--count", "bbbb..aaaa", "--"],
@@ -535,7 +771,7 @@ describe("marketplace update environment", () => {
       expect(calls[6]?.env).toEqual(nonInteractive);
       // Everything else — the probes that settled that default included —
       // keeps the invoking environment, by reference and unmodified.
-      for (const index of [0, 1, 2, 3, 4, 7, 8, 9, 10, 11]) {
+      for (const index of [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12]) {
         expect(calls[index]?.env).toBe(env);
       }
       expect(env).toEqual({ PATH: "/test/bin", TOKEN: "secret" });

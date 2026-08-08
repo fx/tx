@@ -39,8 +39,17 @@ class RecordingManager implements MarketplaceOperations {
     return this.listings;
   }
 
+  async pin(name: string, ref: string): Promise<string> {
+    this.calls.push(["pin", name, ref]);
+    return "v1.4.0";
+  }
+
   async remove(name: string): Promise<void> {
     this.calls.push(["remove", name]);
+  }
+
+  async unpin(name: string): Promise<void> {
+    this.calls.push(["unpin", name]);
   }
 }
 
@@ -95,6 +104,8 @@ describe("first-party marketplace plugin", () => {
     );
     expect(namespaceHelp.stdoutText()).toContain("add [options] <source>");
     expect(namespaceHelp.stdoutText()).toContain("list ");
+    expect(namespaceHelp.stdoutText()).toContain("pin <name> <ref>");
+    expect(namespaceHelp.stdoutText()).toContain("unpin <name>");
     expect(namespaceHelp.stdoutText()).toContain("remove <name>");
     expect(namespaceHelp.stderrText()).toBe("");
 
@@ -149,6 +160,38 @@ describe("first-party marketplace plugin", () => {
     expect(context.stderrText()).toBe("");
   });
 
+  test("pins through the manager and reports what the next update applies", async () => {
+    const context = captureContext();
+    const { manager, program } = await setup(context);
+
+    expect(
+      await dispatch(
+        program,
+        ["marketplace", "pin", "personal", "1.4.0"],
+        context,
+      ),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(manager.calls).toEqual([["pin", "personal", "1.4.0"]]);
+    expect(context.stdoutText()).toBe(
+      'Pinned marketplace "personal" to "1.4.0"; the next "tx update" applies v1.4.0.\n',
+    );
+    expect(context.stderrText()).toBe("");
+  });
+
+  test("unpins through the manager and reports what it tracks again", async () => {
+    const context = captureContext();
+    const { manager, program } = await setup(context);
+
+    expect(
+      await dispatch(program, ["marketplace", "unpin", "personal"], context),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(manager.calls).toEqual([["unpin", "personal"]]);
+    expect(context.stdoutText()).toBe(
+      'Unpinned marketplace "personal"; it tracks its remote\'s default branch again.\n',
+    );
+    expect(context.stderrText()).toBe("");
+  });
+
   test("removes through the manager and reports success", async () => {
     const context = captureContext();
     const { manager, program } = await setup(context);
@@ -171,6 +214,10 @@ describe("first-party marketplace plugin", () => {
     ],
     ["add", ["repository", "--unknown"], "unknown option '--unknown'"],
     ["list", ["extra"], "too many arguments"],
+    ["pin", ["personal"], "missing required argument 'ref'"],
+    ["pin", ["one", "two", "three"], "too many arguments"],
+    ["unpin", [], "missing required argument 'name'"],
+    ["unpin", ["one", "two"], "too many arguments"],
     ["remove", [], "missing required argument 'name'"],
     ["remove", ["one", "two"], "too many arguments"],
   ])("reports declared %s usage errors", async (command, args, message) => {
@@ -187,6 +234,8 @@ describe("first-party marketplace plugin", () => {
 
   test.each([
     ["add", ["repository", "--name", "../escape"]],
+    ["pin", ["../escape", "v1.4.0"]],
+    ["unpin", ["../escape"]],
     ["remove", ["../escape"]],
   ])(
     "keeps rejecting unsafe %s names through its own namespace",

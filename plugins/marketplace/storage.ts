@@ -65,7 +65,18 @@ export interface PrepareMarketplaceOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
-const marketplaceNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/**
+ * What a marketplace may be called. `@` is admitted because a local source is
+ * referenced under the name of the directory on disk, and a directory called
+ * `tools@2` is called that — the version suffix is read from a Git source
+ * only, so a name carrying one is a name rather than a version. It is inert
+ * for path safety: the name is still one component, with no separator and no
+ * leading dot.
+ */
+const marketplaceNamePattern = /^[A-Za-z0-9][A-Za-z0-9._@-]*$/;
+/** What a plugin inside a marketplace manifest may be called. Narrower than a
+ * marketplace name, which has a directory on disk to agree with. */
+const pluginNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const manifestFilename = ".tx/config.json";
 const legacyManifestFilename = "tx.marketplace.json";
 
@@ -75,6 +86,10 @@ function pathImplementation(platform: NodeJS.Platform): typeof posix {
 
 function isSafeMarketplaceName(name: string): boolean {
   return marketplaceNamePattern.test(name);
+}
+
+function isSafePluginName(name: string): boolean {
+  return pluginNamePattern.test(name);
 }
 
 function environmentValue(
@@ -338,7 +353,7 @@ async function resolveMarketplaceManifest(
     };
     if (
       typeof candidate.name !== "string" ||
-      !isSafeMarketplaceName(candidate.name)
+      !isSafePluginName(candidate.name)
     ) {
       throw new Error(
         `${selectedManifestFilename} plugin ${index + 1} must have a safe non-empty name`,

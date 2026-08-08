@@ -14,9 +14,12 @@ import {
   type RunGit,
   readCheckoutCommit,
   readCommitLabel,
+  readHigherReleaseTag,
+  readMarketplacePin,
   readModifiedTrackedFiles,
   readRemoteDefaultCommit,
   readRemoteSource,
+  resolveMarketplaceRef,
   restoreCheckout,
   runGit,
   unknownMarketplaceVersion,
@@ -61,6 +64,16 @@ function unusableMarketplace(name: string, error: unknown): string {
  * so a checkout that cannot even name its remote still reports the failure
  * that matters.
  */
+/**
+ * A pin whose ref the remote no longer publishes — a deleted tag, a merged
+ * branch. The remedy is the pin, not the installation: the marketplace itself
+ * is intact and the user chose the ref, so they are pointed at the two
+ * commands that change that choice rather than at removing what they pinned.
+ */
+function unresolvablePin(name: string, error: unknown): string {
+  return `${errorMessage(error)}. Run "tx marketplace pin ${name} <ref>" or "tx marketplace unpin ${name}".`;
+}
+
 function unreachableRemote(error: unknown, source: string): string {
   const message = withoutCredentials(
     errorMessage(error),
@@ -115,7 +128,8 @@ export class MarketplaceUpdater implements UpdateParticipant {
     }
 
     const current = await readCheckoutCommit(checkout, this.#execution);
-    const target = await this.#resolveTarget(checkout);
+    const pin = await readMarketplacePin(checkout, this.#execution);
+    const target = await this.#trackedCommit(checkout, pin);
     if (target === current) return { applied: false };
 
     const blocked = await this.#blockingCondition(
@@ -123,6 +137,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
       checkout,
       current,
       target,
+      pin,
     );
     if (blocked !== undefined) throw new Error(blocked);
 
@@ -188,8 +203,28 @@ export class MarketplaceUpdater implements UpdateParticipant {
       // before the fetch would report the hash here while `marketplace list`
       // reported the tag, and the two are required to be the same label.
       label = await readCommitLabel(checkout, current, this.#execution);
-      const target = await this.#resolveTarget(checkout);
-      if (target === current) return { name, current: label };
+
+      const pin = await readMarketplacePin(checkout, this.#execution);
+      let target: string;
+      try {
+        target = await this.#trackedCommit(checkout, pin);
+      } catch (error) {
+        if (pin === undefined) throw error;
+        return { name, current: label, failure: unresolvablePin(name, error) };
+      }
+      // The pin is reported whether or not anything moves: a marketplace held
+      // at the version its user chose is exactly the one they are managing
+      // most deliberately, and a newer release they have not accepted is the
+      // answer to the question `tx update` asks.
+      const pinned =
+        pin === undefined ? undefined : await this.#pinDetail(checkout, pin);
+      if (target === current) {
+        return {
+          name,
+          current: label,
+          ...(pinned === undefined ? {} : { detail: pinned }),
+        };
+      }
 
       // Reported as detail rather than withheld: a user asking what is
       // available learns both that there is an update and what is in its way,
@@ -199,12 +234,14 @@ export class MarketplaceUpdater implements UpdateParticipant {
         checkout,
         current,
         target,
+        pin,
       );
+      const detail = [pinned, blocked].filter(Boolean).join("; ");
       return {
         name,
         current: label,
         available: await readCommitLabel(checkout, target, this.#execution),
-        ...(blocked === undefined ? {} : { detail: blocked }),
+        ...(detail === "" ? {} : { detail }),
       };
     } catch (error) {
       return {
@@ -226,9 +263,30 @@ export class MarketplaceUpdater implements UpdateParticipant {
     }
   }
 
-  /** What the marketplace tracks: the remote's current default branch. */
-  async #resolveTarget(checkout: string): Promise<string> {
-    return readRemoteDefaultCommit(checkout, this.#execution);
+  /**
+   * What the marketplace tracks: the remote's current default branch, or what
+   * its pin resolves to now the fetch is in. A pin names a ref rather than a
+   * commit, so it is re-resolved on every update — a hash never moves, a
+   * branch moves with the branch, and a tag moves if and only if the remote
+   * moved it.
+   */
+  async #trackedCommit(
+    checkout: string,
+    pin: string | undefined,
+  ): Promise<string> {
+    if (pin === undefined) {
+      return readRemoteDefaultCommit(checkout, this.#execution);
+    }
+    return resolveMarketplaceRef(checkout, pin, this.#execution);
+  }
+
+  /** What a pinned marketplace reports about its pin, and about a release the
+   * remote has published above it that nothing here proposes to apply. */
+  async #pinDetail(checkout: string, pin: string): Promise<string> {
+    const higher = await readHigherReleaseTag(checkout, pin, this.#execution);
+    return higher === undefined
+      ? `pinned to ${pin}`
+      : `pinned to ${pin}; the remote publishes ${higher}`;
   }
 
   /** Why this marketplace cannot move, in one line, or nothing. */
@@ -237,12 +295,20 @@ export class MarketplaceUpdater implements UpdateParticipant {
     checkout: string,
     current: string,
     target: string,
+    pin: string | undefined,
   ): Promise<string | undefined> {
     const modified = await readModifiedTrackedFiles(checkout, this.#execution);
     if (modified.length > 0) {
       return `blocked: modified tracked files (${modified.join(", ")}); resolve them in the checkout`;
     }
-    if (!(await isCommitAncestor(checkout, current, target, this.#execution))) {
+    // Only an unpinned marketplace is held to moving forward. It says "keep me
+    // current", so a target its commit is no part of is a rewritten upstream;
+    // a pin says "put me at this", and going back to the last good version is
+    // the whole point of setting one.
+    if (
+      pin === undefined &&
+      !(await isCommitAncestor(checkout, current, target, this.#execution))
+    ) {
       return `blocked: the remote no longer contains the installed commit; run "tx marketplace remove ${name}" and add it again`;
     }
     return undefined;

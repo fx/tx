@@ -154,7 +154,7 @@ export function createMarketplacePlugin(
             )
             .argument(
               "<source>",
-              "Git clone source, bare owner/repository GitHub shorthand, or an existing local directory referenced live",
+              "Git clone source, bare owner/repository GitHub shorthand, or an existing local directory referenced live, optionally with an @<ref> version",
             )
             .option(
               "--name <name>",
@@ -180,6 +180,36 @@ export function createMarketplacePlugin(
                   `${marketplace.name}\t${marketplace.version}\t${marketplace.source}\n`,
                 );
               }
+            });
+
+          namespace
+            .command("pin")
+            .description(
+              "Pin an installed marketplace to a version its remote publishes",
+            )
+            .argument("<name>", "Local marketplace name")
+            .argument("<ref>", "Tag, branch, or commit the remote publishes")
+            .action(async (name: string, ref: string) => {
+              const version = await manager.pin(
+                validateMarketplaceName(name),
+                ref,
+              );
+              context.stdout.write(
+                `Pinned marketplace "${name}" to "${ref}"; the next "tx update" applies ${version}.\n`,
+              );
+            });
+
+          namespace
+            .command("unpin")
+            .description(
+              "Clear an installed marketplace's pin, tracking its remote's default branch again",
+            )
+            .argument("<name>", "Local marketplace name")
+            .action(async (name: string) => {
+              await manager.unpin(validateMarketplaceName(name));
+              context.stdout.write(
+                `Unpinned marketplace "${name}"; it tracks its remote's default branch again.\n`,
+              );
             });
 
           namespace
