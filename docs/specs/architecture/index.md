@@ -253,7 +253,7 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
 - [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Change 0009: Skip Quality Commands for Documentation](../../changes/0009-skip-quality-commands-for-documentation.md)
-- [Change 0014: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
+- [Change 0015: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
 
 ## Changelog
