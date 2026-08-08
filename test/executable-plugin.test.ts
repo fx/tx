@@ -2,10 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  mkdir,
   readdir,
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -966,10 +968,32 @@ describe("executable update effects", () => {
       env: { MISE_DATA_DIR: "/opt/tool-cache" },
       managers: [],
     },
-  ])("detects the managers that could own $path", ({ path, env, managers }) => {
-    expect(detectManagers(path, env)).toEqual(
-      managers as readonly ManagerKind[],
-    );
+  ])(
+    "detects the managers that could own $path",
+    async ({ path, env, managers }) => {
+      expect(await detectManagers(path, env)).toEqual(
+        managers as readonly ManagerKind[],
+      );
+    },
+  );
+
+  test("resolves a configured mise store reached through a symbolic link", async () => {
+    // The target is compared as its real path, so a store the environment
+    // names through a link has to be resolved too, or its own installs would
+    // look unmanaged and be written into.
+    const root = await workspace("mise-link");
+    const store = join(root, "store");
+    await mkdir(join(store, "installs", "github-fx-tx", "1.2.0"), {
+      recursive: true,
+    });
+    await symlink(store, join(root, "link"));
+
+    expect(
+      await detectManagers(
+        join(store, "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
+        { MISE_DATA_DIR: join(root, "link") },
+      ),
+    ).toEqual(["mise"]);
   });
 
   test.each([

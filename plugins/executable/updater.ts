@@ -213,13 +213,22 @@ const miseStoreVariables = [
   ["MISE_DATA_DIR", "installs"],
 ] as const;
 
-function miseStores(
+async function miseStores(
   env: Readonly<Record<string, string | undefined>>,
-): readonly string[] {
+): Promise<readonly string[]> {
   const stores: string[] = [];
   for (const [variable, child] of miseStoreVariables) {
     const configured = env[variable];
-    if (configured) stores.push(child ? join(configured, child) : configured);
+    if (!configured) continue;
+    const store = child ? join(configured, child) : configured;
+    stores.push(store);
+    try {
+      // The target is compared as its real path, so a store reached through a
+      // symlink has to be resolved too or it would not match its own installs.
+      stores.push(await realpath(store));
+    } catch {
+      // Configured but not present: nothing is installed under it.
+    }
   }
   return stores;
 }
@@ -242,16 +251,16 @@ function miseStores(
  * `/opt/tool-cache/installs` would look unmanaged and be written into rather
  * than delegated to.
  */
-export function detectManagers(
+export async function detectManagers(
   target: string,
   env: Readonly<Record<string, string | undefined>> = {},
-): readonly ManagerKind[] {
+): Promise<readonly ManagerKind[]> {
   const segments = target.split(sep);
   const mise =
     segments.some(
       (segment, index) =>
         segment === "mise" && segments[index + 1] === "installs",
-    ) || miseStores(env).some((store) => isWithin(store, target));
+    ) || (await miseStores(env)).some((store) => isWithin(store, target));
   const npm = segments.includes("node_modules");
   if (mise && npm) return ["npm", "mise"];
   if (mise) return ["mise"];
@@ -375,7 +384,7 @@ export class ExecutableUpdater implements UpdateParticipant {
     }
 
     const target = await realpath(this.#executablePath);
-    const kinds = detectManagers(target, this.#env);
+    const kinds = await detectManagers(target, this.#env);
     if (kinds.length > 0) return this.#delegate(kinds, target);
     return this.#replace(target, published);
   }
@@ -551,9 +560,11 @@ export class ExecutableUpdater implements UpdateParticipant {
       try {
         // Exclusive creation, so the staged name is one this process made:
         // opening it any other way would follow a symlink somebody planted at
-        // the path and write the download through it.
-        await writeFile(staged, executable, { flag: "wx" });
-        await chmod(staged, 0o755);
+        // the path and write the download through it. Owner-only until it is
+        // verified, so nobody else holds a writable descriptor on the bytes
+        // between the digest that vouched for them and the rename that
+        // installs them; the mode a user runs it under is set after that.
+        await writeFile(staged, executable, { flag: "wx", mode: 0o700 });
       } catch (error) {
         // Named rather than forced: acquiring privileges to write somewhere
         // the user cannot is not this command's call to make.
@@ -569,6 +580,7 @@ export class ExecutableUpdater implements UpdateParticipant {
           `Downloaded ${asset} reported "${reported || oneLine(check.stderr)}" rather than ${published}`,
         );
       }
+      await chmod(staged, 0o755);
       await rename(staged, target);
     } finally {
       await discardStaged(staged);
