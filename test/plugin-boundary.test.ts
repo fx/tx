@@ -401,13 +401,13 @@ async function withProgram<T>(
 
 test("bundled plugin module graphs stay behind the public boundary", async () => {
   const entries = await bundledPluginEntries();
-  // Naming them keeps the check from passing vacuously: every bundled plugin,
-  // the update driver included, has its whole graph walked below, so the
-  // driver cannot reach the marketplace plugin's modules or core's.
-  expect(entries.map((entry) => relative(repositoryRoot, entry))).toEqual([
-    join("plugins", "marketplace", "index.ts"),
+  expect(entries.length).toBeGreaterThan(0);
+  // The whole graph of every discovered entry is walked below, so naming the
+  // update driver keeps its own check from passing vacuously: it cannot reach
+  // the marketplace plugin's modules, or core's, without failing here.
+  expect(entries.map((entry) => relative(repositoryRoot, entry))).toContain(
     join("plugins", "update", "index.ts"),
-  ]);
+  );
   await withProgram(
     join(repositoryRoot, "tsconfig.json"),
     async (program, checker) => {

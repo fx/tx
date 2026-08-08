@@ -3,7 +3,12 @@ import * as ink from "ink";
 import * as react from "react";
 import packageMetadata from "../package.json" with { type: "json" };
 
-import { createRootProgram, dispatch, EXIT_SUCCESS } from "../src/commands.ts";
+import {
+  createRootProgram,
+  dispatch,
+  EXIT_SUCCESS,
+  identityName,
+} from "../src/commands.ts";
 import type {
   CoreDependencies,
   Plugin,
@@ -33,16 +38,6 @@ function stubParticipant(): UpdateParticipant {
     gather: () => [],
     apply: () => ({ applied: false }),
   };
-}
-
-function participantOwners(
-  participations: readonly UpdateParticipation[],
-): string[] {
-  return participations.map(({ identity }) =>
-    identity.parent
-      ? `${identity.parent.name}/${identity.name}`
-      : identity.name,
-  );
 }
 
 function namespaceNames(
@@ -528,7 +523,7 @@ describe("update participation", () => {
       late,
       child,
     ]);
-    expect(participantOwners(committed)).toEqual([
+    expect(committed.map(({ identity }) => identityName(identity))).toEqual([
       "alpha",
       "alpha",
       "beta",
@@ -556,12 +551,11 @@ describe("update participation", () => {
     ]);
 
     expect(failures).toEqual([]);
-    // Its own contribution is still staged, and later plugins have not run.
+    // Its own contribution is still staged, later plugins have not run, and
+    // the snapshot it took is not a live view of what was committed after it.
     expect(duringInitialization.map((entry) => entry.participant)).toEqual([
       early,
     ]);
-    // The snapshot is taken at call time rather than kept live.
-    expect(duringInitialization).toHaveLength(1);
     expect(reader?.updaters()).toHaveLength(3);
   });
 

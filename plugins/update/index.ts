@@ -92,18 +92,22 @@ const updatePlugin: PluginDefinition = Object.freeze({
               context.stdout.write("Nothing installed to update.\n");
             }
 
-            // Names are matched before anything is applied, so a typo is
-            // reported rather than silently widening or narrowing the run.
+            // Everything is in scope until names narrow it, and the names are
+            // matched against that one definition before anything is applied,
+            // so a typo is reported rather than silently widening the run.
+            const scoped =
+              names.length === 0
+                ? gathered
+                : gathered.filter(({ item }) => names.includes(item.name));
             for (const name of names) {
-              if (!gathered.some(({ item }) => item.name === name)) {
+              if (!scoped.some(({ item }) => item.name === name)) {
                 fail(`No update named "${name}".`);
               }
             }
 
             if (!flags.dryRun) {
-              for (const { participation, item } of gathered) {
+              for (const { participation, item } of scoped) {
                 if (item.failure) continue;
-                if (names.length > 0 && !names.includes(item.name)) continue;
                 try {
                   const result = await participation.participant.apply(item);
                   context.stdout.write(applyLine(item, result));

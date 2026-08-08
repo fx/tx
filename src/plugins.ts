@@ -100,6 +100,11 @@ export async function initializePlugins(
   const dependencies = options.dependencies ?? coreDependencies;
   const namespaces: PluginNamespace[] = [];
   const participants: UpdateParticipation[] = [];
+  // Read at call time rather than delivered at initialization: a plugin that
+  // reads during its own initialization sees only what was committed before
+  // it, which is why a driver reads them when its command runs.
+  const updaters = (): readonly UpdateParticipation[] =>
+    Object.freeze([...participants]);
   const claimed = new Map<string, PluginNamespace>();
   const failures: PluginLoadFailure[] = [];
   const queue: Array<PluginDefinition | undefined> = [...definitions];
@@ -123,7 +128,7 @@ export async function initializePlugins(
     let namespace: Command | undefined;
     let violation: Error | undefined;
     const children: PluginDefinition[] = [];
-    const staged: UpdateParticipant[] = [];
+    const staged: UpdateParticipation[] = [];
     /**
      * Remember a registration violation as well as raising it. A plugin that
      * catches the throw must still fail rather than commit what it staged.
@@ -132,17 +137,18 @@ export async function initializePlugins(
       violation ??= error;
       throw violation;
     };
+    /** Staging is over once initialization returns, for every contribution. */
+    const closed = (contribution: string): Error =>
+      new Error(
+        `Plugin ${identity.name} cannot ${contribution} after initialization`,
+      );
     const api: PluginAPI = Object.freeze({
       identity,
       env,
       context: { ...processContext, env, plugin: identity },
       dependencies,
       command(build: (namespace: Command) => void) {
-        if (!staging) {
-          throw new Error(
-            `Plugin ${identity.name} cannot register commands after initialization`,
-          );
-        }
+        if (!staging) throw closed("register commands");
         if (!namespace) {
           const claimError = namespaceClaimError(identity);
           if (claimError) reject(claimError);
@@ -162,25 +168,14 @@ export async function initializePlugins(
         }
       },
       plugin(child: PluginDefinition) {
-        if (!staging) {
-          throw new Error(
-            `Plugin ${identity.name} cannot contribute plugins after initialization`,
-          );
-        }
+        if (!staging) throw closed("contribute plugins");
         children.push(child);
       },
       update(participant: UpdateParticipant) {
-        if (!staging) {
-          throw new Error(
-            `Plugin ${identity.name} cannot contribute update participants after initialization`,
-          );
-        }
-        staged.push(participant);
+        if (!staging) throw closed("contribute update participants");
+        staged.push(Object.freeze({ identity, participant }));
       },
-      // Read at call time rather than delivered at initialization: a plugin
-      // that reads during its own initialization sees only what was committed
-      // before it, so a driver reads when its command runs.
-      updaters: () => Object.freeze([...participants]),
+      updaters,
     });
 
     try {
@@ -205,9 +200,7 @@ export async function initializePlugins(
         namespaces.push(contribution);
       }
 
-      for (const participant of staged) {
-        participants.push(Object.freeze({ identity, participant }));
-      }
+      participants.push(...staged);
       queue.push(...children);
     } catch (error) {
       staging = false;
