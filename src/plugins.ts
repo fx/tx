@@ -14,6 +14,8 @@ import type {
   PluginAPI,
   PluginDefinition,
   PluginIdentity,
+  UpdateParticipant,
+  UpdateParticipation,
 } from "./plugin.ts";
 
 export const coreDependencies: CoreDependencies = Object.freeze({
@@ -97,6 +99,7 @@ export async function initializePlugins(
   >;
   const dependencies = options.dependencies ?? coreDependencies;
   const namespaces: PluginNamespace[] = [];
+  const participants: UpdateParticipation[] = [];
   const claimed = new Map<string, PluginNamespace>();
   const failures: PluginLoadFailure[] = [];
   const queue: Array<PluginDefinition | undefined> = [...definitions];
@@ -120,6 +123,7 @@ export async function initializePlugins(
     let namespace: Command | undefined;
     let violation: Error | undefined;
     const children: PluginDefinition[] = [];
+    const staged: UpdateParticipant[] = [];
     /**
      * Remember a registration violation as well as raising it. A plugin that
      * catches the throw must still fail rather than commit what it staged.
@@ -165,6 +169,18 @@ export async function initializePlugins(
         }
         children.push(child);
       },
+      update(participant: UpdateParticipant) {
+        if (!staging) {
+          throw new Error(
+            `Plugin ${identity.name} cannot contribute update participants after initialization`,
+          );
+        }
+        staged.push(participant);
+      },
+      // Read at call time rather than delivered at initialization: a plugin
+      // that reads during its own initialization sees only what was committed
+      // before it, so a driver reads when its command runs.
+      updaters: () => Object.freeze([...participants]),
     });
 
     try {
@@ -189,6 +205,9 @@ export async function initializePlugins(
         namespaces.push(contribution);
       }
 
+      for (const participant of staged) {
+        participants.push(Object.freeze({ identity, participant }));
+      }
       queue.push(...children);
     } catch (error) {
       staging = false;
