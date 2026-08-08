@@ -71,6 +71,17 @@ Results go to standard output and failures to standard error, so you can pipe on
 
 `tx` never checks for updates on its own. No other invocation contacts a remote to learn what is available, caches a result, or prints a notice, and there is no flag or configuration key that turns such a check on.
 
+### Updating tx itself
+
+One of the items `tx update` gathers is `tx`, contributed by a bundled plugin that owns the running executable and defines no commands of its own. It compares the running version against the project's latest published release as a semantic version and offers only a strictly newer one, so a locally built executable is never dragged backwards. The lookup sends a token when `GH_TOKEN` or `GITHUB_TOKEN` is set — the first of those two that is non-empty, and no other variable — which raises the rate limit; the release is public, so it works without either.
+
+`tx` is composed last, so everything else finishes updating before the binary is replaced. How it is replaced depends on who owns the file:
+
+- **A version manager owns it.** mise and npm are recognized from the executable's own resolved location. The manager is asked which tool owns that path and its own upgrade command is run for that tool — `mise upgrade <tool>` or `npm install --global <package>` — and its output is reported. Nothing inside the manager's store is replaced by `tx`, because a manager that kept recording the old version would silently revert the update on its next install. A recognized manager that cannot be interrogated is a failure, not a reason to write into its store anyway.
+- **Nobody owns it.** The published executable and its `SHA256SUMS` are downloaded, the digest is verified, and the file is staged beside the target with its executable bit set, run once to confirm it reports the published version, and moved onto the installed path in a single rename. Any mismatch aborts with the installed executable untouched, and every staged file is removed on every exit path. A location `tx` cannot write to is reported by name; `tx` never tries to acquire privileges.
+
+Two conditions report the release as detail and offer nothing to apply, because applying would only be refused: running from a source checkout — where the running program is the Bun runtime, not `tx` — and a platform with no published executable. Neither is a failure, so `tx update` still exits `0` while your marketplaces update normally.
+
 ## Marketplace layout
 
 The canonical manifest is `.tx/config.json` at the repository root:

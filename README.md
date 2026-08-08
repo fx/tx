@@ -36,6 +36,19 @@ mise use -g npm:@fx/tx
 
 Prefer `mise use -g github:fx/tx` unless GitHub Packages integration is specifically required.
 
+## Update
+
+`tx update` updates everything `tx` has installed, including `tx` itself; `tx update --dry-run` reports the same thing and changes nothing.
+
+```sh
+tx update
+tx update --dry-run
+```
+
+The executable is compared against the latest published release as a semantic version, and only a strictly newer one is offered. If a version manager installed `tx`, its own upgrade command is run for the tool that owns the path — `mise upgrade <tool>` or `npm install --global @fx/tx` — so the manager keeps recording what is actually on disk. Otherwise the published executable is downloaded, verified against its `SHA256SUMS` digest, run once to confirm its version, and moved into place in a single rename; nothing is replaced unless all of that succeeds. Set `GH_TOKEN` or `GITHUB_TOKEN` to raise the rate limit on the release lookup — no token is required, and no other variable is read.
+
+Running from a source checkout, or on a platform with no published executable, reports the newer release and applies nothing. `tx` never checks for updates on any other invocation. See the [plugin guide](docs/manual/plugins.md#update-what-is-installed) for the whole command.
+
 ## Plugins
 
 Extend `tx` by installing a trusted Git marketplace:
