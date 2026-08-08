@@ -54,9 +54,13 @@ const tokenVariables = ["GH_TOKEN", "GITHUB_TOKEN"] as const;
 const compiledModulePattern = /^(?:\/\$bunfs[/\\]|[A-Za-z]:[/\\]~BUN[/\\])/;
 /**
  * A semantic version, optionally spelled with the `v` the release tags carry.
- * Exactly the grammar the specification gives, leading zeros and empty
- * identifiers included, because the ordering below coerces anything it cannot
- * parse rather than refusing it.
+ *
+ * The grammar is implemented with the exclusions the specification makes, so
+ * a leading zero in any numeric component and an empty pre-release identifier
+ * are both rejected. That matters because the ordering below coerces what it
+ * cannot parse rather than refusing it: without this, a tag like `v01.3.0`
+ * would be read as newer and offered as an update whose assets nothing could
+ * then fetch.
  */
 const numericIdentifier = "0|[1-9]\\d*";
 const prereleaseIdentifier = `${numericIdentifier}|\\d*[A-Za-z-][0-9A-Za-z-]*`;
