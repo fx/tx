@@ -600,8 +600,8 @@ describe("executable replacement", () => {
       version: publishedVersion,
     });
     expect(urls()).toEqual([
-      downloadUrl("v1.3.0", assetName),
       downloadUrl("v1.3.0", checksumName),
+      downloadUrl("v1.3.0", assetName),
     ]);
     // Staged beside the target, with the executable bit set before it is run.
     expect(staged).toHaveLength(1);
@@ -725,6 +725,8 @@ describe("executable replacement", () => {
     const root = await workspace("missing-asset");
     const target = await installedExecutable(root, join("bin", "tx"));
     const { fetch } = stubFetch({
+      [downloadUrl("v1.3.0", checksumName)]: () =>
+        new Response(checksumDocument(digestOf(stubExecutable))),
       [downloadUrl("v1.3.0", assetName)]: () =>
         new Response("nope", { status: 404, statusText: "Not Found" }),
     });

@@ -443,21 +443,25 @@ export class ExecutableUpdater implements UpdateParticipant {
    * file to clean up; the run catches everything a digest cannot — an asset
    * built for another platform, a release rebuilt after its tag moved — while
    * there is still a working `tx` to fix it with.
+   *
+   * The small checksum document is fetched first, so a release that publishes
+   * no asset for this platform is refused before an executable is pulled down
+   * to be thrown away.
    */
   async #replace(target: string, published: string): Promise<UpdateResult> {
     // The release tag carries a `v`, which [Architecture: Runtime and
     // Distribution] requires of every published version.
     const tag = `v${published}`;
     const asset = `tx-${this.#platform}`;
-    const executable = await this.#download(tag, asset);
     const document = new TextDecoder().decode(
       await this.#download(tag, checksumAsset),
     );
-
     const expected = publishedChecksum(document, asset);
     if (expected === undefined) {
       throw new Error(`${checksumAsset} for ${tag} publishes no ${asset}`);
     }
+
+    const executable = await this.#download(tag, asset);
     const digest = createHash("sha256").update(executable).digest("hex");
     if (digest !== expected) {
       throw new Error(
