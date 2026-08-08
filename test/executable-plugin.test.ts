@@ -191,15 +191,27 @@ describe("semantic version ordering", () => {
     expect(isNewerRelease(published, running)).toBe(newer);
   });
 
-  test.each(["", "1", "1.2", "1.2.3.4", "latest", "v1.2.x", "1.2.3-"])(
-    "offers nothing for the unreadable version %p",
-    (text) => {
-      // Neither side may be coerced: reading `v1.2.x` as something above
-      // `1.2.0` would offer an update from a tag nothing can download.
-      expect(isNewerRelease(text, "1.2.0")).toBe(false);
-      expect(isNewerRelease("9.9.9", text)).toBe(false);
-    },
-  );
+  test.each([
+    "",
+    "1",
+    "1.2",
+    "1.2.3.4",
+    "latest",
+    "v1.2.x",
+    "1.2.3-",
+    // Leading zeros and empty identifiers are not semantic versions, and the
+    // ordering below coerces anything it cannot parse rather than refusing it.
+    "01.3.0",
+    "1.03.0",
+    "1.3.0-01",
+    "1.3.0-a..b",
+    "1.3.0+",
+  ])("offers nothing for the unreadable version %p", (text) => {
+    // Neither side may be coerced: reading `v1.2.x` as something above
+    // `1.2.0` would offer an update from a tag nothing can download.
+    expect(isNewerRelease(text, "1.2.0")).toBe(false);
+    expect(isNewerRelease("9.9.9", text)).toBe(false);
+  });
 });
 
 describe("executable update gathering", () => {
@@ -939,19 +951,41 @@ describe("executable replacement", () => {
   });
 
   test("keeps the failure a refused cleanup would have replaced", async () => {
-    // Forced through a property of the path rather than a permission bit, so
-    // it holds for a suite running as root as well as for one that is not: a
-    // staged path whose parent is a file can be neither written nor unlinked,
-    // so the removal in the exit path is refused and must not surface.
-    const { updater, target, directory } = await replacement("cleanup", {
-      staging: (path) => join(path, "child"),
-    });
+    const root = await workspace("cleanup");
+    const target = await installedExecutable(root, join("bin", "tx"));
+    const staged = join(dirname(target), "staged");
+    const { fetch } = stubFetch(
+      downloadRoutes(
+        `v${publishedVersion}`,
+        stubExecutable,
+        checksumDocument(digestOf(stubExecutable)),
+      ),
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({
+        fetch,
+        executablePath: target,
+        staging: () => staged,
+        // The file really is staged, and then — between the staging and the
+        // rename — the path becomes a non-empty directory, which the removal
+        // on the way out cannot unlink. Forced through a property of the path
+        // rather than a permission bit, so it holds for a suite running as
+        // root as well as for one that is not.
+        run: async () => {
+          await rm(staged);
+          await mkdir(join(staged, "occupied"), { recursive: true });
+          return { exitCode: 0, stdout: "9.9.9\n", stderr: "" };
+        },
+      }),
+    );
 
+    // The verification failure is what surfaces, not the refused removal.
     await expect(updater.apply(availableItem)).rejects.toThrow(
-      `Cannot stage a replacement beside "${target}"`,
+      'reported "9.9.9" rather than 1.3.0',
     );
     expect(await readFile(target, "utf8")).toBe(installedBytes);
-    expect(await readdir(directory)).toEqual(["tx"]);
+    expect((await stat(staged)).isDirectory()).toBe(true);
   });
 
   test("fails a download the release does not serve", async () => {

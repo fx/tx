@@ -52,9 +52,20 @@ const tokenVariables = ["GH_TOKEN", "GITHUB_TOKEN"] as const;
  * filesystem, which is a property of the running program rather than of its
  * filename — a `bun` someone renamed to `tx` fails this and is left alone. */
 const compiledModulePattern = /^(?:\/\$bunfs[/\\]|[A-Za-z]:[/\\]~BUN[/\\])/;
-/** A semantic version, optionally spelled with the `v` the release tags carry. */
-const versionPattern =
-  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+/**
+ * A semantic version, optionally spelled with the `v` the release tags carry.
+ * Exactly the grammar the specification gives, leading zeros and empty
+ * identifiers included, because the ordering below coerces anything it cannot
+ * parse rather than refusing it.
+ */
+const numericIdentifier = "0|[1-9]\\d*";
+const prereleaseIdentifier = `${numericIdentifier}|\\d*[A-Za-z-][0-9A-Za-z-]*`;
+const buildIdentifier = "[0-9A-Za-z-]+";
+const versionPattern = new RegExp(
+  `^v?(?:${numericIdentifier})\\.(?:${numericIdentifier})\\.(?:${numericIdentifier})` +
+    `(?:-(?:${prereleaseIdentifier})(?:\\.(?:${prereleaseIdentifier}))*)?` +
+    `(?:\\+${buildIdentifier}(?:\\.${buildIdentifier})*)?$`,
+);
 
 interface Installation {
   readonly name: string;
