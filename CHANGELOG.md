@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0](https://github.com/fx/tx/compare/v1.2.0...v1.3.0) (2026-08-08)
+
+
+### Features
+
+* **marketplace:** update installed marketplaces ([#35](https://github.com/fx/tx/issues/35)) ([c2e27ff](https://github.com/fx/tx/commit/c2e27ffda7117daa313908f3829fc29a466c13d1))
+* **update:** add a generic update lifecycle and the tx update command ([#32](https://github.com/fx/tx/issues/32)) ([158845a](https://github.com/fx/tx/commit/158845a72cd2e33c2b74be11953579211a1bcd91))
+* **update:** update the tx executable ([#34](https://github.com/fx/tx/issues/34)) ([b869b94](https://github.com/fx/tx/commit/b869b944627dc7fde327aedd5987ffd7435b9da8))
+
 ## [1.2.0](https://github.com/fx/tx/compare/v1.1.0...v1.2.0) (2026-08-08)
 
 
