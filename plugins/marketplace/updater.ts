@@ -5,6 +5,7 @@ import type {
 } from "@fx/tx/plugin";
 
 import {
+  credentialRedactions,
   fetchCheckoutRemote,
   type GitExecution,
   isCommitAncestor,
@@ -15,8 +16,11 @@ import {
   readCommitLabel,
   readModifiedTrackedFiles,
   readRemoteDefaultCommit,
+  readRemoteSource,
+  restoreCheckout,
   runGit,
   unknownMarketplaceVersion,
+  withoutCredentials,
 } from "./manager.ts";
 import {
   containedMarketplacePath,
@@ -48,9 +52,21 @@ function unusableMarketplace(name: string, error: unknown): string {
  * that moved are all failures of the fetch rather than of the installation,
  * and advising a user to delete a working marketplace over one would be
  * advising them to lose it.
+ *
+ * What is taken out of it is the credential the recorded remote may carry.
+ * Git quotes the URL it was working with when a fetch fails, and a marketplace
+ * installed from a source with an embedded token has that token in the URL, so
+ * reporting Git's message unaltered would print it to the terminal and into
+ * whatever collects that output. The source is passed in rather than read here
+ * so a checkout that cannot even name its remote still reports the failure
+ * that matters.
  */
-function unreachableRemote(error: unknown): string {
-  return `${errorMessage(error)}. Check that the marketplace's remote is reachable, then retry.`;
+function unreachableRemote(error: unknown, source: string): string {
+  const message = withoutCredentials(
+    errorMessage(error),
+    credentialRedactions(source),
+  );
+  return `${message}. Check that the marketplace's remote is reachable, then retry.`;
 }
 
 /**
@@ -118,7 +134,11 @@ export class MarketplaceUpdater implements UpdateParticipant {
     } catch (error) {
       const failure = errorMessage(error);
       try {
-        await moveCheckout(checkout, current, this.#execution);
+        // Forced, because preparation may have rewritten tracked files — a
+        // dependency install rewriting a committed lockfile is ordinary — and
+        // an ordinary checkout would refuse to overwrite them and leave the
+        // marketplace on the commit that just failed validation.
+        await restoreCheckout(checkout, current, this.#execution);
       } catch (restoration) {
         // The failure that started this stays the headline — it is what the
         // user has to act on — and the commit the checkout is stuck on is
@@ -156,7 +176,11 @@ export class MarketplaceUpdater implements UpdateParticipant {
       try {
         await fetchCheckoutRemote(checkout, this.#execution);
       } catch (error) {
-        return { name, current: label, failure: unreachableRemote(error) };
+        return {
+          name,
+          current: label,
+          failure: unreachableRemote(error, await this.#remoteSource(checkout)),
+        };
       }
       const target = await this.#resolveTarget(checkout);
       if (target === current) return { name, current: label };
@@ -182,6 +206,17 @@ export class MarketplaceUpdater implements UpdateParticipant {
         current: label,
         failure: unusableMarketplace(name, error),
       };
+    }
+  }
+
+  /** The recorded remote, or nothing when the checkout cannot name one. */
+  async #remoteSource(checkout: string): Promise<string> {
+    try {
+      return await readRemoteSource(checkout, this.#execution);
+    } catch {
+      // Nothing to redact against, which is the safe direction: the failure
+      // being reported came from a checkout with no readable remote.
+      return "";
     }
   }
 

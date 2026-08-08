@@ -255,7 +255,7 @@ function rawUserinfo(repository: string): string | undefined {
  *   ever quotes the password-stripped `https://@host/path` there is no
  *   credential left in it to remove.
  */
-function credentialRedactions(repository: string): readonly string[] {
+export function credentialRedactions(repository: string): readonly string[] {
   const userinfo = rawUserinfo(repository);
   if (userinfo === undefined) return [];
 
@@ -268,7 +268,7 @@ function credentialRedactions(repository: string): readonly string[] {
 }
 
 /** Text with every one of a source's credential literals taken out of it. */
-function withoutCredentials(
+export function withoutCredentials(
   text: string,
   redactions: readonly string[],
 ): string {
@@ -596,6 +596,18 @@ export async function readRemoteDefaultCommit(
   return readCheckout(checkout, ["rev-parse", remoteHeadRef], execution);
 }
 
+/** The remote a checkout was cloned from, exactly as it is recorded. */
+export async function readRemoteSource(
+  checkout: string,
+  execution: GitExecution,
+): Promise<string> {
+  return readCheckout(
+    checkout,
+    ["config", "--get", "remote.origin.url"],
+    execution,
+  );
+}
+
 /**
  * Moves a checkout onto a commit, detached. One operation covers an update, a
  * pin, and the restoration of a previous commit, and it leaves "did the
@@ -609,6 +621,32 @@ export async function moveCheckout(
   execution: GitExecution,
 ): Promise<void> {
   await readCheckout(checkout, ["checkout", "--detach", commit], execution);
+}
+
+/**
+ * Puts a checkout back on a commit it is known to have held cleanly, and
+ * forces it, which `moveCheckout` deliberately does not.
+ *
+ * The two are asymmetric because what stands in the way is. A move forward
+ * refuses to overwrite anything, because whatever it would overwrite is the
+ * user's. A restoration runs only after the blocking checks found the checkout
+ * clean and only after tx moved it itself, so every tracked modification it
+ * would discard was made after that point by the preparation now being undone
+ * — trusted code writing into a checkout tx owns. Refusing there would leave
+ * the marketplace on a commit that failed validation, which is the one outcome
+ * the restoration exists to prevent, and it is what an ordinary checkout does
+ * the moment a dependency install rewrites a tracked lockfile before failing.
+ */
+export async function restoreCheckout(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<void> {
+  await readCheckout(
+    checkout,
+    ["checkout", "--force", "--detach", commit],
+    execution,
+  );
 }
 
 export class MarketplaceManager implements MarketplaceOperations {
@@ -786,11 +824,9 @@ export class MarketplaceManager implements MarketplaceOperations {
               source = await readlink(checkout);
               version = liveMarketplaceVersion;
             } else {
-              const result = await this.#runGit(
-                ["-C", checkout, "config", "--get", "remote.origin.url"],
-                { env: this.#env },
-              );
-              source = result.stdout.trim() || unknownSource;
+              source =
+                (await readRemoteSource(checkout, this.#execution)) ||
+                unknownSource;
               // The participant's label, read out of the checkout, so listing
               // stays offline.
               version =

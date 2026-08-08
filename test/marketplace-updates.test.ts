@@ -576,9 +576,14 @@ describe("marketplace update failures", () => {
         if (args.includes("core.sshCommand")) {
           throw new Error("Git command failed");
         }
-        const [command] = args.slice(2);
+        const [command, ...rest] = args.slice(2);
         if (command === "fetch") {
           throw new Error("Git command failed: could not read from remote");
+        }
+        // A checkout that cannot even name its remote still reports the
+        // failure that matters, with nothing to redact against.
+        if (rest.includes("remote.origin.url")) {
+          throw new Error("Git command failed");
         }
         if (command === "rev-parse") return { stdout: "aaaa\n" };
         if (command === "describe") return { stdout: "v1.0.0\n" };
@@ -597,6 +602,81 @@ describe("marketplace update failures", () => {
             "Git command failed: could not read from remote. Check that the marketplace's remote is reachable, then retry.",
         },
       ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps the recorded remote's credential out of a fetch failure", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-secret-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await mkdir(join(root, "stub"), { recursive: true });
+      const source = "https://x-access-token:ghp_secret@example.com/acme/t.git";
+      const runGit: RunGit = async (args) => {
+        if (args.includes("core.sshCommand")) {
+          throw new Error("Git command failed");
+        }
+        const [command, ...rest] = args.slice(2);
+        if (command === "fetch") {
+          // Git quotes the URL it was working with, credential and all.
+          throw new Error(
+            `Git command failed: fatal: could not read Username for '${source}'`,
+          );
+        }
+        if (rest.includes("remote.origin.url"))
+          return { stdout: `${source}\n` };
+        if (command === "rev-parse") return { stdout: "aaaa\n" };
+        if (command === "describe") return { stdout: "v1.0.0\n" };
+        return { stdout: "\n" };
+      };
+
+      const [item] = await new MarketplaceUpdater(root, {
+        env: {},
+        runGit,
+      }).gather();
+
+      expect(item?.failure).not.toContain("ghp_secret");
+      expect(item?.failure).not.toContain("x-access-token");
+      // The host and path survive, because a user reads them to work out what
+      // failed; only the credential run is taken out.
+      expect(item?.failure).toContain("https://example.com/acme/t.git");
+      expect(item?.failure).toEndWith(
+        "Check that the marketplace's remote is reachable, then retry.",
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("restores a checkout preparation left with modified tracked files", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-dirty-restore-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      await publishSecondVersion(remote, {
+        "README.txt": "second\n",
+        "lock.txt": "published\n",
+      });
+      const before = headOf(checkout);
+      // What an ordinary dependency install does: rewrite a tracked file it
+      // owns, and then fail. The rewritten file differs between the two
+      // commits, so an unforced restoration refuses and leaves the checkout on
+      // the commit that just failed validation.
+      const participant = updater(root, async (moved) => {
+        await writeFile(join(moved, "lock.txt"), "rewritten\n");
+        throw new Error("trusted lifecycle failed");
+      });
+
+      const item = gathered(await participant.gather());
+      await expect(participant.apply(item)).rejects.toThrow(
+        "trusted lifecycle failed. The previous commit was restored; installed dependencies were not.",
+      );
+
+      expect(headOf(checkout)).toBe(before);
+      expect(fixtureGit(checkout, ["status", "--porcelain"])).toBe("");
+      expect(await readFile(join(checkout, "README.txt"), "utf8")).toBe(
+        "first\n",
+      );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
