@@ -527,6 +527,72 @@ describe("executable update delegation", () => {
     ]);
   });
 
+  test("delegates for a store mise reports through the link it was given", async () => {
+    // mise echoes back the spelling it was configured with, while the target
+    // is compared as its real path, so an unresolved comparison would report
+    // no owner for an installation mise plainly owns.
+    const root = await workspace("mise-link-owner");
+    const store = join(root, "store");
+    const installed = join(store, "installs", "github-fx-tx", "1.2.0");
+    const target = await installedExecutable(
+      root,
+      join("store", "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
+    );
+    await symlink(store, join(root, "link"));
+    const linked = join(root, "link", "installs", "github-fx-tx", "1.2.0");
+    const { run, commands } = recorder((command) =>
+      command[1] === "ls"
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              "github:fx/tx": [{ install_path: linked }],
+            }),
+            stderr: "",
+          }
+        : { exitCode: 0, stdout: "upgraded\n", stderr: "" },
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({
+        run,
+        executablePath: target,
+        env: { MISE_DATA_DIR: join(root, "link") },
+      }),
+    );
+
+    expect(await updater.apply(availableItem)).toMatchObject({ applied: true });
+    expect(commands[1]).toEqual(["mise", "upgrade", "github:fx/tx"]);
+    expect(installed).toContain("store");
+  });
+
+  test("reports what the manager wrote on both of its streams", async () => {
+    const root = await workspace("both-streams");
+    const target = await installedExecutable(
+      root,
+      join("lib", "node_modules", "@fx", "tx", "dist", "tx"),
+    );
+    const listing = `${join(root, "lib", "node_modules", "@fx", "tx")}:@fx/tx@1.2.0\n`;
+    const { run } = recorder((command) =>
+      command[1] === "ls"
+        ? { exitCode: 0, stdout: listing, stderr: "" }
+        : {
+            exitCode: 0,
+            stdout: "changed 1 package\n",
+            stderr: "npm warn deprecated\n",
+          },
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: true,
+      detail:
+        '"npm install --global @fx/tx": changed 1 package; npm warn deprecated',
+    });
+  });
+
   test("stops rather than asking mise when npm cannot be interrogated", async () => {
     // The next candidate would answer about the Node this install sits
     // inside, and upgrading that would report success while leaving tx where

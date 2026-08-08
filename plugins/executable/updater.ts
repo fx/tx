@@ -65,10 +65,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Command output as the one line of detail an item may carry. */
-function oneLine(text: string): string {
-  return text
-    .split("\n")
+/** Everything a command wrote, on both streams, as the one line of detail an
+ * item may carry: a manager that warns on one and answers on the other has
+ * said both things, and reporting its output means reporting all of it. */
+function oneLine(result: CommandResult): string {
+  return [result.stdout, result.stderr]
+    .flatMap((stream) => stream.split("\n"))
     .map((line) => line.trim())
     .filter(Boolean)
     .join("; ");
@@ -123,17 +125,35 @@ function isWithin(directory: string, candidate: string): boolean {
   return candidate === directory || candidate.startsWith(`${directory}${sep}`);
 }
 
-/** The installation containing the target, longest path first: a manager's own
- * root contains every tool it installed, so the innermost match is the owner. */
-function owner(
+async function resolvedPath(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * The installation containing the target, longest path first: a manager's own
+ * root contains every tool it installed, so the innermost match is the owner.
+ *
+ * A path that does not contain the target as it was spelled is resolved before
+ * it is ruled out. The target is compared as its real path, while a manager
+ * echoes back the spelling it was configured with, so a store reached through
+ * a symbolic link would otherwise not contain its own installs.
+ */
+async function owner(
   target: string,
   installations: readonly Installation[],
-): string | undefined {
+): Promise<string | undefined> {
   let best: Installation | undefined;
   for (const installation of installations) {
-    if (!isWithin(installation.path, target)) continue;
-    if (best === undefined || installation.path.length > best.path.length) {
-      best = installation;
+    const path = isWithin(installation.path, target)
+      ? installation.path
+      : await resolvedPath(installation.path);
+    if (!isWithin(path, target)) continue;
+    if (best === undefined || path.length > best.path.length) {
+      best = { name: installation.name, path };
     }
   }
   return best?.name;
@@ -449,13 +469,11 @@ export class ExecutableUpdater implements UpdateParticipant {
     const spelled = command.join(" ");
     const result = await this.#run(command);
     if (result.exitCode !== 0) {
-      throw new Error(
-        `"${spelled}" failed: ${oneLine(result.stderr || result.stdout)}`,
-      );
+      throw new Error(`"${spelled}" failed: ${oneLine(result)}`);
     }
     return {
       applied: true,
-      detail: `"${spelled}": ${oneLine(result.stdout || result.stderr)}`,
+      detail: `"${spelled}": ${oneLine(result)}`,
     };
   }
 
@@ -505,11 +523,13 @@ export class ExecutableUpdater implements UpdateParticipant {
     const listing = await this.#run(manager.listing);
     const installations = manager.read(listing.stdout);
     const owning =
-      installations === undefined ? undefined : owner(target, installations);
+      installations === undefined
+        ? undefined
+        : await owner(target, installations);
     if (owning !== undefined) return owning;
     if (listing.exitCode !== 0) {
       throw new Error(
-        `${manager.name} could not report which ${manager.noun} owns "${target}": ${oneLine(listing.stderr || listing.stdout)}`,
+        `${manager.name} could not report which ${manager.noun} owns "${target}": ${oneLine(listing)}`,
       );
     }
     if (installations === undefined) {
@@ -577,7 +597,7 @@ export class ExecutableUpdater implements UpdateParticipant {
       const reported = check.stdout.trim();
       if (check.exitCode !== 0 || reported !== published) {
         throw new Error(
-          `Downloaded ${asset} reported "${reported || oneLine(check.stderr)}" rather than ${published}`,
+          `Downloaded ${asset} reported "${reported || oneLine(check)}" rather than ${published}`,
         );
       }
       await chmod(staged, 0o755);
