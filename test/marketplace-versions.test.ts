@@ -404,20 +404,49 @@ describe("marketplace pin and unpin", () => {
     }
   });
 
-  test("refuses a ref Git would answer from the checkout rather than the remote", async () => {
+  test("refuses a ref Git would answer as an expression rather than as a name", async () => {
     const temporaryRoot = await temporaryDirectory("tx-pin-local-ref-");
     try {
-      const { remote } = await createVersionedRemote(temporaryRoot);
+      const { remote, branch } = await createVersionedRemote(temporaryRoot);
       const root = join(temporaryRoot, "marketplaces");
       const installed = manager(root, temporaryRoot);
       await installed.add(pathToFileURL(remote).href);
 
-      // `@` is what Git calls the checkout's own HEAD, so handing a ref to
-      // `rev-parse` unqualified would answer this pin out of the checkout —
-      // and answer it identically on every update, which is a marketplace
-      // reporting itself current forever.
-      await expect(installed.pin("tools", "@")).rejects.toThrow(
-        'Version "@" is not published by the remote',
+      // None of these is a ref the remote publishes — Git forbids every one of
+      // these characters inside a ref name. Handed to `rev-parse` they would
+      // evaluate against this checkout instead: `@` is its own HEAD, `~1` an
+      // ancestor of one, `@{1}` a reflog entry, `^{}` a peeled tag.
+      for (const ref of ["@", `${branch}~1`, `${branch}@{1}`, "v1.0.0^{}"]) {
+        await expect(installed.pin("tools", ref)).rejects.toThrow(
+          `Version "${ref}" is not published by the remote`,
+        );
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("prefers a tag to a branch of the same name", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-collision-");
+    try {
+      const { remote, first, second } =
+        await createVersionedRemote(temporaryRoot);
+      // One name, two things: the order resolution takes them in is the only
+      // thing that decides which commit a pin to it means.
+      fixtureGit(remote, ["branch", "1.4", second]);
+      fixtureGit(remote, ["tag", "1.4", first]);
+      const root = join(temporaryRoot, "marketplaces");
+      const installed = manager(root, temporaryRoot);
+      await installed.add(pathToFileURL(remote).href);
+      await installed.pin("tools", "1.4");
+
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        prepare: async () => {},
+      });
+      await participant.apply({ name: "tools", current: "v2.0.0" });
+      expect(fixtureGit(join(root, "tools"), ["rev-parse", "HEAD"])).toBe(
+        first,
       );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

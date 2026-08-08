@@ -105,6 +105,19 @@ const pinVariable = "tx.pin";
  * no further than Git's own default. Anything shorter is a name. */
 const commitHashPattern = /^[0-9a-f]{7,40}$/i;
 /**
+ * What Git reads as revision syntax rather than as part of a ref's name:
+ * the operators `~`, `^`, `:`, the reflog and upstream form `@{…}`, `@` on its
+ * own, the range `..`, the glob characters a pattern would expand, and control
+ * characters. Git forbids every one of them inside a ref name, so a pin
+ * carrying one names no ref the remote could publish — and appending it to
+ * `refs/tags/` or `refs/remotes/origin/` would otherwise ask `rev-parse` to
+ * evaluate an expression, answering a pin with an ancestor or a reflog entry
+ * nobody published.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the characters Git
+// forbids in a ref name are what this has to match.
+const revisionSyntaxPattern = /[\0-\x20~^:?*[\\\x7f]|@\{|\.\.|^@$/;
+/**
  * A semantic version, optionally spelled with the `v` release tags carry,
  * implemented with the exclusions the specification makes so a leading zero or
  * an empty pre-release identifier is rejected rather than coerced by the
@@ -811,6 +824,25 @@ async function readResolvedCommit(
 }
 
 /**
+ * The commit one of the remote's refs names, taking the ref's name as a name:
+ * a pin carrying revision syntax names nothing the remote publishes, so it is
+ * refused here rather than evaluated as an expression against this checkout.
+ */
+async function readPublishedRef(
+  checkout: string,
+  namespace: string,
+  name: string,
+  execution: GitExecution,
+): Promise<string | undefined> {
+  if (revisionSyntaxPattern.test(name)) return undefined;
+  return readResolvedCommit(
+    checkout,
+    `${namespace}${name}^{commit}`,
+    execution,
+  );
+}
+
+/**
  * The commit a hash names, when the remote publishes that commit.
  *
  * Only a hash is read this way. Everything else the user could type here is a
@@ -860,16 +892,18 @@ export async function resolveMarketplaceRef(
 ): Promise<ResolvedRef> {
   const attempts = /^\d/.test(ref) ? [ref, `v${ref}`] : [ref];
   for (const attempt of attempts) {
-    const tagged = await readResolvedCommit(
+    const tagged = await readPublishedRef(
       checkout,
-      `refs/tags/${attempt}^{commit}`,
+      "refs/tags/",
+      attempt,
       execution,
     );
     if (tagged !== undefined) return { commit: tagged, tag: true };
 
-    const branch = await readResolvedCommit(
+    const branch = await readPublishedRef(
       checkout,
-      `refs/remotes/${originRemote}/${attempt}^{commit}`,
+      `refs/remotes/${originRemote}/`,
+      attempt,
       execution,
     );
     if (branch !== undefined) return { commit: branch, tag: false };
