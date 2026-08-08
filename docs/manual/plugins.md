@@ -158,7 +158,10 @@ const plugin: Plugin = ({ update }) => {
       { name: "tools", current: "1.0.0", available: "1.1.0", detail: "two commits behind" },
       { name: "notes", current: "3.2.0" },
     ],
-    apply: async (item: UpdateItem) => ({ applied: true, version: item.available }),
+    apply: async (item: UpdateItem) =>
+      item.available === undefined
+        ? { applied: false }
+        : { applied: true, version: item.available },
   });
 };
 
