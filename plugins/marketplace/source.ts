@@ -41,6 +41,23 @@ export function carriesGitSyntax(source: string): boolean {
 }
 
 /**
+ * A source as a diagnostic may quote it back: with whatever userinfo a scheme's
+ * authority carries left out, because that userinfo is an HTTP(S) credential
+ * and a diagnostic goes to a terminal and to whatever collects its output. An
+ * SCP-style source keeps its `user@` — that is an SSH login rather than a
+ * secret, and it is half of what makes such a source recognizable.
+ */
+function quotableSource(source: string): string {
+  const scheme = source.indexOf("://");
+  if (scheme < 0) return source;
+  const start = scheme + 3;
+  const authority = source.slice(start, gitSourceAuthorityEnd(source));
+  const credential = authority.lastIndexOf("@");
+  if (credential < 0) return source;
+  return source.slice(0, start) + source.slice(start + credential + 1);
+}
+
+/**
  * A Git source split from the version suffix it carries, or the source
  * unchanged when it carries none.
  *
@@ -66,7 +83,7 @@ export function parseGitSourceVersion(source: string): GitSourceVersion {
   const ref = source.slice(separator + 1);
   if (!ref) {
     throw new Error(
-      `Marketplace source "${source}" names an empty version; write "<source>@<ref>"`,
+      `Marketplace source "${quotableSource(source)}" names an empty version; write "<source>@<ref>"`,
     );
   }
   return { source: source.slice(0, separator), ref };

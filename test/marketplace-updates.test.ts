@@ -697,6 +697,49 @@ describe("pinned marketplace updates", () => {
     }
   });
 
+  test("does not answer a withdrawn branch pin from the clone's own branch", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-local-branch-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      const branch = fixtureGit(remote, ["symbolic-ref", "--short", "HEAD"]);
+      pin(checkout, branch);
+      // The remote renames the branch away. The clone still holds a local
+      // branch of that name — cloning creates one — so a resolution that read
+      // the checkout rather than the remote would report the pin as fine.
+      fixtureGit(remote, ["branch", "--move", `${branch}-renamed`]);
+
+      const item = gathered(await updater(root, unprepared).gather());
+      expect(item.failure).toBe(
+        `Version "${branch}" is not published by the remote. Run "tx marketplace pin tools <ref>" or "tx marketplace unpin tools".`,
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not answer a hash pin the remote does not publish", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-local-commit-");
+    try {
+      const { root, checkout } = await installClone(temporaryRoot);
+      // A commit that exists in this checkout's object database and nowhere on
+      // the remote, which is what a hash has to be checked against.
+      const local = await commitFixtureFiles(
+        checkout,
+        { "README.txt": "mine\n" },
+        "mine",
+      );
+      fixtureGit(checkout, ["checkout", "--quiet", "--detach", "HEAD~1"]);
+      pin(checkout, local);
+
+      const item = gathered(await updater(root, unprepared).gather());
+      expect(item.failure).toBe(
+        `Version "${local}" is not published by the remote. Run "tx marketplace pin tools <ref>" or "tx marketplace unpin tools".`,
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("names re-pinning when an unpinned checkout sits on a commit the remote still has", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-diverged-");
     try {

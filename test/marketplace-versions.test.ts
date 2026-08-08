@@ -134,6 +134,30 @@ describe("Git source version suffixes", () => {
       ),
   );
 
+  test("keeps a credential out of the empty-version failure", () => {
+    const failure = (() => {
+      try {
+        parseGitSourceVersion("https://me:ghp_secret@example.com/acme/t.git@");
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    })();
+
+    expect(failure).not.toContain("ghp_secret");
+    // The host and path survive, because the user has to recognize what they
+    // typed; only the userinfo an HTTP(S) source carries is left out.
+    expect(failure).toContain("https://example.com/acme/t.git@");
+  });
+
+  test("keeps an SCP source's login in the empty-version failure", () => {
+    // An SSH login is not a secret, and it is half of what makes such a source
+    // recognizable when it is quoted back.
+    expect(() =>
+      parseGitSourceVersion("git@example.com:owner/repository.git@"),
+    ).toThrow('"git@example.com:owner/repository.git@"');
+  });
+
   test("leaves an authority with no path unsplit", () => {
     const source = "https://user@example.com";
     expect(parseGitSourceVersion(source)).toEqual({ source });
@@ -342,6 +366,26 @@ describe("marketplace pin and unpin", () => {
       // Pinning states an intention; `tx update` is where intentions become
       // checkouts, with its own validation and restoration.
       expect(fixtureGit(checkout, ["rev-parse", "HEAD"])).toBe(before);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses a ref Git would answer from the checkout rather than the remote", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-local-ref-");
+    try {
+      const { remote } = await createVersionedRemote(temporaryRoot);
+      const root = join(temporaryRoot, "marketplaces");
+      const installed = manager(root, temporaryRoot);
+      await installed.add(pathToFileURL(remote).href);
+
+      // `@` is what Git calls the checkout's own HEAD, so handing a ref to
+      // `rev-parse` unqualified would answer this pin out of the checkout —
+      // and answer it identically on every update, which is a marketplace
+      // reporting itself current forever.
+      await expect(installed.pin("tools", "@")).rejects.toThrow(
+        'Version "@" is not published by the remote',
+      );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

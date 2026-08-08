@@ -90,6 +90,9 @@ const sshCommandVariable = "core.sshcommand";
  * migrate.
  */
 const pinVariable = "tx.pin";
+/** What a pin may name as a commit rather than as a ref: a hash, abbreviated
+ * no further than Git's own default. Anything shorter is a name. */
+const commitHashPattern = /^[0-9a-f]{7,40}$/i;
 /**
  * A semantic version, optionally spelled with the `v` release tags carry,
  * implemented with the exclusions the specification makes so a leading zero or
@@ -797,10 +800,42 @@ async function readResolvedCommit(
 }
 
 /**
+ * The commit a hash names, when the remote publishes that commit.
+ *
+ * Only a hash is read this way. Everything else the user could type here is a
+ * name Git would resolve against the *local* repository — the clone's own
+ * default branch, a local tag, `HEAD`, `@`, `HEAD~1` — and resolving one of
+ * those would answer a pin out of the checkout rather than out of the remote,
+ * which is exactly the question. A branch the remote withdrew would go on
+ * resolving through the local branch of the same name, and a marketplace
+ * pinned to `HEAD` would report itself current forever.
+ *
+ * The publication check is what makes the hash honest too: a commit is a
+ * commit-ish the remote publishes only while some ref of the remote's still
+ * reaches it.
+ */
+async function readPublishedCommit(
+  checkout: string,
+  hash: string,
+  execution: GitExecution,
+): Promise<string | undefined> {
+  if (!commitHashPattern.test(hash)) return undefined;
+  const commit = await readResolvedCommit(
+    checkout,
+    `${hash}^{commit}`,
+    execution,
+  );
+  if (commit === undefined) return undefined;
+  return (await isCommitPublished(checkout, commit, execution))
+    ? commit
+    : undefined;
+}
+
+/**
  * The commit a ref names, resolved against what the remote published into this
- * repository: a tag first, then a remote branch, then the ref as a commit,
- * which is the order the spec fixes. A ref beginning with a digit is tried
- * once more with a `v` prefix, because `@1.4.0` is what a user types and
+ * repository: a tag first, then a remote branch, then the ref as a commit
+ * hash, which is the order the spec fixes. A ref beginning with a digit is
+ * tried once more with a `v` prefix, because `@1.4.0` is what a user types and
  * `v1.4.0` is what almost every repository tags — bounded to one extra
  * attempt, after the literal ref failed everywhere, so it can shadow nothing.
  *
@@ -817,7 +852,6 @@ export async function resolveMarketplaceRef(
     for (const revision of [
       `refs/tags/${attempt}`,
       `refs/remotes/${originRemote}/${attempt}`,
-      attempt,
     ]) {
       const commit = await readResolvedCommit(
         checkout,
@@ -826,6 +860,8 @@ export async function resolveMarketplaceRef(
       );
       if (commit !== undefined) return commit;
     }
+    const commit = await readPublishedCommit(checkout, attempt, execution);
+    if (commit !== undefined) return commit;
   }
   throw new Error(`Version "${ref}" is not published by the remote`);
 }
@@ -839,16 +875,14 @@ function isSemanticVersion(tag: string): boolean {
  * pre-release — read ahead of the build metadata, which may itself contain the
  * `-` that introduces one. */
 function versionParts(version: string): {
-  readonly core: readonly number[];
+  readonly core: readonly string[];
   readonly prerelease: boolean;
 } {
   const [withoutBuild = ""] = version.split("+");
   const core = withoutBuild.replace(/^v/, "");
   const separator = core.indexOf("-");
   return {
-    core: (separator < 0 ? core : core.slice(0, separator))
-      .split(".")
-      .map(Number),
+    core: (separator < 0 ? core : core.slice(0, separator)).split("."),
     prerelease: separator >= 0,
   };
 }
@@ -862,13 +896,25 @@ function versionParts(version: string): {
  * core are the same version. That is the whole ordering this plugin needs, and
  * it is written out rather than delegated because the marketplace plugin is
  * type-checked by consumers who have no Bun types.
+ *
+ * Components are ordered as digits rather than as numbers: the grammar above
+ * forbids a leading zero, so the longer run of digits is the larger value and
+ * equal-length runs compare lexically. Reading them as numbers would round two
+ * different versions above 2^53 into the same one and report neither as higher
+ * than the other.
  */
 function isHigherRelease(candidate: string, version: string): boolean {
   const left = versionParts(candidate);
   const right = versionParts(version);
   for (let index = 0; index < left.core.length; index += 1) {
-    const [leading, trailing] = [left.core[index] ?? 0, right.core[index] ?? 0];
-    if (leading !== trailing) return leading > trailing;
+    const [leading = "0", trailing = "0"] = [
+      left.core[index],
+      right.core[index],
+    ];
+    if (leading === trailing) continue;
+    return leading.length === trailing.length
+      ? leading > trailing
+      : leading.length > trailing.length;
   }
   return right.prerelease;
 }
