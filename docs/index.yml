@@ -131,6 +131,6 @@ changes:
     path: changes/0015-update-the-tx-executable.md
     description: Contribute an executable update participant that delegates to a version manager or verifies and atomically replaces the published executable.
     spec: updates
-    status: draft
+    status: complete
     depends_on:
       - "0012"
