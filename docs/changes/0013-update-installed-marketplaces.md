@@ -152,6 +152,7 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
 
 - [ ] Should a blocked marketplace be reported through the plugin's recovery diagnostics on ordinary invocations, rather than only during an update? It would tell users something is wrong sooner, at the cost of a Git read on every startup, which the eager-initialization open question in [Architecture](../specs/architecture/index.md#open-questions) already worries about.
 - [ ] Should the participant report how many commits an update spans, or their subjects? It is one more Git read and genuinely useful, and it is also the beginning of a changelog feature with no boundaries.
+- [ ] Should a lockfile that `tx`'s own dependency installation rewrote count as a user modification? A marketplace that commits `bun.lock` and whose install rewrites it acquires a modified tracked file that nothing the user did produced, and the blocking rule then refuses every later update until they resolve it by hand. Exempting a path because `tx` wrote it is a hole in a rule whose whole value is that it has none, and the alternative — refusing on a modification the tool itself made — is a trap. Changing either needs an amendment to [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates), which owns the rule.
 - [ ] Should a marketplace be updatable while a dependency installation from a previous update left the checkout half-installed? There is no way to detect that state today, and Bun's own install is the thing that would have to report it.
 
 ## References

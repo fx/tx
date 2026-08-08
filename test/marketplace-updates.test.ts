@@ -487,6 +487,9 @@ describe("marketplace update environment", () => {
       expect(calls.map(({ args }) => args)).toEqual([
         ["-C", checkout, "rev-parse", "HEAD"],
         ["-C", checkout, "describe", "--tags", "--always", "aaaa"],
+        // The checkout's own configuration is asked first: a fetch runs inside
+        // it, so Git applies it and it outranks both files.
+        ["-C", checkout, "config", "--local", "--get", "core.sshCommand"],
         ["config", "--global", "--get", "core.sshCommand"],
         ["config", "--system", "--get", "core.sshCommand"],
         ["-C", checkout, "fetch", "--tags", "origin"],
@@ -505,14 +508,133 @@ describe("marketplace update environment", () => {
         GIT_TERMINAL_PROMPT: "0",
         GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
       };
-      expect(calls[4]?.env).toEqual(nonInteractive);
       expect(calls[5]?.env).toEqual(nonInteractive);
-      // Everything else — the probe that settled that default included —
+      expect(calls[6]?.env).toEqual(nonInteractive);
+      // Everything else — the probes that settled that default included —
       // keeps the invoking environment, by reference and unmodified.
-      for (const index of [0, 1, 2, 3, 6, 7, 8, 9]) {
+      for (const index of [0, 1, 2, 3, 4, 7, 8, 9, 10]) {
         expect(calls[index]?.env).toBe(env);
       }
       expect(env).toEqual({ PATH: "/test/bin", TOKEN: "secret" });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps an SSH command the checkout's own configuration names", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-local-ssh-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const checkout = join(root, "keyed");
+      await mkdir(checkout, { recursive: true });
+      const env = Object.freeze({ PATH: "/test/bin" });
+      const calls: {
+        readonly args: readonly string[];
+        readonly env: Readonly<Record<string, string | undefined>>;
+      }[] = [];
+      const runGit: RunGit = async (args, options) => {
+        calls.push({ args: [...args], env: options.env });
+        if (args.includes("core.sshCommand")) {
+          // Configured in the checkout's own repository, which is where a
+          // per-marketplace deploy key is pinned.
+          if (args.includes("--local")) {
+            return { stdout: "ssh -i /run/secrets/deploy_key\n" };
+          }
+          throw new Error("Git command failed");
+        }
+        const [command] = args.slice(2);
+        if (command === "rev-parse") return { stdout: "aaaa\n" };
+        if (command === "describe") return { stdout: "v1.0.0\n" };
+        return { stdout: "\n" };
+      };
+
+      await new MarketplaceUpdater(root, { env, runGit }).gather();
+
+      // The global and system files are never reached, and the fetch runs
+      // under the user's own SSH command rather than the batch-mode default.
+      expect(
+        calls.filter(({ args }) => args.includes("core.sshCommand")),
+      ).toHaveLength(1);
+      const fetched = calls.find(({ args }) => args.includes("fetch"));
+      expect(fetched?.env).toEqual({
+        PATH: "/test/bin",
+        GIT_TERMINAL_PROMPT: "0",
+      });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("marketplace update failures", () => {
+  test("reports an unreachable remote as itself, without advising removal", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-unreachable-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await mkdir(join(root, "stub"), { recursive: true });
+      const runGit: RunGit = async (args) => {
+        if (args.includes("core.sshCommand")) {
+          throw new Error("Git command failed");
+        }
+        const [command] = args.slice(2);
+        if (command === "fetch") {
+          throw new Error("Git command failed: could not read from remote");
+        }
+        if (command === "rev-parse") return { stdout: "aaaa\n" };
+        if (command === "describe") return { stdout: "v1.0.0\n" };
+        return { stdout: "\n" };
+      };
+
+      expect(
+        await new MarketplaceUpdater(root, { env: {}, runGit }).gather(),
+      ).toEqual([
+        {
+          name: "stub",
+          // The version the checkout is on is known before the remote is
+          // asked, so a failed fetch still reports it.
+          current: "v1.0.0",
+          failure:
+            "Git command failed: could not read from remote. Check that the marketplace's remote is reachable, then retry.",
+        },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports the commit a failed restoration leaves the checkout on", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-restore-failed-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await mkdir(join(root, "stub"), { recursive: true });
+      const runGit: RunGit = async (args) => {
+        const [command, ...rest] = args.slice(2);
+        if (command === "rev-parse") {
+          return { stdout: `${rest[0] === "HEAD" ? "aaaa" : "bbbb"}\n` };
+        }
+        if (command === "rev-list") return { stdout: "0\n" };
+        // Moving forward works; putting the previous commit back does not.
+        if (command === "checkout" && rest.at(-1) === "aaaa") {
+          throw new Error("Git command failed: cannot restore");
+        }
+        return { stdout: "\n" };
+      };
+
+      const participant = new MarketplaceUpdater(root, {
+        env: {},
+        runGit,
+        prepare: async () => {
+          throw new Error("Invalid .tx/config.json");
+        },
+      });
+
+      // The preparation failure stays the headline, the restoration failure is
+      // reported beside it, and the commit the checkout is stuck on is named.
+      await expect(
+        participant.apply({ name: "stub", current: "aaaa" }),
+      ).rejects.toThrow(
+        "Invalid .tx/config.json. Restoring commit aaaa failed too, so the checkout is left on bbbb: Git command failed: cannot restore",
+      );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

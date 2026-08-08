@@ -43,6 +43,17 @@ function unusableMarketplace(name: string, error: unknown): string {
 }
 
 /**
+ * A remote tx could not reach is reported as itself, and deliberately without
+ * the removal remedy: an offline run, an expired credential, and a repository
+ * that moved are all failures of the fetch rather than of the installation,
+ * and advising a user to delete a working marketplace over one would be
+ * advising them to lose it.
+ */
+function unreachableRemote(error: unknown): string {
+  return `${errorMessage(error)}. Check that the marketplace's remote is reachable, then retry.`;
+}
+
+/**
  * Every installed marketplace as one update item. Storage is enumerated
  * directly, exactly as `marketplace list` enumerates it, because the
  * marketplace most in need of an update is the one whose current commit does
@@ -105,9 +116,19 @@ export class MarketplaceUpdater implements UpdateParticipant {
     try {
       await this.#prepare(checkout);
     } catch (error) {
-      await moveCheckout(checkout, current, this.#execution);
+      const failure = errorMessage(error);
+      try {
+        await moveCheckout(checkout, current, this.#execution);
+      } catch (restoration) {
+        // The failure that started this stays the headline — it is what the
+        // user has to act on — and the commit the checkout is stuck on is
+        // named, because restoring it is now their job rather than tx's.
+        throw new Error(
+          `${failure}. Restoring commit ${current} failed too, so the checkout is left on ${target}: ${errorMessage(restoration)}`,
+        );
+      }
       throw new Error(
-        `${errorMessage(error)}. The previous commit was restored; installed dependencies were not.`,
+        `${failure}. The previous commit was restored; installed dependencies were not.`,
       );
     }
     return {
@@ -120,6 +141,9 @@ export class MarketplaceUpdater implements UpdateParticipant {
     name: string,
     checkout: string,
   ): Promise<UpdateItem> {
+    // What the checkout holds is known before the remote is asked anything, so
+    // a marketplace that fails afterwards still reports the version it is on.
+    let label = unknownMarketplaceVersion;
     try {
       // A reference is live: nothing is fetched, moved, or modified, so no Git
       // command runs against it at all.
@@ -128,8 +152,12 @@ export class MarketplaceUpdater implements UpdateParticipant {
       }
 
       const current = await readCheckoutCommit(checkout, this.#execution);
-      const label = await readCommitLabel(checkout, current, this.#execution);
-      await fetchCheckoutRemote(checkout, this.#execution);
+      label = await readCommitLabel(checkout, current, this.#execution);
+      try {
+        await fetchCheckoutRemote(checkout, this.#execution);
+      } catch (error) {
+        return { name, current: label, failure: unreachableRemote(error) };
+      }
       const target = await this.#resolveTarget(checkout);
       if (target === current) return { name, current: label };
 
@@ -151,7 +179,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
     } catch (error) {
       return {
         name,
-        current: unknownMarketplaceVersion,
+        current: label,
         failure: unusableMarketplace(name, error),
       };
     }

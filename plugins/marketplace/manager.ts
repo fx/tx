@@ -401,15 +401,22 @@ export async function runGit(
 }
 
 /**
- * Whether Git configuration names an SSH command in a scope a clone applies.
- * The environment's own command-scope entries are scanned first, because they
- * outrank both files and cost no Git call; after them the global and system
- * files are read. `--local` MUST NOT be added to those two: `git clone`
- * creates the repository it writes into, so it never applies the local
- * configuration of whatever repository the caller happens to be standing in.
- * Reading that scope would report a command the clone will not use, suppress
- * batch mode for nothing, and leave ssh(1) free to block on the host-key
- * prompt the default exists to prevent.
+ * Whether Git configuration names an SSH command in a scope the operation
+ * about to run applies. The environment's own command-scope entries are
+ * scanned first, because they outrank every file and cost no Git call; after
+ * them the configuration files are read, one scope at a time.
+ *
+ * Which files those are is exactly the difference between an operation that
+ * runs *inside* a repository and one that creates it. A fetch runs inside the
+ * checkout it names, so that checkout's own `--local` configuration applies
+ * and outranks both files — it is asked first, and a per-checkout deploy key
+ * set there is honoured rather than overridden. A clone passes no checkout,
+ * and `--local` MUST NOT be read for it: `git clone` creates the repository it
+ * writes into, so it never applies the local configuration of whatever
+ * repository the caller happens to be standing in. Reading that scope for a
+ * clone would report a command the clone will not use, suppress batch mode for
+ * nothing, and leave ssh(1) free to block on the host-key prompt the default
+ * exists to prevent.
  *
  * Each scope is asked for separately rather than parsed out of
  * `--show-scope`, which works on every Git version and leaves no output
@@ -423,12 +430,17 @@ export async function runGit(
  */
 async function hasConfiguredSshCommand(
   execution: GitExecution,
+  checkout?: string,
 ): Promise<boolean> {
   if (hasEnvironmentSshCommand(execution.env)) return true;
-  for (const scope of sshCommandScopes) {
+  const probes = [
+    ...(checkout === undefined ? [] : [["-C", checkout, "config", "--local"]]),
+    ...sshCommandScopes.map((scope) => ["config", scope]),
+  ];
+  for (const probe of probes) {
     try {
       const { stdout } = await execution.runGit(
-        ["config", scope, "--get", "core.sshCommand"],
+        [...probe, "--get", "core.sshCommand"],
         { env: execution.env },
       );
       if (stdout.trim() !== "") return true;
@@ -456,14 +468,18 @@ async function hasConfiguredSshCommand(
  * of exactly the setup the SSH retry exists to serve. The two environment
  * variables settle the question without reading any configuration, so the
  * probe runs only when neither is set.
+ *
+ * A checkout is given by an operation that runs inside one, so its own
+ * configuration counts among the scopes probed; a clone passes none.
  */
 export async function nonInteractiveGitEnvironment(
   execution: GitExecution,
+  checkout?: string,
 ): Promise<Readonly<Record<string, string | undefined>>> {
   const promptless = { ...execution.env, GIT_TERMINAL_PROMPT: "0" };
   const { GIT_SSH_COMMAND: sshCommand, GIT_SSH: sshProgram } = execution.env;
   if (sshCommand || sshProgram) return promptless;
-  if (await hasConfiguredSshCommand(execution)) return promptless;
+  if (await hasConfiguredSshCommand(execution, checkout)) return promptless;
   return { ...promptless, GIT_SSH_COMMAND: batchModeSshCommand };
 }
 
@@ -556,7 +572,9 @@ export async function fetchCheckoutRemote(
 ): Promise<void> {
   const remote: GitExecution = {
     runGit: execution.runGit,
-    env: await nonInteractiveGitEnvironment(execution),
+    // The checkout is named, so an SSH command configured in its own
+    // repository counts: a fetch runs inside it and Git applies it.
+    env: await nonInteractiveGitEnvironment(execution, checkout),
   };
   await readCheckout(checkout, ["fetch", "--tags", originRemote], remote);
   await readCheckout(
