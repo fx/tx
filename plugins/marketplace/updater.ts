@@ -12,6 +12,7 @@ import {
   isCommitPublished,
   liveMarketplaceVersion,
   moveCheckout,
+  type ResolvedRef,
   type RunGit,
   readCheckoutCommit,
   readCommitLabel,
@@ -139,7 +140,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
 
     const current = await readCheckoutCommit(checkout, this.#execution);
     const pin = await readMarketplacePin(checkout, this.#execution);
-    const target = await this.#targetCommit(item.name, checkout, pin);
+    const { commit: target } = await this.#target(item.name, checkout, pin);
     if (target === current) return { applied: false };
 
     const blocked = await this.#blockingCondition(
@@ -215,9 +216,9 @@ export class MarketplaceUpdater implements UpdateParticipant {
       label = await readCommitLabel(checkout, current, this.#execution);
 
       const pin = await readMarketplacePin(checkout, this.#execution);
-      let target: string;
+      let target: ResolvedRef;
       try {
-        target = await this.#targetCommit(name, checkout, pin);
+        target = await this.#target(name, checkout, pin);
       } catch (error) {
         // A pin the remote stopped publishing is this marketplace's own
         // failure and arrives carrying its remedy; anything else came from a
@@ -230,8 +231,10 @@ export class MarketplaceUpdater implements UpdateParticipant {
       // most deliberately, and a newer release they have not accepted is the
       // answer to the question `tx update` asks.
       const pinned =
-        pin === undefined ? undefined : await this.#pinDetail(checkout, pin);
-      if (target === current) {
+        pin === undefined
+          ? undefined
+          : await this.#pinDetail(checkout, pin, target.tag);
+      if (target.commit === current) {
         return { name, current: label, ...reportedDetail(pinned) };
       }
 
@@ -242,13 +245,17 @@ export class MarketplaceUpdater implements UpdateParticipant {
         name,
         checkout,
         current,
-        target,
+        target.commit,
         pin,
       );
       return {
         name,
         current: label,
-        available: await readCommitLabel(checkout, target, this.#execution),
+        available: await readCommitLabel(
+          checkout,
+          target.commit,
+          this.#execution,
+        ),
         ...reportedDetail(pinned, blocked),
       };
     } catch (error) {
@@ -282,13 +289,16 @@ export class MarketplaceUpdater implements UpdateParticipant {
    * for a pin, so gathering and applying report the same thing: the ref can
    * disappear between the two, and the answer is the same either way.
    */
-  async #targetCommit(
+  async #target(
     name: string,
     checkout: string,
     pin: string | undefined,
-  ): Promise<string> {
+  ): Promise<ResolvedRef> {
     if (pin === undefined) {
-      return readRemoteDefaultCommit(checkout, this.#execution);
+      return {
+        commit: await readRemoteDefaultCommit(checkout, this.#execution),
+        tag: false,
+      };
     }
     try {
       return await resolveMarketplaceRef(checkout, pin, this.#execution);
@@ -297,10 +307,23 @@ export class MarketplaceUpdater implements UpdateParticipant {
     }
   }
 
-  /** What a pinned marketplace reports about its pin, and about a release the
-   * remote has published above it that nothing here proposes to apply. */
-  async #pinDetail(checkout: string, pin: string): Promise<string> {
-    const higher = await readHigherReleaseTag(checkout, pin, this.#execution);
+  /**
+   * What a pinned marketplace reports about its pin, and about a release the
+   * remote has published above it that nothing here proposes to apply.
+   *
+   * Only a pin that resolved as a tag is compared. A release above a pin is
+   * what a user tracking releases wants to hear about; a branch is not a
+   * release, however version-like whoever named it made it look, and there is
+   * nothing above a branch to move to.
+   */
+  async #pinDetail(
+    checkout: string,
+    pin: string,
+    tag: boolean,
+  ): Promise<string> {
+    const higher = tag
+      ? await readHigherReleaseTag(checkout, pin, this.#execution)
+      : undefined;
     return higher === undefined
       ? `pinned to ${pin}`
       : `pinned to ${pin}; the remote publishes ${higher}`;

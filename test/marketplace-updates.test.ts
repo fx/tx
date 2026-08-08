@@ -577,6 +577,26 @@ describe("pinned marketplace updates", () => {
     }
   });
 
+  test("compares nothing for a branch pin that is spelled like a version", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-branch-named-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      const branch = fixtureGit(remote, ["symbolic-ref", "--short", "HEAD"]);
+      // A maintenance branch named like a release, which is a real habit and
+      // is still not a release: there is nothing above a branch to move to.
+      fixtureGit(remote, ["checkout", "--quiet", "-b", "v1.5.0"]);
+      await commitFixtureFiles(remote, { "README.txt": "branch\n" }, "branch");
+      fixtureGit(remote, ["checkout", "--quiet", branch]);
+      await publishSecondVersion(remote);
+      pin(checkout, "v1.5.0");
+
+      const item = gathered(await updater(root, async () => {}).gather());
+      expect(item.detail).toBe("pinned to v1.5.0");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("compares nothing for a pin that is not a semantic version", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-branch-pin-");
     try {

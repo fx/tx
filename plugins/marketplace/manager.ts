@@ -63,6 +63,17 @@ export interface GitExecution {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
+/**
+ * What a ref resolved to, and whether it resolved as one of the remote's tags.
+ * The kind is carried rather than re-derived from the ref's spelling, because a
+ * newer release is reported for a marketplace pinned to a tag — a branch named
+ * like a version is not one, however much it looks like one.
+ */
+export interface ResolvedRef {
+  readonly commit: string;
+  readonly tag: boolean;
+}
+
 export interface MarketplaceManagerOptions {
   readonly runGit?: RunGit;
   readonly prepare?: (checkout: string) => Promise<void>;
@@ -846,22 +857,25 @@ export async function resolveMarketplaceRef(
   checkout: string,
   ref: string,
   execution: GitExecution,
-): Promise<string> {
+): Promise<ResolvedRef> {
   const attempts = /^\d/.test(ref) ? [ref, `v${ref}`] : [ref];
   for (const attempt of attempts) {
-    for (const revision of [
-      `refs/tags/${attempt}`,
-      `refs/remotes/${originRemote}/${attempt}`,
-    ]) {
-      const commit = await readResolvedCommit(
-        checkout,
-        `${revision}^{commit}`,
-        execution,
-      );
-      if (commit !== undefined) return commit;
-    }
-    const commit = await readPublishedCommit(checkout, attempt, execution);
-    if (commit !== undefined) return commit;
+    const tagged = await readResolvedCommit(
+      checkout,
+      `refs/tags/${attempt}^{commit}`,
+      execution,
+    );
+    if (tagged !== undefined) return { commit: tagged, tag: true };
+
+    const branch = await readResolvedCommit(
+      checkout,
+      `refs/remotes/${originRemote}/${attempt}^{commit}`,
+      execution,
+    );
+    if (branch !== undefined) return { commit: branch, tag: false };
+
+    const hash = await readPublishedCommit(checkout, attempt, execution);
+    if (hash !== undefined) return { commit: hash, tag: false };
   }
   throw new Error(`Version "${ref}" is not published by the remote`);
 }
@@ -1152,7 +1166,11 @@ export class MarketplaceManager implements MarketplaceOperations {
    * staging is discarded exactly as it is for any other publication failure.
    */
   async #stageVersion(staging: string, ref: string): Promise<void> {
-    const commit = await resolveMarketplaceRef(staging, ref, this.#execution);
+    const { commit } = await resolveMarketplaceRef(
+      staging,
+      ref,
+      this.#execution,
+    );
     await moveCheckout(staging, commit, this.#execution);
     await writeMarketplacePin(staging, ref, this.#execution);
   }
@@ -1226,7 +1244,11 @@ export class MarketplaceManager implements MarketplaceOperations {
   async pin(name: string, ref: string): Promise<string> {
     const checkout = await this.#pinnableCheckout(name);
     await this.#fetchCheckout(checkout);
-    const commit = await resolveMarketplaceRef(checkout, ref, this.#execution);
+    const { commit } = await resolveMarketplaceRef(
+      checkout,
+      ref,
+      this.#execution,
+    );
     await writeMarketplacePin(checkout, ref, this.#execution);
     return readCommitLabel(checkout, commit, this.#execution);
   }

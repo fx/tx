@@ -10,6 +10,7 @@ import {
   carriesGitSyntax,
   parseGitSourceVersion,
 } from "../plugins/marketplace/source.ts";
+import { MarketplaceUpdater } from "../plugins/marketplace/updater.ts";
 import {
   commitFixtureFiles,
   createGitRepository,
@@ -366,6 +367,38 @@ describe("marketplace pin and unpin", () => {
       // Pinning states an intention; `tx update` is where intentions become
       // checkouts, with its own validation and restoration.
       expect(fixtureGit(checkout, ["rev-parse", "HEAD"])).toBe(before);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("records a ref whose own name contains @, which no suffix can carry", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-at-ref-");
+    try {
+      const { remote, first } = await createVersionedRemote(temporaryRoot);
+      const root = join(temporaryRoot, "marketplaces");
+      const installed = manager(root, temporaryRoot);
+      await installed.add(pathToFileURL(remote).href);
+      const checkout = join(root, "tools");
+      fixtureGit(remote, ["tag", "release@beta", first]);
+
+      // The suffix cannot spell this ref — its separator is the last `@`
+      // outside the authority, which lands inside the name — so `pin` taking
+      // the ref as an argument of its own is what keeps it reachable.
+      // Reported by the label Git gives that commit, which is now this tag.
+      expect(await installed.pin("tools", "release@beta")).toBe("release@beta");
+      expect(pinOf(checkout)).toBe("release@beta");
+
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        prepare: async () => {},
+      });
+      const [item] = await participant.gather();
+      expect(item?.detail).toBe("pinned to release@beta");
+      expect(
+        await participant.apply({ name: "tools", current: "v2.0.0" }),
+      ).toEqual({ applied: true, version: "release@beta" });
+      expect(fixtureGit(checkout, ["rev-parse", "HEAD"])).toBe(first);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
