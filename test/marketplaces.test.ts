@@ -1188,11 +1188,42 @@ describe("MarketplaceManager", () => {
         { name: "zeta", source: "<unknown>", version: "<unknown>" },
       ]);
       // A reference reaches Git not at all, and no read here contacts a
-      // remote: the version comes out of the checkout.
-      expect(calls).toEqual([
-        ["-C", join(root, "alpha"), "config", "--get", "remote.origin.url"],
-        ["-C", join(root, "zeta"), "config", "--get", "remote.origin.url"],
-        ["-C", join(root, "alpha"), "describe", "--tags", "--always", "HEAD"],
+      // remote: the version comes out of the checkout. Compared as a set,
+      // because the entries are read concurrently and each column of an entry
+      // is read independently of the other.
+      expect(calls.map((args) => args.join(" ")).toSorted()).toEqual(
+        [
+          `-C ${join(root, "alpha")} config --get remote.origin.url`,
+          `-C ${join(root, "alpha")} describe --tags --always HEAD`,
+          `-C ${join(root, "zeta")} config --get remote.origin.url`,
+          `-C ${join(root, "zeta")} describe --tags --always HEAD`,
+        ].toSorted(),
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("lists the version of a checkout that has lost its remote", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-no-remote-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await mkdir(join(root, "orphaned"), { recursive: true });
+      const manager = new MarketplaceManager(root, {
+        runGit: async (args) => {
+          // What `git config --get` does for a variable that is not set,
+          // which is what a checkout whose origin was removed answers.
+          if (args.includes("remote.origin.url")) {
+            throw new Error("Git command failed");
+          }
+          return { stdout: "v1.4.0\n" };
+        },
+      });
+
+      // Each column is read on its own, so an unanswerable source does not
+      // take the version down with it.
+      expect(await manager.list()).toEqual([
+        { name: "orphaned", source: "<unknown>", version: "v1.4.0" },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

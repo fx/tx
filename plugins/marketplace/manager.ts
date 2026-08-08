@@ -649,6 +649,22 @@ export async function restoreCheckout(
   );
 }
 
+/**
+ * One column of a listing, or the placeholder that stands for what a corrupt
+ * checkout could not answer. Blank counts as unanswered, so the listing never
+ * leaves a column empty or varies its wording between rows.
+ */
+async function listedColumn(
+  read: () => Promise<string>,
+  placeholder: string,
+): Promise<string> {
+  try {
+    return (await read()) || placeholder;
+  } catch {
+    return placeholder;
+  }
+}
+
 export class MarketplaceManager implements MarketplaceOperations {
   readonly #root: string;
   readonly #runGit: RunGit;
@@ -813,33 +829,43 @@ export class MarketplaceManager implements MarketplaceOperations {
     const marketplaces = await discoverInstalledMarketplaces(this.#root);
     return Promise.all(
       marketplaces.map(
-        async ({ name, checkout }): Promise<MarketplaceListing> => {
-          let source = unknownSource;
-          let version = unknownMarketplaceVersion;
-          try {
-            if (await isMarketplaceReference(checkout)) {
-              // A reference reports the directory tx reads, not the remote
-              // that directory happens to have configured, and it has no
-              // version: its contents are whatever that directory holds.
-              source = await readlink(checkout);
-              version = liveMarketplaceVersion;
-            } else {
-              source =
-                (await readRemoteSource(checkout, this.#execution)) ||
-                unknownSource;
-              // The participant's label, read out of the checkout, so listing
-              // stays offline.
-              version =
-                (await readCommitLabel(checkout, "HEAD", this.#execution)) ||
-                unknownMarketplaceVersion;
-            }
-          } catch {
-            // A corrupt checkout remains visible and removable.
-          }
-          return { name, source, version };
-        },
+        async ({ name, checkout }): Promise<MarketplaceListing> => ({
+          name,
+          // One column cannot cost the other: a checkout whose remote was
+          // removed still holds a commit worth reporting, and one that cannot
+          // answer either is still listed and still removable.
+          source: await listedColumn(
+            () => this.#listedSource(checkout),
+            unknownSource,
+          ),
+          version: await listedColumn(
+            () => this.#listedVersion(checkout),
+            unknownMarketplaceVersion,
+          ),
+        }),
       ),
     );
+  }
+
+  /**
+   * A reference reports the directory tx reads, not the remote that directory
+   * happens to have configured.
+   */
+  async #listedSource(checkout: string): Promise<string> {
+    return (await isMarketplaceReference(checkout))
+      ? readlink(checkout)
+      : readRemoteSource(checkout, this.#execution);
+  }
+
+  /**
+   * The participant's own label, read out of the checkout, so listing stays
+   * offline. A reference has no version: its contents are whatever its
+   * directory holds when tx runs.
+   */
+  async #listedVersion(checkout: string): Promise<string> {
+    return (await isMarketplaceReference(checkout))
+      ? liveMarketplaceVersion
+      : readCommitLabel(checkout, "HEAD", this.#execution);
   }
 
   async remove(name: string): Promise<void> {

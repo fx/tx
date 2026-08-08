@@ -158,6 +158,26 @@ describe("marketplace update gathering", () => {
     }
   });
 
+  test("reports a tag the fetch brought in for the commit already installed", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-new-tag-");
+    try {
+      const { remote, root } = await installClone(
+        temporaryRoot,
+        "tools",
+        false,
+      );
+      // The publisher tags what is already installed and advances nothing, so
+      // the only thing the fetch changes is what this commit is called.
+      fixtureGit(remote, ["tag", "v1.0.0"]);
+
+      expect(await updater(root, unprepared).gather()).toEqual([
+        { name: "tools", current: "v1.0.0" },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("never reaches Git for a reference, and applies nothing to it", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-reference-");
     try {
@@ -494,6 +514,9 @@ describe("marketplace update environment", () => {
         ["config", "--system", "--get", "core.sshCommand"],
         ["-C", checkout, "fetch", "--tags", "origin"],
         ["-C", checkout, "remote", "set-head", "origin", "--auto"],
+        // Read again now the fetch has brought the tags in, since a tag added
+        // to the installed commit changes what it is called.
+        ["-C", checkout, "describe", "--tags", "--always", "aaaa"],
         ["-C", checkout, "rev-parse", "refs/remotes/origin/HEAD"],
         ["-C", checkout, "diff", "--name-only", "HEAD", "--"],
         ["-C", checkout, "rev-list", "--count", "bbbb..aaaa", "--"],
@@ -512,7 +535,7 @@ describe("marketplace update environment", () => {
       expect(calls[6]?.env).toEqual(nonInteractive);
       // Everything else — the probes that settled that default included —
       // keeps the invoking environment, by reference and unmodified.
-      for (const index of [0, 1, 2, 3, 4, 7, 8, 9, 10]) {
+      for (const index of [0, 1, 2, 3, 4, 7, 8, 9, 10, 11]) {
         expect(calls[index]?.env).toBe(env);
       }
       expect(env).toEqual({ PATH: "/test/bin", TOKEN: "secret" });

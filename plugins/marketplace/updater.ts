@@ -182,6 +182,12 @@ export class MarketplaceUpdater implements UpdateParticipant {
           failure: unreachableRemote(error, await this.#remoteSource(checkout)),
         };
       }
+      // Read again now the fetch has brought the remote's tags in: a publisher
+      // who tags the commit already installed, without advancing anything,
+      // changes what this commit is called and nothing else. Reading it only
+      // before the fetch would report the hash here while `marketplace list`
+      // reported the tag, and the two are required to be the same label.
+      label = await readCommitLabel(checkout, current, this.#execution);
       const target = await this.#resolveTarget(checkout);
       if (target === current) return { name, current: label };
 
