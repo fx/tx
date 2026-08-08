@@ -1,7 +1,7 @@
-import { pathToFileURL } from "node:url";
 import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
 
 import { MarketplaceManager, type MarketplaceOperations } from "./manager.ts";
+import { importPluginEntry } from "./module.ts";
 import {
   discoverInstalledMarketplaces,
   type MarketplaceCheckout,
@@ -57,9 +57,7 @@ function entryDefinition(
     identity: childIdentity(name, parent),
     async load(): Promise<Plugin> {
       try {
-        const source: PluginModule = await import(
-          pathToFileURL(entryPath).href
-        );
+        const source = (await importPluginEntry(entryPath)) as PluginModule;
         if (typeof source.default !== "function") {
           throw new Error(`Plugin ${name} must default-export a function`);
         }
