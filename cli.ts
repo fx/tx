@@ -6,9 +6,12 @@ import { main } from "./src/cli.ts";
 import type { PluginDefinition } from "./src/plugin.ts";
 
 /**
- * Composition order fixes update participant order: the update plugin comes
- * after the marketplace plugin, so a participant the marketplace contributes
- * is gathered and applied before anything composed after it.
+ * Composition order fixes the order of update participants among the plugins
+ * that contribute them: a participant contributed here is gathered and applied
+ * before one contributed by anything listed after it. The update plugin's own
+ * position is not part of that — it contributes no participant, and it reads
+ * the committed ones when its command runs rather than when it initializes, so
+ * it sees every participant wherever it sits in this array.
  */
 export const defaultPlugins: readonly PluginDefinition[] = Object.freeze([
   marketplacePlugin,
