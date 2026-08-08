@@ -424,13 +424,22 @@ export class ExecutableUpdater implements UpdateParticipant {
     return this.#replace(target, published);
   }
 
-  /** The lookup's headers. A token raises a rate limit that a shared address
-   * can exhaust; the release assets are public, so none is required. */
+  /** What every request this participant makes identifies itself with. */
   #headers(): Record<string, string> {
-    const headers = {
+    return {
       accept: "application/vnd.github+json",
       "user-agent": `tx/${this.#version}`,
     };
+  }
+
+  /**
+   * The lookup's headers. The token goes on the API request and nowhere else:
+   * it exists to raise the rate limit on unauthenticated API access, the
+   * release assets are public and need none, and an asset download redirects
+   * to a separate host that the token was never issued for.
+   */
+  #lookupHeaders(): Record<string, string> {
+    const headers = this.#headers();
     const token = tokenVariables
       .map((name) => this.#env[name])
       .find((value) => value);
@@ -439,10 +448,13 @@ export class ExecutableUpdater implements UpdateParticipant {
       : { ...headers, authorization: `Bearer ${token}` };
   }
 
-  async #get(url: string): Promise<Response> {
+  async #get(
+    url: string,
+    headers: Record<string, string> = this.#headers(),
+  ): Promise<Response> {
     let response: Response;
     try {
-      response = await this.#fetch(url, { headers: this.#headers() });
+      response = await this.#fetch(url, { headers });
     } catch (error) {
       throw new Error(`Request to ${url} failed: ${errorMessage(error)}`);
     }
@@ -455,7 +467,7 @@ export class ExecutableUpdater implements UpdateParticipant {
   }
 
   async #latestTag(): Promise<string> {
-    const response = await this.#get(releaseEndpoint);
+    const response = await this.#get(releaseEndpoint, this.#lookupHeaders());
     const payload = (await response.json()) as { tag_name?: unknown };
     const tag = payload.tag_name;
     if (typeof tag !== "string" || tag === "") {

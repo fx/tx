@@ -311,6 +311,48 @@ describe("executable update gathering", () => {
     expect(JSON.stringify(requests)).not.toContain("secret");
   });
 
+  test("sends the token to the API and to no other host", async () => {
+    // An asset download redirects to a separate host, and the assets are
+    // public, so the token belongs on the lookup that is rate limited without
+    // it and on nothing else.
+    const root = await workspace("token-scope");
+    const target = await installedExecutable(root, join("bin", "tx"));
+    const { fetch, requests } = stubFetch({
+      ...releaseRoutes(`v${publishedVersion}`),
+      ...downloadRoutes(
+        `v${publishedVersion}`,
+        stubExecutable,
+        checksumDocument(digestOf(stubExecutable)),
+      ),
+    });
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({
+        fetch,
+        executablePath: target,
+        env: { GH_TOKEN: "secret" },
+        run: () => ({
+          exitCode: 0,
+          stdout: `${publishedVersion}\n`,
+          stderr: "",
+        }),
+      }),
+    );
+
+    const [item] = await updater.gather();
+    if (!item) throw new Error("nothing was gathered");
+    expect(await updater.apply(item)).toMatchObject({ applied: true });
+
+    expect(requests).toHaveLength(3);
+    expect(header(requests[0], "authorization")).toBe("Bearer secret");
+    expect(requests[0]?.url).toBe(releaseUrl);
+    for (const request of requests.slice(1)) {
+      expect(request.url).toStartWith("https://github.com/fx/tx/releases/");
+      expect(header(request, "authorization")).toBeUndefined();
+      expect(JSON.stringify(request.headers)).not.toContain("secret");
+    }
+  });
+
   test.each([
     [
       (): Response => {
