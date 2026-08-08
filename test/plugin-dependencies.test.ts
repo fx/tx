@@ -1,8 +1,28 @@
 import { expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { importPluginEntry } from "../plugins/marketplace/module.ts";
+import {
+  type BundlingRuntime,
+  bundlePluginEntry,
+  importPluginEntry,
+} from "../plugins/marketplace/module.ts";
 import { temporaryDirectory, writeFixtureFiles } from "./helpers.ts";
+
+/**
+ * A bundler reporting an outcome rather than producing one. `Bun.build` throws
+ * for a failure under the options this loader passes, so the outcomes it
+ * reports instead — a failure carried by `success` and `logs`, and a success
+ * carrying no module — have no other way to be reached.
+ */
+function reportingBundler(result: {
+  readonly success: boolean;
+  readonly logs?: readonly unknown[];
+}): BundlingRuntime {
+  return {
+    build: async () => ({ logs: [], outputs: [], ...result }),
+    plugin: () => {},
+  };
+}
 
 const repositoryRoot = join(import.meta.dir, "..");
 
@@ -245,4 +265,35 @@ test("loading the same entry twice registers one loader", async () => {
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
+});
+
+test("a bundle reporting failure names the specifier rather than an empty module", async () => {
+  const failure = await bundlePluginEntry(
+    "/plugin/index.ts",
+    reportingBundler({
+      success: false,
+      logs: ['ResolveMessage: Could not resolve: "never-installed"'],
+    }),
+  ).then(
+    () => undefined,
+    (error: unknown) => error as Error,
+  );
+
+  expect(failure?.message).toBe(
+    'Cannot resolve dependencies: ResolveMessage: Could not resolve: "never-installed"',
+  );
+});
+
+test("a bundle reporting success without a module fails rather than loading nothing", async () => {
+  const failure = await bundlePluginEntry(
+    "/plugin/index.ts",
+    reportingBundler({ success: true }),
+  ).then(
+    () => undefined,
+    (error: unknown) => error as Error,
+  );
+
+  expect(failure?.message).toBe(
+    "Cannot resolve dependencies: the bundle reported success but produced no module",
+  );
 });

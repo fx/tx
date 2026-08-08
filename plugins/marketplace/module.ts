@@ -40,7 +40,17 @@ interface BundledModule {
   text(): Promise<string>;
 }
 
+/**
+ * A bundle reports its outcome twice over: `Bun.build` throws by default, and
+ * it reports the same failure as `success` with the detail in `logs` when a
+ * caller opts out of the throw. Both are declared, because a build that
+ * reports a failure this loader ignored would surface as a plugin exporting
+ * nothing — which names the wrong problem entirely, and names it in exactly
+ * the case this whole change exists to diagnose.
+ */
 interface BundleResult {
+  readonly success: boolean;
+  readonly logs: readonly unknown[];
   readonly outputs: readonly BundledModule[];
 }
 
@@ -63,12 +73,17 @@ interface ModuleLoaderRegistry {
  * already reaches the same runtime through Node's own `process.execPath` to
  * install dependencies.
  */
-interface BundlingRuntime {
+export interface BundlingRuntime {
   build(options: {
     readonly entrypoints: readonly string[];
     readonly target: "bun";
     readonly format: "esm";
     readonly sourcemap: "inline";
+    // Typed as the literal rather than a boolean, so enabling it is a type
+    // error rather than a puzzle at runtime: split output references sibling
+    // chunks by relative path, and this loader writes nothing to disk for
+    // those references to find.
+    readonly splitting: false;
   }): Promise<BundleResult>;
   plugin(definition: {
     readonly name: string;
@@ -89,23 +104,37 @@ function exactPathPattern(path: string): RegExp {
   return new RegExp(`^${path.replace(patternMetacharacters, "\\$&")}$`);
 }
 
-/**
- * What a failed bundle has to say. `Bun.build` throws an `AggregateError`
- * whose `errors` carry the individual resolution and parse failures — those
- * name the dependency that could not be resolved, while the aggregate's own
- * message ("Bundle failed") names nothing. A throw of any other shape is
- * reported as itself.
- */
-function bundleFailureDetail(error: unknown): string {
-  const failures = (error as { errors?: readonly unknown[] }).errors ?? [error];
+/** Everything a failure has to say about itself, in one line. */
+function describe(failures: readonly unknown[]): string {
   return failures.map(String).join("; ");
 }
 
-/** The plugin entry and its whole dependency graph as one module's source. */
-async function bundlePluginEntry(entryPath: string): Promise<string> {
+/**
+ * A failure a plugin author can act on. Every path here names the specifier
+ * that could not be resolved, because that is the whole point of resolving the
+ * graph ahead of time: the alternative is an empty module reported as a plugin
+ * that exports nothing, which describes neither the problem nor its location.
+ */
+function bundleFailure(detail: string): Error {
+  return new Error(`Cannot resolve dependencies: ${detail}`);
+}
+
+/**
+ * The plugin entry and its whole dependency graph as one module's source.
+ *
+ * The bundler is a parameter so that the outcomes `Bun.build` does not produce
+ * under these options can still be exercised. It throws here rather than
+ * returning an unsuccessful result, but that is a default it has changed
+ * before — this repository's own `build.ts` still checks `success` — and a
+ * silent empty bundle is a bad enough failure to be worth handling either way.
+ */
+export async function bundlePluginEntry(
+  entryPath: string,
+  bundler: BundlingRuntime = runtime,
+): Promise<string> {
   let result: BundleResult;
   try {
-    result = await runtime.build({
+    result = await bundler.build({
       entrypoints: [entryPath],
       target: "bun",
       format: "esm",
@@ -113,16 +142,23 @@ async function bundlePluginEntry(entryPath: string): Promise<string> {
       // would have no place to sit, and without one every frame of a plugin's
       // own stack traces would point into generated output.
       sourcemap: "inline",
+      splitting: false,
     });
   } catch (error) {
-    throw new Error(
-      `Cannot resolve dependencies: ${bundleFailureDetail(error)}`,
+    // An `AggregateError` whose `errors` carry the individual resolution and
+    // parse failures; its own message ("Bundle failed") names nothing. A throw
+    // of any other shape is reported as itself.
+    throw bundleFailure(
+      describe((error as { errors?: readonly unknown[] }).errors ?? [error]),
     );
   }
-  // One entrypoint bundled without splitting is one module. An empty result
-  // would reach the caller as a plugin exporting nothing, which it reports.
+  if (!result.success) throw bundleFailure(describe(result.logs));
+
   const [module] = result.outputs;
-  return module === undefined ? "" : module.text();
+  if (module === undefined) {
+    throw bundleFailure("the bundle reported success but produced no module");
+  }
+  return module.text();
 }
 
 /**
