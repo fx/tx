@@ -5,7 +5,7 @@
 Give the host one more generic contribution — an update participant — and add a bundled `update` plugin that drives whatever has been contributed. `tx update` gathers what could change and applies it; `tx update --dry-run` gathers and stops. Neither the host nor the driver knows what a marketplace or an executable is; the plugins that own those contribute participants in [0013](./0013-update-installed-marketplaces.md) and [0015](./0015-update-the-tx-executable.md).
 
 **Spec:** [Updates](../specs/updates/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0007
 
 ## Motivation
@@ -119,35 +119,35 @@ An item is in scope when no names were given, or when its name is one of them. A
   - [x] Replace the Architecture and Plugin System statements that automatic updates are out of scope with pointers to the prohibition (PR #30)
   - [x] Update the specs' references and changelogs, and both documentation indexes (PR #30)
 
-- [ ] Add the participant contract to the public plugin module
-  - [ ] Declare `UpdateItem`, `UpdateResult`, `UpdateParticipant`, and `UpdateParticipation` in `src/plugin.ts`
-  - [ ] Add `update(participant)` and `updaters()` to `PluginAPI`
-  - [ ] Confirm the module stays types-only and adds no runtime export
+- [x] Add the participant contract to the public plugin module
+  - [x] Declare `UpdateItem`, `UpdateResult`, `UpdateParticipant`, and `UpdateParticipation` in `src/plugin.ts`
+  - [x] Add `update(participant)` and `updaters()` to `PluginAPI`
+  - [x] Confirm the module stays types-only and adds no runtime export
 
-- [ ] Stage and commit participants in `src/plugins.ts`
-  - [ ] Stage contributions per plugin, rejecting a contribution made after initialization exactly as a late command registration is rejected
-  - [ ] Commit staged participants frozen with their owner's identity, in FIFO order, and drop them with everything else when the plugin fails
-  - [ ] Return a frozen snapshot from `updaters()` at call time
-  - [ ] Confirm no marketplace, network, version, or update-domain vocabulary enters `src/`
+- [x] Stage and commit participants in `src/plugins.ts`
+  - [x] Stage contributions per plugin, rejecting a contribution made after initialization exactly as a late command registration is rejected
+  - [x] Commit staged participants frozen with their owner's identity, in FIFO order, and drop them with everything else when the plugin fails
+  - [x] Return a frozen snapshot from `updaters()` at call time
+  - [x] Confirm no marketplace, network, version, or update-domain vocabulary enters `src/`
 
-- [ ] Add the bundled `update` plugin under `plugins/update/`
-  - [ ] Claim the `update` namespace and define the action on its root with `--dry-run` and optional item names
-  - [ ] Gather from every committed participant in order, reporting each item's name, current label, available label or its absence, and detail
-  - [ ] Reject item names that match nothing before applying anything
-  - [ ] Apply in-scope items sequentially, skipping every apply on a dry run
-  - [ ] Report results on standard output and failures on standard error through the injected context streams
-  - [ ] Isolate each participant call so one failure neither aborts the run nor hides the remaining items, report an item that carries its own failure as failed without applying it, and exit non-zero when anything failed
-  - [ ] Compose the plugin in `cli.ts` after the marketplace plugin, with the ordering stated
+- [x] Add the bundled `update` plugin under `plugins/update/`
+  - [x] Claim the `update` namespace and define the action on its root with `--dry-run` and optional item names
+  - [x] Gather from every committed participant in order, reporting each item's name, current label, available label or its absence, and detail
+  - [x] Reject item names that match nothing before applying anything
+  - [x] Apply in-scope items sequentially, skipping every apply on a dry run
+  - [x] Report results on standard output and failures on standard error through the injected context streams
+  - [x] Isolate each participant call so one failure neither aborts the run nor hides the remaining items, report an item that carries its own failure as failed without applying it, and exit non-zero when anything failed
+  - [x] Compose the plugin in `cli.ts` after the marketplace plugin, with the ordering stated
 
-- [ ] Cover the new behavior in tests
-  - [ ] Extend `test/plugins.test.ts` with staging, commit-order, late-contribution, and failure-drop cases for participants
-  - [ ] Add `test/update-plugin.test.ts` driving stub participants: gather-only dry runs, applied runs, selection by name, an unmatched name, gather failures, apply failures, an item carrying its own failure alongside healthy siblings that still apply, an applied-nothing result that does not fail the run, mixed outcomes, and exit codes
-  - [ ] Assert a dry run calls no participant's apply
-  - [ ] Assert the driver never imports marketplace or executable modules, through `test/plugin-boundary.test.ts`
-  - [ ] Assert `tx update` with no participants reports nothing to update and exits zero
+- [x] Cover the new behavior in tests
+  - [x] Extend `test/plugins.test.ts` with staging, commit-order, late-contribution, and failure-drop cases for participants
+  - [x] Add `test/update-plugin.test.ts` driving stub participants: gather-only dry runs, applied runs, selection by name, an unmatched name, gather failures, apply failures, an item carrying its own failure alongside healthy siblings that still apply, an applied-nothing result that does not fail the run, mixed outcomes, and exit codes
+  - [x] Assert a dry run calls no participant's apply
+  - [x] Assert the driver never imports marketplace or executable modules, through `test/plugin-boundary.test.ts`
+  - [x] Assert `tx update` with no participants reports nothing to update and exits zero
 
-- [ ] Document `tx update` and the participant contract in `docs/manual/plugins.md`, in the pull request that implements it
-- [ ] Verify 100% coverage and `bun run check`
+- [x] Document `tx update` and the participant contract in `docs/manual/plugins.md`, in the pull request that implements it
+- [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 

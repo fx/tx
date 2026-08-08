@@ -6,7 +6,7 @@ The plugin system is a generic host for trusted plugins. Core code under `src/` 
 
 The approved target architecture is implemented: the core is generic, the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md), and the canonical package API is scoped as specified in [Change 0004](../../changes/0004-automate-versioning-and-publishing.md).
 
-One part of this specification is not yet implemented: [Update Participation](#update-participation), and the marketplace version and pin behavior it points at. Those describe the desired state and are planned by [Change 0012](../../changes/0012-add-generic-update-lifecycle.md) through [Change 0014](../../changes/0014-pin-marketplace-versions.md); nothing in them is in the shipped `@fx/tx/plugin` contract today.
+[Update Participation](#update-participation) is implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md): the contribution, its staging, and its public types are in the shipped `@fx/tx/plugin` contract, and no bundled plugin contributes a participant yet. The marketplace version and pin behavior that section points at is not implemented, and is planned by [Change 0013](../../changes/0013-update-installed-marketplaces.md) and [Change 0014](../../changes/0014-pin-marketplace-versions.md).
 
 ## Requirements
 
