@@ -64,6 +64,14 @@ function unusableMarketplace(name: string, error: unknown): string {
  * so a checkout that cannot even name its remote still reports the failure
  * that matters.
  */
+function unreachableRemote(error: unknown, source: string): string {
+  const message = withoutCredentials(
+    errorMessage(error),
+    credentialRedactions(source),
+  );
+  return `${message}. Check that the marketplace's remote is reachable, then retry.`;
+}
+
 /**
  * A pin whose ref the remote no longer publishes — a deleted tag, a merged
  * branch. The remedy is the pin, not the installation: the marketplace itself
@@ -74,12 +82,13 @@ function unresolvablePin(name: string, error: unknown): string {
   return `${errorMessage(error)}. Run "tx marketplace pin ${name} <ref>" or "tx marketplace unpin ${name}".`;
 }
 
-function unreachableRemote(error: unknown, source: string): string {
-  const message = withoutCredentials(
-    errorMessage(error),
-    credentialRedactions(source),
-  );
-  return `${message}. Check that the marketplace's remote is reachable, then retry.`;
+/** The one line of detail an item may carry, joined from whatever the pin and
+ * the blocking check had to say, or nothing when neither had anything. */
+function reportedDetail(...parts: readonly (string | undefined)[]): {
+  detail?: string;
+} {
+  const line = parts.filter(Boolean).join("; ");
+  return line === "" ? {} : { detail: line };
 }
 
 /**
@@ -219,11 +228,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
       const pinned =
         pin === undefined ? undefined : await this.#pinDetail(checkout, pin);
       if (target === current) {
-        return {
-          name,
-          current: label,
-          ...(pinned === undefined ? {} : { detail: pinned }),
-        };
+        return { name, current: label, ...reportedDetail(pinned) };
       }
 
       // Reported as detail rather than withheld: a user asking what is
@@ -236,12 +241,11 @@ export class MarketplaceUpdater implements UpdateParticipant {
         target,
         pin,
       );
-      const detail = [pinned, blocked].filter(Boolean).join("; ");
       return {
         name,
         current: label,
         available: await readCommitLabel(checkout, target, this.#execution),
-        ...(detail === "" ? {} : { detail }),
+        ...reportedDetail(pinned, blocked),
       };
     } catch (error) {
       return {

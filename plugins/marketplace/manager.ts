@@ -14,7 +14,11 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { carriesGitSyntax, parseGitSourceVersion } from "./source.ts";
+import {
+  carriesGitSyntax,
+  parseGitSourceVersion,
+  windowsDrivePattern,
+} from "./source.ts";
 import {
   containedMarketplacePath,
   discoverInstalledMarketplaces,
@@ -157,7 +161,7 @@ export function deriveMarketplaceName(repository: string): string {
     candidate = url.pathname;
   } catch {
     const scpSeparator = candidate.indexOf(":");
-    if (scpSeparator >= 0 && !/^[A-Za-z]:[\\/]/.test(candidate)) {
+    if (scpSeparator >= 0 && !windowsDrivePattern.test(candidate)) {
       candidate = candidate.slice(scpSeparator + 1);
     }
   }
@@ -496,6 +500,23 @@ export async function nonInteractiveGitEnvironment(
   return { ...promptless, GIT_SSH_COMMAND: batchModeSshCommand };
 }
 
+/**
+ * A Git read whose failure and whose blank answer mean the same thing: the
+ * thing asked about is not there. One definition, because every caller of it
+ * is asking Git a question it answers by exit status — an unset configuration
+ * variable, a revision that names nothing, a checkout too broken to say — and
+ * each would otherwise repeat the same swallow.
+ */
+async function readOptional(
+  read: () => Promise<string>,
+): Promise<string | undefined> {
+  try {
+    return (await read()) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** One Git command inside a checkout, answered by its trimmed output. */
 async function readCheckout(
   checkout: string,
@@ -685,17 +706,13 @@ export async function readMarketplacePin(
   checkout: string,
   execution: GitExecution,
 ): Promise<string | undefined> {
-  try {
-    return (
-      (await readCheckout(
-        checkout,
-        ["config", "--local", "--get", pinVariable],
-        execution,
-      )) || undefined
-    );
-  } catch {
-    return undefined;
-  }
+  return readOptional(() =>
+    readCheckout(
+      checkout,
+      ["config", "--local", "--get", pinVariable],
+      execution,
+    ),
+  );
 }
 
 /**
@@ -726,24 +743,24 @@ export async function clearMarketplacePin(
   );
 }
 
-/** One revision, resolved to the commit it names, or nothing. */
+/**
+ * One revision, resolved to the commit it names, or nothing — which is how
+ * `rev-parse --quiet` answers a revision that names nothing, and the only
+ * outcome this has to tell apart. `--end-of-options` keeps a revision
+ * beginning with `-` a revision rather than an option.
+ */
 async function readResolvedCommit(
   checkout: string,
   revision: string,
   execution: GitExecution,
 ): Promise<string | undefined> {
-  try {
-    return (
-      (await readCheckout(
-        checkout,
-        ["rev-parse", "--verify", "--quiet", "--end-of-options", revision],
-        execution,
-      )) || undefined
-    );
-  } catch {
-    // How `rev-parse --quiet` reports a revision that names nothing.
-    return undefined;
-  }
+  return readOptional(() =>
+    readCheckout(
+      checkout,
+      ["rev-parse", "--verify", "--quiet", "--end-of-options", revision],
+      execution,
+    ),
+  );
 }
 
 /**
@@ -861,11 +878,7 @@ async function listedColumn(
   read: () => Promise<string>,
   placeholder: string,
 ): Promise<string> {
-  try {
-    return (await read()) || placeholder;
-  } catch {
-    return placeholder;
-  }
+  return (await readOptional(read)) ?? placeholder;
 }
 
 export class MarketplaceManager implements MarketplaceOperations {
@@ -896,10 +909,10 @@ export class MarketplaceManager implements MarketplaceOperations {
     // directory named `tools@2` is that directory, so only a source Git is
     // being handed is examined for a version at all.
     const local = await this.#resolveLocalSource(source);
-    const version =
-      local === undefined ? parseGitSourceVersion(source) : undefined;
-    const repository = version?.source ?? source;
-    const ref = version?.ref;
+    const { source: repository, ref } =
+      local === undefined
+        ? parseGitSourceVersion(source)
+        : { source, ref: undefined };
     if (ref !== undefined)
       await this.#requireVersionableSource(repository, ref);
 

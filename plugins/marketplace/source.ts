@@ -1,4 +1,5 @@
-const windowsDrivePattern = /^[A-Za-z]:[\\/]/;
+/** The one colon that opens a local path rather than a remote's authority. */
+export const windowsDrivePattern = /^[A-Za-z]:[\\/]/;
 
 /** A Git source and the version its suffix named, where it carried one. */
 export interface GitSourceVersion {
