@@ -6,6 +6,8 @@ The plugin system is a generic host for trusted plugins. Core code under `src/` 
 
 The approved target architecture is implemented: the core is generic, the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md), and the canonical package API is scoped as specified in [Change 0004](../../changes/0004-automate-versioning-and-publishing.md).
 
+One part of this specification is not yet implemented: [Update Participation](#update-participation), and the marketplace version and pin behavior it points at. Those describe the desired state and are planned by [Change 0012](../../changes/0012-add-generic-update-lifecycle.md) through [Change 0014](../../changes/0014-pin-marketplace-versions.md); nothing in them is in the shipped `@fx/tx/plugin` contract today.
+
 ## Requirements
 
 ### Generic Plugin Host
@@ -13,7 +15,7 @@ The approved target architecture is implemented: the core is generic, the market
 - Every plugin definition MUST have an immutable, marketplace-agnostic identity.
 - A plugin definition MAY lazily provide child plugin definitions.
 - The host MUST initialize root and child plugin definitions in deterministic FIFO order.
-- Commands and child plugin definitions contributed during one plugin initialization MUST be staged atomically.
+- Commands, child plugin definitions, and update participants contributed during one plugin initialization MUST be staged atomically.
 - If initialization succeeds, the host MUST commit all staged contributions together.
 - If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure on standard error against its generic identity, and continue initializing unrelated plugins.
 - A failed plugin MUST NOT prevent commands committed by healthy plugins from dispatching.
@@ -24,9 +26,9 @@ The approved target architecture is implemented: the core is generic, the market
 
 #### Scenario: Atomic initialization
 
-- **GIVEN** a plugin stages commands and child definitions
+- **GIVEN** a plugin stages commands, child definitions, and an update participant
 - **WHEN** its initialization throws
-- **THEN** none of those commands or child definitions become visible
+- **THEN** none of those commands, child definitions, or participants become visible
 
 #### Scenario: Deterministic child initialization
 
@@ -49,7 +51,7 @@ The approved target architecture is implemented: the core is generic, the market
 ### Public Plugin Contract
 
 - The public package MUST expose the plugin contract through `@fx/tx/plugin`.
-- The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, namespace registration, command context, and React, Ink, command-parser, and version dependencies.
+- The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, namespace registration, update participation, command context, and React, Ink, command-parser, and version dependencies.
 - Public plugin types and initialization context MUST NOT contain marketplace names, paths, manifests, storage services, Git services, dependency installers, or marketplace-specific diagnostics.
 - Plugin identity MUST be assigned by the definition's owner and MUST NOT be mutable by the plugin during initialization.
 - Initialization context MUST expose only generic host capabilities.
@@ -87,6 +89,8 @@ export interface PluginAPI {
   readonly dependencies: CoreDependencies
   command(build: (namespace: Command) => void): void
   plugin(definition: PluginDefinition): void
+  update(participant: UpdateParticipant): void
+  updaters(): readonly UpdateParticipation[]
 }
 
 export type Plugin = (api: PluginAPI) => void | Promise<void>
@@ -117,6 +121,62 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - **GIVEN** a plugin defines commands and options using only the namespace the host supplies
 - **WHEN** it is built and type-checked as an external consumer
 - **THEN** it needs no parser dependency, package manifest, or build step of its own
+
+### Update Participation
+
+A plugin that installs something on the user's behalf can be asked what it would change and told to change it. The host owns registering, isolating, and handing over those participants; what an update *means* is owned by [Updates](../updates/index.md), and the marketplace and executable participants are specified there.
+
+- A plugin MAY contribute update participants during initialization, and MAY contribute more than one.
+- A contributed participant is staged, committed, and discarded under the atomic-staging rules in [Generic Plugin Host](#generic-plugin-host), which owns them for every contribution; a plugin that fails initialization therefore contributes no participant. Nothing about participants changes those rules, and this section states none of them again.
+- The host MUST record the contributing plugin's identity with each participant, so a driver can report a participant's failure against its owner without the participant naming itself.
+- The host MUST make committed participants readable through the initialization API, in the deterministic FIFO order in which they were committed.
+- Reading participants MUST reflect what is committed at the moment of the call. A plugin that reads them during its own initialization sees only what was committed before it, which is why the driver reads them when its command runs rather than when it initializes.
+- The host MUST NOT call a participant. It stores and hands them over; invoking one is the driver's business, and the host has no update vocabulary beyond the contract's shape.
+- A participant reports items and applies them. The host MUST NOT interpret an item's name, version labels, detail, or failure, and MUST NOT decide whether an item is out of date.
+- An item MUST be able to carry its own failure, so a participant covering several things can report one of them as failed while still reporting the rest. Throwing is the participant's way of saying it could not report at all; a failed item is its way of saying one thing it found is unusable.
+- Contributing a participant MUST NOT itself claim a namespace, and MUST NOT require the contributing plugin to define any command. A plugin that also defines commands claims its namespace through them exactly as it does today, so a participant may come from a plugin with a namespace or from one without.
+
+Conceptual public shape:
+
+```ts
+export interface UpdateItem {
+  readonly name: string
+  readonly current: string
+  readonly available?: string
+  readonly detail?: string
+  readonly failure?: string
+}
+
+export interface UpdateResult {
+  readonly applied: boolean
+  readonly version?: string
+  readonly detail?: string
+}
+
+export interface UpdateParticipant {
+  gather(): Promise<readonly UpdateItem[]> | readonly UpdateItem[]
+  apply(item: UpdateItem): Promise<UpdateResult> | UpdateResult
+}
+
+export interface UpdateParticipation {
+  readonly identity: PluginIdentity
+  readonly participant: UpdateParticipant
+}
+```
+
+The exact structural representation MAY vary, but it MUST preserve the owned contracts above. `available` absent means there is nothing to apply; every label is an opaque string chosen by the participant. A returned result means the participant handled the item — `applied` distinguishes having changed something from having deliberately changed nothing — and a thrown failure means it did not; [Updates: The Update Command](../updates/index.md#the-update-command) owns what a driver does with each.
+
+#### Scenario: Participant without commands
+
+- **GIVEN** a plugin that contributes an update participant and calls no command builder
+- **WHEN** the host commits its contribution
+- **THEN** the participant is readable through the initialization API and the plugin claims no namespace
+
+#### Scenario: Failed plugin contributes no participant
+
+- **GIVEN** a plugin contributes an update participant and then throws during initialization
+- **WHEN** a driver reads committed participants
+- **THEN** that participant is absent, exactly as the plugin's staged commands are
 
 ### Namespace Ownership
 
@@ -173,11 +233,13 @@ export interface CommandContext {
 - A Git source that is HTTP(S), whether typed as such or produced by shorthand expansion, MUST be attempted over HTTP(S) first.
 - When that attempt fails, for any reason, `marketplace add` MUST retry the clone exactly once against the SSH source derived from it, under the same requested name and the same target path. A Git source that is not HTTP(S) MUST be attempted exactly once.
 - The derived SSH source MUST be `git@host:path` in SCP syntax, taking only the host and the path from the HTTP(S) source. The source's userinfo MUST NOT be carried into it: a userinfo is an HTTP credential rather than an SSH login, so carrying one would transmit it to the remote as a login name, and the SSH login of a hosted forge is `git` regardless. The source's port MUST NOT be carried into it either, because an HTTP(S) port is not an SSH port. Percent-escapes in the path MUST be decoded, since Git decodes them in an `ssh://` URL but not in SCP syntax; a path whose escapes cannot be decoded MUST derive no SSH source at all, and query and fragment MUST NOT be carried into the derived source. An SSH login other than `git`, or a non-standard SSH port, MUST be reached by giving that SSH source directly rather than by guessing it from an HTTP(S) one.
-- Git's own terminal prompt MUST be disabled for every clone attempt, so a missing HTTP(S) credential fails rather than blocking on a prompt, which would otherwise keep the SSH retry from ever running. Configured credential helpers and askpass programs MUST remain in effect. Every clone attempt, not only the derived SSH retry, MUST run SSH in batch mode when no SSH command is configured, so a missing key or an unknown host key fails rather than asking: Git MAY rewrite an HTTP(S) source to SSH before the first attempt ever dials, through an `url.<base>.insteadOf` rule, and ssh(1) reads its own host-key and passphrase prompts from the terminal, where disabling Git's prompt does not reach them. An SSH command the caller configured — through `GIT_SSH_COMMAND`, through `GIT_SSH`, or through Git's own `core.sshCommand` in a scope a clone applies — MUST be used as it stands rather than overridden, and such a command MAY still prompt, its prompting behavior belonging to whoever configured it. The scopes a clone applies MUST include command scope supplied by the environment through `GIT_CONFIG_COUNT` with its `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` entries, whose key MUST be matched case-insensitively as Git matches configuration names, alongside the global and system files: command scope outranks both files, and a clone applies it. A repository-local `core.sshCommand` MUST NOT count as configured: `git clone` creates the repository it writes into and never applies the local configuration of the repository the command was invoked from, so counting it would suppress batch mode for a command the clone cannot use and leave the attempt free to block on a prompt. These environment changes MUST apply to clone attempts only; reading Git configuration, `marketplace list`, and dependency installation MUST keep the invoking environment unchanged.
+- Git's own terminal prompt MUST be disabled for every clone attempt, so a missing HTTP(S) credential fails rather than blocking on a prompt, which would otherwise keep the SSH retry from ever running. Configured credential helpers and askpass programs MUST remain in effect. Every clone attempt, not only the derived SSH retry, MUST run SSH in batch mode when no SSH command is configured, so a missing key or an unknown host key fails rather than asking: Git MAY rewrite an HTTP(S) source to SSH before the first attempt ever dials, through an `url.<base>.insteadOf` rule, and ssh(1) reads its own host-key and passphrase prompts from the terminal, where disabling Git's prompt does not reach them. An SSH command the caller configured — through `GIT_SSH_COMMAND`, through `GIT_SSH`, or through Git's own `core.sshCommand` in a scope a clone applies — MUST be used as it stands rather than overridden, and such a command MAY still prompt, its prompting behavior belonging to whoever configured it. The scopes a clone applies MUST include command scope supplied by the environment through `GIT_CONFIG_COUNT` with its `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` entries, whose key MUST be matched case-insensitively as Git matches configuration names, alongside the global and system files: command scope outranks both files, and a clone applies it. A repository-local `core.sshCommand` MUST NOT count as configured: `git clone` creates the repository it writes into and never applies the local configuration of the repository the command was invoked from, so counting it would suppress batch mode for a command the clone cannot use and leave the attempt free to block on a prompt. These environment changes MUST apply to operations against a remote only, per the bullet on non-interactive network operations below; reading Git configuration, `marketplace list`, and dependency installation MUST keep the invoking environment unchanged.
 - Only the clone MUST be retried. A failure in manifest validation, dependency installation, or the installed-name check MUST NOT trigger another clone attempt.
 - When every attempt fails and more than one was made, the reported failure MUST name every attempted source and MUST preserve every underlying failure message. In that combined failure, the source's userinfo password, and every `userinfo@` run Git quotes, MUST be removed throughout: from the sources it names, from the preserved messages, which quote Git output repeating the clone URL, and from any underlying failure attached to it as a cause. Removal MUST be anchored on the userinfo run including its trailing `@`, which is the only way Git spells a credential — in the URL it was handed, in the URL it echoes with the password stripped, and in the host-only form it prints when a source has a username and no password. A userinfo *user* that appears without its `@`, such as a server message naming the account, MAY remain: deleting a bare identifier would rewrite the surrounding text and report repositories the user never typed, and the password is covered regardless because Git never spells one outside a userinfo run. An empty userinfo component MUST contribute no removal at all — a source MAY leave the user out and carry its token as the password, or spell an empty userinfo outright — because the run built from one is a bare `@`, and removing that would take the `@` out of every host the failure names. When only one attempt was made, its failure MUST be reported as it is, without redaction, since that is the failure Git itself reported and the pre-existing behavior for it.
 - A marketplace installed through the SSH retry MUST report its SSH source in `marketplace list`, since that is the source it was cloned from.
 - For local directory sources, see [Local Marketplace Sources](#local-marketplace-sources). That section owns the requirement and states it in RFC 2119 terms; this bullet is a pointer to it, not a second statement of it.
+- The marketplace plugin MUST own the marketplace update participant, marketplace version labels, and marketplace version pins, including the `<source>@<ref>` suffix `marketplace add` accepts and the commands that change a pin. [Updates: Marketplace Updates](../updates/index.md#marketplace-updates) and [Updates: Marketplace Versions and Pins](../updates/index.md#marketplace-versions-and-pins) own those requirements and state them in RFC 2119 terms; these are pointers to them, not a second statement of them.
+- The non-interactive execution required of clone attempts above MUST apply to every network operation the marketplace plugin performs against a remote, fetching included, and MUST NOT extend to reading Git configuration, `marketplace list`, or dependency installation.
 - Automatically loading `.tx/config.json` from the current working repository is out of scope. A working repository is loaded by adding it as a local marketplace source.
 - The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
 - The marketplace plugin MUST define deterministic marketplace-name and manifest-entry ordering before contributing child definitions to the FIFO host.
@@ -375,8 +437,9 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 
 ## Constraints
 
-- Plugin sandboxing, signing, provenance, rollback, catalogs, and automatic updates are out of scope.
-- One installed checkout represents a cloned marketplace's current version. A referenced local marketplace has no pinned version; its current version is whatever its directory holds when `tx` runs.
+- Plugin sandboxing, signing, provenance, rollback, and catalogs are out of scope.
+- Automatic update checking is prohibited rather than merely unimplemented, and user-invoked updating is specified by [Updates](../updates/index.md).
+- One installed checkout represents a cloned marketplace's current version, which [Updates](../updates/index.md) moves and pins. A referenced local marketplace has no version to pin; its current version is whatever its directory holds when `tx` runs.
 - Dependency environment isolation between plugins is not required.
 - Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
 
@@ -389,6 +452,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 ## References
 
 - [Architecture](../architecture/)
+- [Updates](../updates/)
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Change 0004: Automate Versioning and Publishing](../../changes/0004-automate-versioning-and-publishing.md)
 - [Change 0005: Install Per-Plugin Dependencies](../../changes/0005-install-per-plugin-dependencies.md)
@@ -397,6 +461,9 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Change 0010: Retry Marketplace Clones Over SSH](../../changes/0010-retry-marketplace-clones-over-ssh.md)
 - [Change 0011: Resolve Plugin Dependencies By Node Rules](../../changes/0011-resolve-plugin-dependencies-by-node-rules.md)
+- [Change 0012: Add a Generic Update Lifecycle](../../changes/0012-add-generic-update-lifecycle.md)
+- [Change 0013: Update Installed Marketplaces](../../changes/0013-update-installed-marketplaces.md)
+- [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -416,3 +483,6 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-06 | Specified local marketplace sources as live references so authors can run uncommitted plugin work against the real executable | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
 | 2026-08-07 | Required a failed HTTP(S) marketplace clone to be retried once against its derived SSH source, non-interactively, staged per attempt, and reported without credentials | [0010-retry-marketplace-clones-over-ssh](../../changes/0010-retry-marketplace-clones-over-ssh.md) |
 | 2026-08-07 | Required a plugin's dependency graph to resolve by Node's rules in a compiled executable, without relying on its runtime module resolver | [0011-resolve-plugin-dependencies-by-node-rules](../../changes/0011-resolve-plugin-dependencies-by-node-rules.md) |
+| 2026-08-07 | Added generic update participants as a staged, isolated, host-recorded contribution to the plugin host and its public contract | [0012-add-generic-update-lifecycle](../../changes/0012-add-generic-update-lifecycle.md) |
+| 2026-08-07 | Gave the marketplace plugin the update participant and version labels, and extended non-interactive execution from cloning to every operation against a remote | [0013-update-installed-marketplaces](../../changes/0013-update-installed-marketplaces.md) |
+| 2026-08-07 | Gave the marketplace plugin marketplace version pins, including the source suffix and the commands that change one | [0014-pin-marketplace-versions](../../changes/0014-pin-marketplace-versions.md) |

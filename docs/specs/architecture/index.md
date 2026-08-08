@@ -66,7 +66,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - The deterministic production build MUST create the standalone executable at `dist/tx` using `bun-linux-x64-baseline`.
 - A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage, or from a location that storage references rather than from the storage itself.
 - The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist.
-- GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend.
+- GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend. Those two assets are also what an executable no version manager owns replaces itself from; where one does own it, self-update delegates to that manager instead. [Updates: Executable Updates](../updates/index.md#executable-updates) owns both paths and the platforms they reach.
 - `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
 
 #### Scenario: Standalone host
@@ -99,7 +99,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 ### Composition Root
 
 - A repository composition root outside `src/` MUST supply an ordered list of default plugin definitions to the host.
-- Default plugin ordering MUST be explicit at the composition root.
+- Default plugin ordering MUST be explicit at the composition root. Ordering is observable rather than cosmetic: it fixes the order in which contributed update participants run. A default plugin that owns the executable itself MUST therefore be composed after every other default plugin, so that whatever the others own is updated before the executable is replaced.
 - The composition root MAY import default plugin entries; core implementation under `src/` MUST NOT.
 - A default plugin MUST be removable or replaceable without adding feature-specific vocabulary to `src/`.
 
@@ -187,7 +187,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 Generic core implementation in `src/` has four responsibilities:
 
 1. Initialize generic plugin definitions and isolate failures.
-2. Atomically commit commands and lazy child definitions contributed by each successful plugin.
+2. Atomically commit every contribution a successful plugin staged — commands, lazy child definitions, and the update participants specified by [Plugin System: Update Participation](../plugin-system/index.md#update-participation).
 3. Build one root program in which each plugin owns a namespace named after its identity.
 4. Resolve the first argument to a namespace, delegate the rest to its owner, and map the outcome to an exit code.
 
@@ -243,15 +243,17 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 
 - Additional supported operating systems and architectures may be decided in a future change.
 - Plugin initialization is eager: on every invocation that reaches dispatch, every installed plugin loads to contribute its namespace and description. Making it lazy is worth revisiting if startup cost comes to justify the added caching contract.
-- Automatic marketplace updates are out of scope initially.
+- Automatic update checking is prohibited outright rather than deferred; [Updates](../updates/) owns that prohibition and the user-invoked update lifecycle that replaces it.
 
 ## References
 
 - [Plugin System](../plugin-system/)
+- [Updates](../updates/)
 - [Change 0003: Externalize Marketplace Plugin](../../changes/0003-externalize-marketplace-plugin.md)
 - [Change 0007: Delegate Dispatch to Plugins](../../changes/0007-delegate-dispatch-to-plugins.md)
 - [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Change 0009: Skip Quality Commands for Documentation](../../changes/0009-skip-quality-commands-for-documentation.md)
+- [Change 0015: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
 
 ## Changelog
@@ -268,3 +270,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-05 | Delegated everything after the plugin namespace to its owner, settled the parser question, and collapsed usage and runtime failures onto one exit code | [0007-delegate-dispatch-to-plugins](../../changes/0007-delegate-dispatch-to-plugins.md) |
 | 2026-08-06 | Allowed plugin-owned storage to reference a user-supplied directory outside it, and required removal to drop only the reference | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
 | 2026-08-06 | Exempted documentation-only runs from the CI quality commands while still reporting the required check | [0009-skip-quality-commands-for-documentation](../../changes/0009-skip-quality-commands-for-documentation.md) |
+| 2026-08-07 | Made composition order observable through update-participant ordering, and made the published release assets the executable's own update source | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |
