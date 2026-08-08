@@ -139,12 +139,18 @@ describe("main", () => {
     expect(bare.stderrText()).not.toContain("marketplace");
   });
 
-  test("composes the update driver, which has nothing to drive yet", async () => {
-    const context = captureContext({ XDG_DATA_HOME: emptyDataHome });
-
-    expect(await main(["update"], defaultPlugins, context)).toBe(0);
-    expect(context.stdoutText()).toBe("Nothing installed to update.\n");
-    expect(context.stderrText()).toBe("");
+  test("composes the executable plugin after every other default plugin", () => {
+    // Composition order is the order participants are gathered and applied in,
+    // and the executable goes last so that whatever the others own is updated
+    // before the running binary is replaced. `tx update` itself is not
+    // dispatched here: gathering the executable item contacts the release
+    // host, which the executable plugin's own suite drives through an injected
+    // fetch instead.
+    expect(defaultPlugins.map((plugin) => plugin.identity.name)).toEqual([
+      "marketplace",
+      "update",
+      "executable",
+    ]);
   });
 
   // The bundled plugin keeps the parser's implicit help subcommand, so these
