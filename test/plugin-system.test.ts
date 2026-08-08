@@ -195,7 +195,7 @@ describe("source CLI local marketplace sources", () => {
         ).isSymbolicLink(),
       ).toBe(true);
       expect(runCli(dataHome, "marketplace", "list").stdout).toBe(
-        `workspace\t${source}\n`,
+        `workspace\tlive\t${source}\n`,
       );
       expect(runCli(dataHome, "live", "run")).toEqual({
         exitCode: 0,
@@ -279,7 +279,7 @@ describe("source CLI namespace ownership", () => {
 
       const list = runCli(dataHome, "marketplace", "list");
       expect(list.exitCode).toBe(0);
-      expect(list.stdout).toContain(`external\t${source}\n`);
+      expect(list.stdout).toContain(`external\tlive\t${source}\n`);
       expect(list.stderr).toContain(
         'Error loading plugin marketplace/installed/external/marketplace: Namespace "marketplace" is already claimed by marketplace; cannot claim it for marketplace/installed/external/marketplace',
       );

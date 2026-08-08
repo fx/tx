@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   createMarketplacePlugin,
   type MarketplaceOperations,
 } from "../plugins/marketplace/index.ts";
+import updatePlugin from "../plugins/update/index.ts";
 import {
   createRootProgram,
   dispatch,
@@ -13,13 +15,18 @@ import {
 } from "../src/commands.ts";
 import type { CommandProcessContext } from "../src/context.ts";
 import { coreDependencies, initializePlugins } from "../src/plugins.ts";
-import { captureContext, temporaryDirectory } from "./helpers.ts";
+import {
+  captureContext,
+  createGitRepository,
+  fixtureGit,
+  temporaryDirectory,
+} from "./helpers.ts";
 
 class RecordingManager implements MarketplaceOperations {
   readonly calls: unknown[][] = [];
   listings = [
-    { name: "alpha", source: "ssh://example/alpha.git" },
-    { name: "broken", source: "<unknown>" },
+    { name: "alpha", version: "v1.4.0", source: "ssh://example/alpha.git" },
+    { name: "broken", version: "<unknown>", source: "<unknown>" },
   ];
 
   async add(repository: string, name?: string): Promise<string> {
@@ -122,7 +129,7 @@ describe("first-party marketplace plugin", () => {
     });
     expect(manager.calls).toEqual([["list"]]);
     expect(context.stdoutText()).toBe(
-      "alpha\tssh://example/alpha.git\nbroken\t<unknown>\n",
+      "alpha\tv1.4.0\tssh://example/alpha.git\nbroken\t<unknown>\t<unknown>\n",
     );
     expect(context.stderrText()).toBe("");
   });
@@ -218,7 +225,7 @@ describe("first-party marketplace plugin", () => {
         ),
       ).toEqual({ exitCode: EXIT_SUCCESS });
       expect(context.stdoutText()).toBe(
-        "alpha\tssh://example/alpha.git\nbroken\t<unknown>\n",
+        "alpha\tv1.4.0\tssh://example/alpha.git\nbroken\t<unknown>\t<unknown>\n",
       );
       expect(context.stderrText()).toBe("");
     } finally {
@@ -289,6 +296,46 @@ describe("first-party marketplace plugin", () => {
         ),
       ).toEqual({ exitCode: EXIT_SUCCESS });
       expect(context.stdoutText()).toBe("linked\n");
+      expect(context.stderrText()).toBe("");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("contributes an update participant covering installed storage", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-updates-");
+    const dataHome = join(temporaryRoot, "data");
+    try {
+      const remote = await createGitRepository(temporaryRoot, "remote", {
+        ".tx/config.json": '{"plugins":[{"name":"tools","entry":"plugin.ts"}]}',
+        "plugin.ts": "export default () => {};\n",
+      });
+      fixtureGit(remote, ["tag", "v1.0.0"]);
+      fixtureGit(temporaryRoot, [
+        "clone",
+        "--quiet",
+        "--",
+        pathToFileURL(remote).href,
+        join(dataHome, "tx", "marketplaces", "tools"),
+      ]);
+      const context = captureContext({ XDG_DATA_HOME: dataHome });
+
+      const { namespaces, failures } = await initializePlugins(
+        [createMarketplacePlugin(), updatePlugin],
+        { context },
+      );
+      expect(failures).toEqual([]);
+
+      // Through the driver, so the participant really was committed: a dry run
+      // reports the marketplace and applies nothing.
+      expect(
+        await dispatch(
+          createRootProgram(coreDependencies, namespaces),
+          ["update", "--dry-run"],
+          context,
+        ),
+      ).toEqual({ exitCode: EXIT_SUCCESS });
+      expect(context.stdoutText()).toBe("tools\tv1.0.0\tup to date\n");
       expect(context.stderrText()).toBe("");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

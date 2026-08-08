@@ -57,7 +57,12 @@ export async function writeFixtureFiles(
   );
 }
 
-export function initializeGitRepository(checkout: string): void {
+/**
+ * One Git command against a fixture, answered by its trimmed output. The test
+ * identity and the disabled hooks are supplied on the command line, so a
+ * developer's own configuration cannot change what a fixture commit is.
+ */
+export function fixtureGit(cwd: string, args: readonly string[]): string {
   const configuration = [
     "-c",
     "user.name=TX Tests",
@@ -66,25 +71,39 @@ export function initializeGitRepository(checkout: string): void {
     "-c",
     "commit.gpgSign=false",
     "-c",
-    `core.hooksPath=${join(checkout, ".git", "disabled-hooks")}`,
+    `core.hooksPath=${join(cwd, ".git", "disabled-hooks")}`,
   ];
 
-  const env = {
-    ...process.env,
-    GIT_AUTHOR_NAME: "TX Tests",
-    GIT_AUTHOR_EMAIL: "tx@example.invalid",
-    GIT_COMMITTER_NAME: "TX Tests",
-    GIT_COMMITTER_EMAIL: "tx@example.invalid",
-  };
+  const result = Bun.spawnSync(["git", ...configuration, ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "TX Tests",
+      GIT_AUTHOR_EMAIL: "tx@example.invalid",
+      GIT_COMMITTER_NAME: "TX Tests",
+      GIT_COMMITTER_EMAIL: "tx@example.invalid",
+    },
+  });
+  expect(result.exitCode).toBe(0);
+  return result.stdout.toString().trim();
+}
 
+export function initializeGitRepository(checkout: string): void {
   for (const args of [["init"], ["add", "."], ["commit", "-m", "fixture"]]) {
-    expect(
-      Bun.spawnSync(["git", ...configuration, ...args], {
-        cwd: checkout,
-        env,
-      }).exitCode,
-    ).toBe(0);
+    fixtureGit(checkout, args);
   }
+}
+
+/** Another commit on a fixture repository's checked-out branch. */
+export async function commitFixtureFiles(
+  checkout: string,
+  files: Readonly<Record<string, string>>,
+  message: string,
+): Promise<string> {
+  await writeFixtureFiles(checkout, files);
+  fixtureGit(checkout, ["add", "--all"]);
+  fixtureGit(checkout, ["commit", "-m", message]);
+  return fixtureGit(checkout, ["rev-parse", "HEAD"]);
 }
 
 export async function createGitRepository(

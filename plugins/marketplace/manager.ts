@@ -27,6 +27,7 @@ const executeFile = promisify(execFile);
 export interface MarketplaceListing {
   readonly name: string;
   readonly source: string;
+  readonly version: string;
 }
 
 export interface MarketplaceOperations {
@@ -46,6 +47,14 @@ export type RunGit = (
   },
 ) => Promise<GitResult>;
 
+/** How a Git command is run, and the environment it inherits. Every read and
+ * write below takes one, so a caller outside this module drives Git exactly as
+ * the manager does. */
+export interface GitExecution {
+  readonly runGit: RunGit;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}
+
 export interface MarketplaceManagerOptions {
   readonly runGit?: RunGit;
   readonly prepare?: (checkout: string) => Promise<void>;
@@ -56,6 +65,13 @@ export interface MarketplaceManagerOptions {
 const githubRepositoryPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
 const windowsDrivePattern = /^[A-Za-z]:[\\/]/;
 const unknownSource = "<unknown>";
+/** What a marketplace whose checkout cannot be read reports as its version. */
+export const unknownMarketplaceVersion = "<unknown>";
+/** What a referenced local marketplace reports instead of a version: its
+ * contents are whatever its directory holds, so there is nothing to compare. */
+export const liveMarketplaceVersion = "live";
+const originRemote = "origin";
+const remoteHeadRef = "refs/remotes/origin/HEAD";
 const defaultSshUser = "git";
 const batchModeSshCommand = "ssh -o BatchMode=yes";
 const sshCommandScopes = ["--global", "--system"] as const;
@@ -383,6 +399,199 @@ export async function runGit(
   }
 }
 
+/**
+ * Whether Git configuration names an SSH command in a scope a clone applies.
+ * The environment's own command-scope entries are scanned first, because they
+ * outrank both files and cost no Git call; after them the global and system
+ * files are read. `--local` MUST NOT be added to those two: `git clone`
+ * creates the repository it writes into, so it never applies the local
+ * configuration of whatever repository the caller happens to be standing in.
+ * Reading that scope would report a command the clone will not use, suppress
+ * batch mode for nothing, and leave ssh(1) free to block on the host-key
+ * prompt the default exists to prevent.
+ *
+ * Each scope is asked for separately rather than parsed out of
+ * `--show-scope`, which works on every Git version and leaves no output
+ * format to misread. `git config --get` exits non-zero for a variable that is
+ * not set, which `runGit` reports as a failure, so an unset variable and a
+ * configuration file that cannot be read are alike here: nothing is
+ * configured, and the default applies.
+ *
+ * The probe itself reads configuration rather than reaching a remote, so it
+ * runs under the invoking environment.
+ */
+async function hasConfiguredSshCommand(
+  execution: GitExecution,
+): Promise<boolean> {
+  if (hasEnvironmentSshCommand(execution.env)) return true;
+  for (const scope of sshCommandScopes) {
+    try {
+      const { stdout } = await execution.runGit(
+        ["config", scope, "--get", "core.sshCommand"],
+        { env: execution.env },
+      );
+      if (stdout.trim() !== "") return true;
+    } catch {
+      // Unset in this scope, or a file this process cannot read.
+    }
+  }
+  return false;
+}
+
+/**
+ * The environment every operation against a remote runs in — a clone attempt
+ * and a fetch alike, which is why there is one definition of it. Git's own
+ * terminal prompt is always off, because a private HTTP(S) clone without a
+ * credential would otherwise block on `/dev/tty` and the SSH retry would never
+ * run, and because `tx update` walks every installed marketplace, where one
+ * prompt would stall the whole run; credential helpers and `GIT_ASKPASS` stay
+ * untouched, so a credential the user did configure still resolves.
+ *
+ * On top of that, batch mode by default — a missing key or an unknown host key
+ * fails rather than asking — but never in place of an SSH command the caller
+ * configured. Git takes one from `GIT_SSH_COMMAND`, from `GIT_SSH`, or from
+ * `core.sshCommand`, and each is a deliberate invocation: an identity file, an
+ * alternate config, a proxy command. Overriding one would drop the deploy key
+ * of exactly the setup the SSH retry exists to serve. The two environment
+ * variables settle the question without reading any configuration, so the
+ * probe runs only when neither is set.
+ */
+export async function nonInteractiveGitEnvironment(
+  execution: GitExecution,
+): Promise<Readonly<Record<string, string | undefined>>> {
+  const promptless = { ...execution.env, GIT_TERMINAL_PROMPT: "0" };
+  const { GIT_SSH_COMMAND: sshCommand, GIT_SSH: sshProgram } = execution.env;
+  if (sshCommand || sshProgram) return promptless;
+  if (await hasConfiguredSshCommand(execution)) return promptless;
+  return { ...promptless, GIT_SSH_COMMAND: batchModeSshCommand };
+}
+
+/** One Git command inside a checkout, answered by its trimmed output. */
+async function readCheckout(
+  checkout: string,
+  args: readonly string[],
+  execution: GitExecution,
+): Promise<string> {
+  const { stdout } = await execution.runGit(["-C", checkout, ...args], {
+    env: execution.env,
+  });
+  return stdout.trim();
+}
+
+/** The commit a checkout currently holds. */
+export async function readCheckoutCommit(
+  checkout: string,
+  execution: GitExecution,
+): Promise<string> {
+  return readCheckout(checkout, ["rev-parse", "HEAD"], execution);
+}
+
+/**
+ * A commit's version label: a tag reachable from it where the marketplace
+ * publishes tags, and an abbreviated hash where it does not, so a user reads
+ * `v1.4.0` rather than a hash whenever there is something better to read.
+ */
+export async function readCommitLabel(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<string> {
+  return readCheckout(
+    checkout,
+    ["describe", "--tags", "--always", commit],
+    execution,
+  );
+}
+
+/**
+ * The tracked paths a checkout has modified, staged or not. Untracked files
+ * are deliberately absent: dependency installation writes them into every
+ * checkout, so blocking on one would fire on tx's own side effect.
+ */
+export async function readModifiedTrackedFiles(
+  checkout: string,
+  execution: GitExecution,
+): Promise<readonly string[]> {
+  const output = await readCheckout(
+    checkout,
+    ["diff", "--name-only", "HEAD", "--"],
+    execution,
+  );
+  return output === "" ? [] : output.split("\n");
+}
+
+/**
+ * Whether one commit is an ancestor of another, a commit counting as its own.
+ * Counted rather than asked through `merge-base --is-ancestor`, which answers
+ * by exit status: a failed Git command is indistinguishable from a negative
+ * answer here, and reporting a broken checkout as a rewritten upstream would
+ * name the wrong remedy.
+ */
+export async function isCommitAncestor(
+  checkout: string,
+  ancestor: string,
+  descendant: string,
+  execution: GitExecution,
+): Promise<boolean> {
+  const count = await readCheckout(
+    checkout,
+    ["rev-list", "--count", `${descendant}..${ancestor}`, "--"],
+    execution,
+  );
+  return count === "0";
+}
+
+/**
+ * Brings a checkout's view of its remote up to date, tags included, and
+ * re-resolves the remote's default branch. Re-resolution is what keeps a
+ * marketplace installed before its remote renamed its default branch from
+ * reporting a missing ref forever.
+ *
+ * Both commands reach the remote, so both run non-interactively.
+ */
+export async function fetchCheckoutRemote(
+  checkout: string,
+  execution: GitExecution,
+): Promise<void> {
+  const remote: GitExecution = {
+    runGit: execution.runGit,
+    env: await nonInteractiveGitEnvironment(execution),
+  };
+  await readCheckout(checkout, ["fetch", "--tags", originRemote], remote);
+  await readCheckout(
+    checkout,
+    ["remote", "set-head", originRemote, "--auto"],
+    remote,
+  );
+}
+
+/**
+ * The commit the remote's default branch points at, as the last fetch
+ * resolved it. This is the whole of what an unpinned marketplace tracks; a pin
+ * replaces this resolution and nothing else.
+ */
+export async function readRemoteDefaultCommit(
+  checkout: string,
+  execution: GitExecution,
+): Promise<string> {
+  return readCheckout(checkout, ["rev-parse", remoteHeadRef], execution);
+}
+
+/**
+ * Moves a checkout onto a commit, detached. One operation covers an update, a
+ * pin, and the restoration of a previous commit, and it leaves "did the
+ * checkout move" a single commit comparison. An ordinary checkout refuses
+ * rather than overwriting an untracked file in the way, which is the refusal
+ * the caller reports instead of forcing past.
+ */
+export async function moveCheckout(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<void> {
+  await readCheckout(checkout, ["checkout", "--detach", commit], execution);
+}
+
 export class MarketplaceManager implements MarketplaceOperations {
   readonly #root: string;
   readonly #runGit: RunGit;
@@ -493,7 +702,7 @@ export class MarketplaceManager implements MarketplaceOperations {
     // retry would hang the attempt before any retry could run. An SSH command
     // is inert for a clone that really does speak HTTP(S), so applying it
     // throughout costs nothing.
-    const env = await this.#cloneEnv();
+    const env = await nonInteractiveGitEnvironment(this.#execution);
     const failures: Error[] = [];
 
     for (const candidate of attempts) {
@@ -509,62 +718,9 @@ export class MarketplaceManager implements MarketplaceOperations {
     throw cloneFailure(labels, failures, redactions);
   }
 
-  /**
-   * The environment every clone attempt runs in. Git's own terminal prompt is
-   * always off, because a private HTTP(S) clone without a credential would
-   * otherwise block on `/dev/tty` and the SSH retry would never run;
-   * credential helpers and `GIT_ASKPASS` stay untouched, so a credential the
-   * user did configure still resolves.
-   *
-   * On top of that, batch mode by default — a missing key or an unknown host
-   * key fails rather than asking — but never in place of an SSH command the
-   * caller configured. Git takes one from `GIT_SSH_COMMAND`, from `GIT_SSH`,
-   * or from `core.sshCommand`, and each is a deliberate invocation: an
-   * identity file, an alternate config, a proxy command. Overriding one would
-   * drop the deploy key of exactly the setup this retry exists to serve. The
-   * two environment variables settle the question without reading any
-   * configuration, so the probe below runs only when neither is set.
-   */
-  async #cloneEnv(): Promise<Readonly<Record<string, string | undefined>>> {
-    const promptless = { ...this.#env, GIT_TERMINAL_PROMPT: "0" };
-    const { GIT_SSH_COMMAND: sshCommand, GIT_SSH: sshProgram } = this.#env;
-    if (sshCommand || sshProgram) return promptless;
-    if (await this.#hasConfiguredSshCommand()) return promptless;
-    return { ...promptless, GIT_SSH_COMMAND: batchModeSshCommand };
-  }
-
-  /**
-   * Whether Git configuration names an SSH command in a scope a clone applies.
-   * The environment's own command-scope entries are scanned first, because
-   * they outrank both files and cost no Git call; after them the global and
-   * system files are read. `--local` MUST NOT be added to those two: `git
-   * clone` creates the repository it writes into, so it never applies the
-   * local configuration of whatever repository the caller happens to be
-   * standing in. Reading that scope would report a command the clone will not
-   * use, suppress batch mode for nothing, and leave ssh(1) free to block on
-   * the host-key prompt the default exists to prevent.
-   *
-   * Each scope is asked for separately rather than parsed out of
-   * `--show-scope`, which works on every Git version and leaves no output
-   * format to misread. `git config --get` exits non-zero for a variable that
-   * is not set, which `runGit` reports as a failure, so an unset variable and
-   * a configuration file that cannot be read are alike here: nothing is
-   * configured, and the default applies.
-   */
-  async #hasConfiguredSshCommand(): Promise<boolean> {
-    if (hasEnvironmentSshCommand(this.#env)) return true;
-    for (const scope of sshCommandScopes) {
-      try {
-        const { stdout } = await this.#runGit(
-          ["config", scope, "--get", "core.sshCommand"],
-          { env: this.#env },
-        );
-        if (stdout.trim() !== "") return true;
-      } catch {
-        // Unset in this scope, or a file this process cannot read.
-      }
-    }
-    return false;
+  /** How this manager drives Git, for the shared operations above. */
+  get #execution(): GitExecution {
+    return { runGit: this.#runGit, env: this.#env };
   }
 
   /**
@@ -604,22 +760,30 @@ export class MarketplaceManager implements MarketplaceOperations {
       marketplaces.map(
         async ({ name, checkout }): Promise<MarketplaceListing> => {
           let source = unknownSource;
+          let version = unknownMarketplaceVersion;
           try {
             if ((await lstat(checkout)).isSymbolicLink()) {
               // A reference reports the directory tx reads, not the remote
-              // that directory happens to have configured.
+              // that directory happens to have configured, and it has no
+              // version: its contents are whatever that directory holds.
               source = await readlink(checkout);
+              version = liveMarketplaceVersion;
             } else {
               const result = await this.#runGit(
                 ["-C", checkout, "config", "--get", "remote.origin.url"],
                 { env: this.#env },
               );
               source = result.stdout.trim() || unknownSource;
+              // The participant's label, read out of the checkout, so listing
+              // stays offline.
+              version =
+                (await readCommitLabel(checkout, "HEAD", this.#execution)) ||
+                unknownMarketplaceVersion;
             }
           } catch {
             // A corrupt checkout remains visible and removable.
           }
-          return { name, source };
+          return { name, source, version };
         },
       ),
     );

@@ -870,7 +870,14 @@ describe("MarketplaceManager", () => {
 
       expect(await manager.add(source)).toBe("source");
       expect(prepared).toBe(true);
-      expect(await manager.list()).toEqual([{ name: "source", source }]);
+      expect(await manager.list()).toEqual([
+        // No tag is published, so the label is the abbreviated commit.
+        {
+          name: "source",
+          source,
+          version: expect.stringMatching(/^[0-9a-f]+$/),
+        },
+      ]);
       await expect(manager.add(source)).rejects.toThrow("already installed");
       expect((await lstat(join(root, "source"))).isSymbolicLink()).toBe(false);
       expect(await readFile(join(root, "source", "README.txt"), "utf8")).toBe(
@@ -1018,6 +1025,14 @@ describe("MarketplaceManager", () => {
           expect.stringContaining(".installed-staging-"),
         ],
         ["-C", join(root, "installed"), "config", "--get", "remote.origin.url"],
+        [
+          "-C",
+          join(root, "installed"),
+          "describe",
+          "--tags",
+          "--always",
+          "HEAD",
+        ],
       ]);
       // A clone attempt runs without Git's terminal prompt and, nothing being
       // configured, under the batch-mode SSH default, so its environment is a
@@ -1033,6 +1048,7 @@ describe("MarketplaceManager", () => {
       expect(calls[0]?.env).toBe(env);
       expect(calls[1]?.env).toBe(env);
       expect(calls[3]?.env).toBe(env);
+      expect(calls[4]?.env).toBe(env);
       expect(env).toEqual({ PATH: "/test/bin", TOKEN: "secret" });
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -1158,18 +1174,25 @@ describe("MarketplaceManager", () => {
             throw new Error("corrupt repository");
           }
           await zetaStarted;
-          return { stdout: "ssh://example/alpha.git\n" };
+          return {
+            stdout: args.includes("describe")
+              ? "v2.0.0\n"
+              : "ssh://example/alpha.git\n",
+          };
         },
       });
 
       expect(await manager.list()).toEqual([
-        { name: "alpha", source: "ssh://example/alpha.git" },
-        { name: "linked", source: join(root, "alpha") },
-        { name: "zeta", source: "<unknown>" },
+        { name: "alpha", source: "ssh://example/alpha.git", version: "v2.0.0" },
+        { name: "linked", source: join(root, "alpha"), version: "live" },
+        { name: "zeta", source: "<unknown>", version: "<unknown>" },
       ]);
+      // A reference reaches Git not at all, and no read here contacts a
+      // remote: the version comes out of the checkout.
       expect(calls).toEqual([
         ["-C", join(root, "alpha"), "config", "--get", "remote.origin.url"],
         ["-C", join(root, "zeta"), "config", "--get", "remote.origin.url"],
+        ["-C", join(root, "alpha"), "describe", "--tags", "--always", "HEAD"],
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -1186,7 +1209,7 @@ describe("MarketplaceManager", () => {
       expect(await manager.list()).toEqual([]);
       await mkdir(join(root, "blank"), { recursive: true });
       expect(await manager.list()).toEqual([
-        { name: "blank", source: "<unknown>" },
+        { name: "blank", source: "<unknown>", version: "<unknown>" },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -1232,6 +1255,7 @@ describe("marketplace clone transports", () => {
             probed.push([...args]);
             unsetSshCommand();
           }
+          if (args.includes("describe")) return { stdout: "v1.0.0\n" };
           if (args[0] !== "clone") {
             // The remote-URL answer belongs to the read it is meant for, and
             // to nothing else.
@@ -1268,7 +1292,7 @@ describe("marketplace clone transports", () => {
       };
       expect(cloneEnv).toEqual([batched, batched]);
       expect(await manager.list()).toEqual([
-        { name: "tx", source: "git@github.com:fx/tx.git" },
+        { name: "tx", source: "git@github.com:fx/tx.git", version: "v1.0.0" },
       ]);
       expect(await readdir(root)).toEqual(["tx"]);
     } finally {
@@ -2198,7 +2222,9 @@ describe("local marketplace sources", () => {
       const target = join(root, "tools");
       expect((await lstat(target)).isSymbolicLink()).toBe(true);
       expect(await readlink(target)).toBe(source);
-      expect(await manager.list()).toEqual([{ name: "tools", source }]);
+      expect(await manager.list()).toEqual([
+        { name: "tools", source, version: "live" },
+      ]);
       expect((await readMarketplaceManifest(target)).plugins[0]?.name).toBe(
         "tools",
       );
@@ -2398,7 +2424,9 @@ describe("local marketplace sources", () => {
       expect((await readMarketplaceManifest(target)).plugins[0]?.name).toBe(
         "first",
       );
-      expect(await manager.list()).toEqual([{ name: "pinned", source: first }]);
+      expect(await manager.list()).toEqual([
+        { name: "pinned", source: first, version: "live" },
+      ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -2540,15 +2568,23 @@ describe("referenced marketplaces", () => {
       const manager = new MarketplaceManager(root, {
         runGit: async (args) => {
           expect(args[1]).toBe(join(root, "cloned"));
-          return { stdout: "ssh://example/cloned.git\n" };
+          return {
+            stdout: args.includes("describe")
+              ? "v3.1.0\n"
+              : "ssh://example/cloned.git\n",
+          };
         },
       });
 
       expect(await manager.list()).toEqual([
-        { name: "cloned", source: "ssh://example/cloned.git" },
-        { name: "dangling", source: missing },
-        { name: "linked", source },
-        { name: "replaced", source: replacement },
+        {
+          name: "cloned",
+          source: "ssh://example/cloned.git",
+          version: "v3.1.0",
+        },
+        { name: "dangling", source: missing, version: "live" },
+        { name: "linked", source, version: "live" },
+        { name: "replaced", source: replacement, version: "live" },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
