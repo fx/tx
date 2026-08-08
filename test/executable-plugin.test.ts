@@ -16,7 +16,7 @@ import {
 } from "../plugins/executable/index.ts";
 import {
   type CommandResult,
-  detectManager,
+  detectManagers,
   discardStaged,
   ExecutableUpdater,
   type FetchResource,
@@ -235,11 +235,15 @@ describe("executable update gathering", () => {
     ]);
   });
 
-  test("accepts a published tag spelled without its v prefix", async () => {
+  test("offers nothing for a release tagged without its v prefix", async () => {
+    // Applying rebuilds the tag from the version, so a tag spelled any other
+    // way would name assets nothing could fetch.
     const { fetch } = stubFetch(releaseRoutes("1.3.0"));
     const updater = new ExecutableUpdater(runningVersion, options({ fetch }));
 
-    expect(await updater.gather()).toEqual([availableItem]);
+    expect(await updater.gather()).toEqual([
+      { name: "tx", current: runningVersion, detail: "latest 1.3.0" },
+    ]);
   });
 
   test.each([
@@ -446,6 +450,128 @@ describe("executable update delegation", () => {
     expect(commands).toEqual([
       ["npm", "ls", "--global", "--parseable", "--long"],
       ["npm", "install", "--global", "@fx/tx"],
+    ]);
+    expect(await readFile(target, "utf8")).toBe(installedBytes);
+  });
+
+  test("reads npm's listing even when npm exits over an unrelated tree problem", async () => {
+    // `npm ls` exits non-zero for any problem anywhere in the global tree —
+    // an extraneous package somebody else installed — after printing the
+    // answer being asked for.
+    const root = await workspace("npm-noisy");
+    const target = await installedExecutable(
+      root,
+      join("lib", "node_modules", "@fx", "tx", "dist", "tx"),
+    );
+    const listing = `${join(root, "lib", "node_modules", "@fx", "tx")}:@fx/tx@1.2.0\n`;
+    const { run, commands } = recorder((command) =>
+      command[1] === "ls"
+        ? { exitCode: 1, stdout: listing, stderr: "npm ERR! ELSPROBLEMS\n" }
+        : { exitCode: 0, stdout: "changed 1 package\n", stderr: "" },
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    expect(await updater.apply(availableItem)).toMatchObject({
+      applied: true,
+    });
+    expect(commands[1]).toEqual(["npm", "install", "--global", "@fx/tx"]);
+  });
+
+  test("asks npm before mise for a node_modules tree inside a mise store", async () => {
+    // A global npm install under a Node that mise installed. Asking mise
+    // first would upgrade Node and report that as having updated tx.
+    const root = await workspace("mise-node");
+    const store = join(root, "mise", "installs");
+    const target = await installedExecutable(
+      root,
+      join(
+        "mise",
+        "installs",
+        "node",
+        "22.18.0",
+        "lib",
+        "node_modules",
+        "@fx",
+        "tx",
+        "dist",
+        "tx",
+      ),
+    );
+    const prefix = join(store, "node", "22.18.0", "lib");
+    const listing = [
+      `${prefix}:lib@`,
+      `${join(prefix, "node_modules", "@fx", "tx")}:@fx/tx@1.2.0`,
+    ].join("\n");
+    const { run, commands } = recorder((command) =>
+      command[1] === "ls"
+        ? { exitCode: 0, stdout: listing, stderr: "" }
+        : { exitCode: 0, stdout: "changed 1 package\n", stderr: "" },
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: true,
+      detail: '"npm install --global @fx/tx": changed 1 package',
+    });
+    expect(commands).toEqual([
+      ["npm", "ls", "--global", "--parseable", "--long"],
+      ["npm", "install", "--global", "@fx/tx"],
+    ]);
+  });
+
+  test("falls back to mise for a store npm does not claim", async () => {
+    // mise's own npm backend installs into a prefix of its own, which the
+    // ambient npm knows nothing about, so mise is the owner after all.
+    const root = await workspace("mise-npm-backend");
+    const installed = join(root, "mise", "installs", "npm-fx-tx", "1.2.0");
+    const target = await installedExecutable(
+      root,
+      join(
+        "mise",
+        "installs",
+        "npm-fx-tx",
+        "1.2.0",
+        "lib",
+        "node_modules",
+        "@fx",
+        "tx",
+        "dist",
+        "tx",
+      ),
+    );
+    const { run, commands } = recorder((command) => {
+      if (command[0] === "npm") {
+        return { exitCode: 0, stdout: "/usr/lib:lib@\n", stderr: "" };
+      }
+      return command[1] === "ls"
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              "npm:@fx/tx": [{ install_path: installed }],
+            }),
+            stderr: "",
+          }
+        : { exitCode: 0, stdout: "mise npm:@fx/tx@1.3.0\n", stderr: "" };
+    });
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: true,
+      detail: '"mise upgrade npm:@fx/tx": mise npm:@fx/tx@1.3.0',
+    });
+    expect(commands).toEqual([
+      ["npm", "ls", "--global", "--parseable", "--long"],
+      ["mise", "ls", "--installed", "--json"],
+      ["mise", "upgrade", "npm:@fx/tx"],
     ]);
     expect(await readFile(target, "utf8")).toBe(installedBytes);
   });
@@ -760,16 +886,25 @@ describe("executable update effects", () => {
   });
 
   test.each([
-    ["/home/user/.local/share/mise/installs/github-fx-tx/1.2.0/bin/tx", "mise"],
-    [
-      "/home/user/.local/share/mise/installs/npm-fx-tx/1.2.0/node_modules/tx",
-      "mise",
-    ],
-    ["/usr/lib/node_modules/@fx/tx/dist/tx", "npm"],
-    ["/usr/local/bin/tx", undefined],
-    ["/home/mise/bin/tx", undefined],
-  ])("detects the manager owning %p", (path, manager) => {
-    expect(detectManager(path)).toBe(manager as ManagerKind | undefined);
+    {
+      path: "/home/user/.local/share/mise/installs/github-fx-tx/1.2.0/bin/tx",
+      managers: ["mise"],
+    },
+    // Both markers: mise's npm backend and a global npm install under a
+    // mise-managed Node produce the same shape, so npm is asked first.
+    {
+      path: "/home/user/.local/share/mise/installs/npm-fx-tx/1.2.0/lib/node_modules/@fx/tx/dist/tx",
+      managers: ["npm", "mise"],
+    },
+    {
+      path: "/home/user/.local/share/mise/installs/node/22.18.0/lib/node_modules/@fx/tx/dist/tx",
+      managers: ["npm", "mise"],
+    },
+    { path: "/usr/lib/node_modules/@fx/tx/dist/tx", managers: ["npm"] },
+    { path: "/usr/local/bin/tx", managers: [] },
+    { path: "/home/mise/bin/tx", managers: [] },
+  ])("detects the managers that could own $path", ({ path, managers }) => {
+    expect(detectManagers(path)).toEqual(managers as readonly ManagerKind[]);
   });
 
   test.each([

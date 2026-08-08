@@ -175,10 +175,14 @@ function readNpmListing(stdout: string): readonly Installation[] {
     if (separator < 0) continue;
     const label = line.slice(separator + 1);
     // A scoped name keeps its leading `@`; only a later one separates the
-    // version this listing appends.
+    // version this listing appends. A label carrying no version at all is the
+    // prefix root npm heads its listing with — a path containing every global
+    // package, which would otherwise claim ownership of all of them and name a
+    // package (`lib`) nobody installed.
     const version = label.lastIndexOf("@");
+    if (version <= 0 || version === label.length - 1) continue;
     installations.push({
-      name: version > 0 ? label.slice(0, version) : label,
+      name: label.slice(0, version),
       path: line.slice(0, separator),
     });
   }
@@ -203,23 +207,29 @@ const managers: Readonly<Record<ManagerKind, Manager>> = Object.freeze({
 });
 
 /**
- * Which of the two managers the project documents owns a resolved path, or
- * undefined for a location neither owns. mise is decided first because its npm
- * backend installs a `node_modules` tree inside its own store, which npm's own
- * marker would otherwise claim.
+ * The managers the project documents that could own a resolved path, in the
+ * order to ask them, or nothing for a location neither owns.
+ *
+ * A `node_modules` tree inside a mise store carries both markers and the path
+ * cannot say which one put it there: mise's own npm backend installs one, and
+ * so does `npm install --global` under a Node that mise installed. npm is
+ * asked first in that case, because npm can only claim a path it installed
+ * into its own global prefix — which mise's backend prefix is not — and mise
+ * answers for whatever npm does not claim. Getting this backwards would run
+ * `mise upgrade node` for a `tx` npm installed, report it as done, and leave
+ * the executable exactly where it was.
  */
-export function detectManager(target: string): ManagerKind | undefined {
+export function detectManagers(target: string): readonly ManagerKind[] {
   const segments = target.split(sep);
-  if (
-    segments.some(
-      (segment, index) =>
-        segment === "mise" && segments[index + 1] === "installs",
-    )
-  ) {
-    return "mise";
-  }
-  if (segments.includes("node_modules")) return "npm";
-  return undefined;
+  const mise = segments.some(
+    (segment, index) =>
+      segment === "mise" && segments[index + 1] === "installs",
+  );
+  const npm = segments.includes("node_modules");
+  if (mise && npm) return ["npm", "mise"];
+  if (mise) return ["mise"];
+  if (npm) return ["npm"];
+  return [];
 }
 
 /** The digest a `sha256sum` document publishes for one asset. */
@@ -300,13 +310,18 @@ export class ExecutableUpdater implements UpdateParticipant {
 
   async gather(): Promise<readonly UpdateItem[]> {
     const tag = await this.#latestTag();
-    if (!isNewerRelease(tag, this.#version)) {
+    // The `v` prefix is required rather than tolerated: applying rebuilds the
+    // tag from the version it was handed, so a release tagged any other way
+    // would be offered as an update whose assets nothing could then fetch.
+    // [Architecture: Runtime and Distribution] requires that prefix of every
+    // published version, so this withholds nothing the project publishes.
+    if (!tag.startsWith("v") || !isNewerRelease(tag, this.#version)) {
       return [
         { name: itemName, current: this.#version, detail: `latest ${tag}` },
       ];
     }
 
-    const available = tag.replace(/^v/, "");
+    const available = tag.slice(1);
     // An available version is withheld where applying it would only be
     // refused, so the driver never manufactures a failure out of a platform or
     // a checkout. The release is still named, as detail.
@@ -333,8 +348,8 @@ export class ExecutableUpdater implements UpdateParticipant {
     }
 
     const target = await realpath(this.#executablePath);
-    const manager = detectManager(target);
-    if (manager !== undefined) return this.#delegate(manager, target);
+    const kinds = detectManagers(target);
+    if (kinds.length > 0) return this.#delegate(kinds, target);
     return this.#replace(target, published);
   }
 
@@ -389,9 +404,12 @@ export class ExecutableUpdater implements UpdateParticipant {
    * install elsewhere, and naming a version this participant did not observe
    * would be a claim rather than an observation.
    */
-  async #delegate(kind: ManagerKind, target: string): Promise<UpdateResult> {
-    const manager = managers[kind];
-    const command = manager.upgrade(await this.#owningName(manager, target));
+  async #delegate(
+    kinds: readonly ManagerKind[],
+    target: string,
+  ): Promise<UpdateResult> {
+    const { manager, name } = await this.#owningManager(kinds, target);
+    const command = manager.upgrade(name);
     const spelled = command.join(" ");
     const result = await this.#run(command);
     if (result.exitCode !== 0) {
@@ -406,32 +424,58 @@ export class ExecutableUpdater implements UpdateParticipant {
   }
 
   /**
+   * The first candidate manager that claims this path, and what it says owns
+   * it. A candidate that does not claim it is passed over while another
+   * remains; the last one's refusal is the failure, because a recognized
+   * manager that cannot say what owns its own store is not something to write
+   * into anyway.
+   */
+  async #owningManager(
+    kinds: readonly ManagerKind[],
+    target: string,
+  ): Promise<{ manager: Manager; name: string }> {
+    let refusal = new Error(`No version manager owns "${target}"`);
+    for (const kind of kinds) {
+      const manager = managers[kind];
+      try {
+        return { manager, name: await this.#owningName(manager, target) };
+      } catch (error) {
+        refusal = error as Error;
+      }
+    }
+    throw refusal;
+  }
+
+  /**
    * What the manager says owns this path, read from the manager's own
    * listing. The path is not asked to answer for itself: a backend, an owner,
    * and a repository collapse into one directory component through a
    * flattening that is not invertible, so reconstructing the name would
    * upgrade something the user may not have.
+   *
+   * The listing is read before its exit status is judged, because npm exits
+   * non-zero for any problem anywhere in a global tree — an extraneous package
+   * somebody else installed — after printing the very answer being asked for.
    */
   async #owningName(manager: Manager, target: string): Promise<string> {
     const listing = await this.#run(manager.listing);
+    const installations = manager.read(listing.stdout);
+    const owning =
+      installations === undefined ? undefined : owner(target, installations);
+    if (owning !== undefined) return owning;
     if (listing.exitCode !== 0) {
       throw new Error(
         `${manager.name} could not report which ${manager.noun} owns "${target}": ${oneLine(listing.stderr || listing.stdout)}`,
       );
     }
-    const installations = manager.read(listing.stdout);
     if (installations === undefined) {
       throw new Error(
         `${manager.name} did not report a readable list of installed ${manager.noun}s`,
       );
     }
-    const owning = owner(target, installations);
-    if (owning === undefined) {
-      throw new Error(
-        `${manager.name} reported no ${manager.noun} owning "${target}"`,
-      );
-    }
-    return owning;
+    throw new Error(
+      `${manager.name} reported no ${manager.noun} owning "${target}"`,
+    );
   }
 
   /**
