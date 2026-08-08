@@ -9,6 +9,7 @@ import {
   fetchCheckoutRemote,
   type GitExecution,
   isCommitAncestor,
+  isCommitPublished,
   liveMarketplaceVersion,
   moveCheckout,
   type RunGit,
@@ -138,7 +139,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
 
     const current = await readCheckoutCommit(checkout, this.#execution);
     const pin = await readMarketplacePin(checkout, this.#execution);
-    const target = await this.#trackedCommit(checkout, pin);
+    const target = await this.#targetCommit(item.name, checkout, pin);
     if (target === current) return { applied: false };
 
     const blocked = await this.#blockingCondition(
@@ -216,10 +217,13 @@ export class MarketplaceUpdater implements UpdateParticipant {
       const pin = await readMarketplacePin(checkout, this.#execution);
       let target: string;
       try {
-        target = await this.#trackedCommit(checkout, pin);
+        target = await this.#targetCommit(name, checkout, pin);
       } catch (error) {
+        // A pin the remote stopped publishing is this marketplace's own
+        // failure and arrives carrying its remedy; anything else came from a
+        // checkout tx cannot read, which the outer handler reports as that.
         if (pin === undefined) throw error;
-        return { name, current: label, failure: unresolvablePin(name, error) };
+        return { name, current: label, failure: errorMessage(error) };
       }
       // The pin is reported whether or not anything moves: a marketplace held
       // at the version its user chose is exactly the one they are managing
@@ -273,15 +277,24 @@ export class MarketplaceUpdater implements UpdateParticipant {
    * commit, so it is re-resolved on every update — a hash never moves, a
    * branch moves with the branch, and a tag moves if and only if the remote
    * moved it.
+   *
+   * A pin the remote has stopped publishing fails here, carrying the remedy
+   * for a pin, so gathering and applying report the same thing: the ref can
+   * disappear between the two, and the answer is the same either way.
    */
-  async #trackedCommit(
+  async #targetCommit(
+    name: string,
     checkout: string,
     pin: string | undefined,
   ): Promise<string> {
     if (pin === undefined) {
       return readRemoteDefaultCommit(checkout, this.#execution);
     }
-    return resolveMarketplaceRef(checkout, pin, this.#execution);
+    try {
+      return await resolveMarketplaceRef(checkout, pin, this.#execution);
+    } catch (error) {
+      throw new Error(unresolvablePin(name, error));
+    }
   }
 
   /** What a pinned marketplace reports about its pin, and about a release the
@@ -306,14 +319,23 @@ export class MarketplaceUpdater implements UpdateParticipant {
       return `blocked: modified tracked files (${modified.join(", ")}); resolve them in the checkout`;
     }
     // Only an unpinned marketplace is held to moving forward. It says "keep me
-    // current", so a target its commit is no part of is a rewritten upstream;
-    // a pin says "put me at this", and going back to the last good version is
-    // the whole point of setting one.
+    // current", so a target its commit is no part of has to be refused; a pin
+    // says "put me at this", and going back to the last good version is the
+    // whole point of setting one.
     if (
       pin === undefined &&
       !(await isCommitAncestor(checkout, current, target, this.#execution))
     ) {
-      return `blocked: the remote no longer contains the installed commit; run "tx marketplace remove ${name}" and add it again`;
+      // Which refusal it is depends on whether the remote still has the
+      // commit. Gone from the remote entirely is a rewritten upstream, and
+      // the checkout has to be replaced. Still published — where unpinning a
+      // marketplace pinned to a side branch or an older tag leaves it — is not
+      // a broken remote at all, and telling that user to delete a working
+      // marketplace would be the wrong remedy for a state they can pin their
+      // way out of.
+      return (await isCommitPublished(checkout, current, this.#execution))
+        ? `blocked: the installed commit is not an ancestor of what this marketplace tracks; pin it with "tx marketplace pin ${name} <ref>", or run "tx marketplace remove ${name}" and add it again`
+        : `blocked: the remote no longer contains the installed commit; run "tx marketplace remove ${name}" and add it again`;
     }
     return undefined;
   }

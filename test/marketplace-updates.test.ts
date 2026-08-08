@@ -427,6 +427,10 @@ describe("marketplace update application", () => {
         "rewritten",
       );
       fixtureGit(remote, ["branch", "--move", "--force", branch]);
+      // The tag went with it, so the installed commit is published nowhere on
+      // the remote — which is what separates this from a checkout sitting on a
+      // commit the remote still has.
+      fixtureGit(remote, ["tag", "--delete", "v1.0.0"]);
       const before = headOf(checkout);
       const participant = updater(root, async () => {
         throw new Error("Preparation must not run for a blocked checkout");
@@ -658,15 +662,71 @@ describe("pinned marketplace updates", () => {
     try {
       const { root, checkout } = await installClone(temporaryRoot);
       pin(checkout, "v9.9.9");
+      const participant = updater(root, unprepared);
+      const failure =
+        'Version "v9.9.9" is not published by the remote. Run "tx marketplace pin tools <ref>" or "tx marketplace unpin tools".';
 
-      expect(await updater(root, unprepared).gather()).toEqual([
-        {
-          name: "tools",
-          current: "v1.0.0",
-          failure:
-            'Version "v9.9.9" is not published by the remote. Run "tx marketplace pin tools <ref>" or "tx marketplace unpin tools".',
-        },
+      expect(await participant.gather()).toEqual([
+        { name: "tools", current: "v1.0.0", failure },
       ]);
+      // The ref can go between gathering and applying, so applying answers the
+      // same way rather than with a bare resolution failure and no remedy.
+      await expect(
+        participant.apply({ name: "tools", current: "v1.0.0" }),
+      ).rejects.toThrow(failure);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports a tag the remote withdrew after it was pinned", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-withdrawn-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      // What yanking a bad release looks like: the tag the user pinned is not
+      // published any more, though this checkout still holds a copy of it.
+      fixtureGit(remote, ["tag", "--delete", "v1.0.0"]);
+
+      const item = gathered(await updater(root, unprepared).gather());
+      expect(item.failure).toBe(
+        'Version "v1.0.0" is not published by the remote. Run "tx marketplace pin tools <ref>" or "tx marketplace unpin tools".',
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("names re-pinning when an unpinned checkout sits on a commit the remote still has", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-diverged-");
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      const branch = fixtureGit(remote, ["symbolic-ref", "--short", "HEAD"]);
+      fixtureGit(remote, ["checkout", "--quiet", "-b", "release/1.4"]);
+      await commitFixtureFiles(
+        remote,
+        { "README.txt": "release\n" },
+        "release",
+      );
+      fixtureGit(remote, ["checkout", "--quiet", branch]);
+      await publishSecondVersion(remote);
+      // Where unpinning a marketplace pinned to a side branch leaves it: the
+      // checkout is on a commit the remote publishes and the default branch
+      // does not contain.
+      pin(checkout, "release/1.4");
+      const participant = updater(root, async () => {});
+      await participant.apply(gathered(await participant.gather()));
+      fixtureGit(checkout, ["config", "--local", "--unset", "tx.pin"]);
+      const before = headOf(checkout);
+
+      const item = gathered(await participant.gather());
+      expect(item.detail).toBe(
+        'blocked: the installed commit is not an ancestor of what this marketplace tracks; pin it with "tx marketplace pin tools <ref>", or run "tx marketplace remove tools" and add it again',
+      );
+      await expect(participant.apply(item)).rejects.toThrow(
+        'pin it with "tx marketplace pin tools <ref>"',
+      );
+      expect(headOf(checkout)).toBe(before);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -745,9 +805,20 @@ describe("marketplace update environment", () => {
         ["-C", checkout, "config", "--local", "--get", "core.sshCommand"],
         ["config", "--global", "--get", "core.sshCommand"],
         ["config", "--system", "--get", "core.sshCommand"],
-        // Forced, so a tag the remote moved is taken as the remote publishes
-        // it now rather than failing the fetch for clobbering a local one.
-        ["-C", checkout, "fetch", "--tags", "--force", "origin"],
+        // Forced and pruning, so the refs this checkout holds are the ones the
+        // remote publishes now: a moved tag moves rather than failing the
+        // fetch for clobbering a local one, and a withdrawn ref goes rather
+        // than answering a pin nobody publishes any more.
+        [
+          "-C",
+          checkout,
+          "fetch",
+          "--tags",
+          "--force",
+          "--prune",
+          "--prune-tags",
+          "origin",
+        ],
         ["-C", checkout, "remote", "set-head", "origin", "--auto"],
         // Read again now the fetch has brought the tags in, since a tag added
         // to the installed commit changes what it is called.

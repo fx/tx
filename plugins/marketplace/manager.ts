@@ -593,18 +593,51 @@ export async function isCommitAncestor(
 }
 
 /**
+ * Whether the remote still publishes a commit somewhere — on one of its
+ * branches, or under one of its tags — as the last fetch saw it.
+ *
+ * It is what separates the two ways a commit can fail to be an ancestor of
+ * what a marketplace tracks. A commit the remote no longer has anywhere is a
+ * rewritten or force-pushed upstream, and the checkout has to be replaced. A
+ * commit the remote still publishes, on a side branch or at a tag, is where a
+ * pin left the checkout, and re-pinning is the remedy rather than removal.
+ */
+export async function isCommitPublished(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<boolean> {
+  const containing = await readCheckout(
+    checkout,
+    [
+      "for-each-ref",
+      "--count",
+      "1",
+      "--contains",
+      commit,
+      `refs/remotes/${originRemote}`,
+      "refs/tags",
+    ],
+    execution,
+  );
+  return containing !== "";
+}
+
+/**
  * Brings a checkout's view of its remote up to date, tags included, and
  * re-resolves the remote's default branch. Re-resolution is what keeps a
  * marketplace installed before its remote renamed its default branch from
  * reporting a missing ref forever.
  *
- * Tags are taken as the remote publishes them now: a fetch that is not forced
- * refuses to update a tag that already exists locally and fails the whole
- * fetch for it, which would report an unreachable remote for a publisher who
- * merely moved a tag, and would leave a pin naming a ref whose local answer is
- * stale. Tag immutability is the remote's contract rather than tx's, and the
- * checkout is tx's own, so following what the remote says is both the honest
- * reading and the only one that keeps the fetch working.
+ * Refs are taken as the remote publishes them now, in both directions. A fetch
+ * that is not forced refuses to update a tag that already exists locally and
+ * fails the whole fetch for it, which would report an unreachable remote for a
+ * publisher who merely moved a tag; a fetch that does not prune keeps a branch
+ * and a tag the remote has withdrawn, which would leave a pin resolving to a
+ * ref nobody publishes any more and a withdrawn release still advertised as
+ * available. Tag immutability is the remote's contract rather than tx's, and
+ * the checkout is tx's own, so following what the remote says is both the
+ * honest reading and the only one that keeps a pin answerable.
  *
  * Both commands reach the remote, so both run non-interactively.
  */
@@ -620,7 +653,7 @@ export async function fetchCheckoutRemote(
   };
   await readCheckout(
     checkout,
-    ["fetch", "--tags", "--force", originRemote],
+    ["fetch", "--tags", "--force", "--prune", "--prune-tags", originRemote],
     remote,
   );
   await readCheckout(
@@ -1146,10 +1179,35 @@ export class MarketplaceManager implements MarketplaceOperations {
    */
   async pin(name: string, ref: string): Promise<string> {
     const checkout = await this.#pinnableCheckout(name);
-    await fetchCheckoutRemote(checkout, this.#execution);
+    await this.#fetchCheckout(checkout);
     const commit = await resolveMarketplaceRef(checkout, ref, this.#execution);
     await writeMarketplacePin(checkout, ref, this.#execution);
     return readCommitLabel(checkout, commit, this.#execution);
+  }
+
+  /**
+   * Fetches, with the recorded remote's credential taken out of whatever Git
+   * says when it cannot reach it. Git quotes the URL it was working with, and a
+   * marketplace installed from a source carrying a token has that token in the
+   * URL, so reporting the failure unaltered would print it — the same
+   * guarantee `tx update` makes about its own fetch, made in the one other
+   * place that fetches.
+   */
+  async #fetchCheckout(checkout: string): Promise<void> {
+    try {
+      await fetchCheckoutRemote(checkout, this.#execution);
+    } catch (error) {
+      // Nothing to redact against when the checkout cannot name its remote,
+      // which is the safe direction: the failure still reports.
+      const source =
+        (await readOptional(() =>
+          readRemoteSource(checkout, this.#execution),
+        )) ?? "";
+      throw withoutCredentialsInFailure(
+        error as Error,
+        credentialRedactions(source),
+      );
+    }
   }
 
   /** Clears a pin, if one is set, so the marketplace tracks its remote's

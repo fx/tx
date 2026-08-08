@@ -347,6 +347,46 @@ describe("marketplace pin and unpin", () => {
     }
   });
 
+  test("keeps the recorded remote's credential out of a failed fetch", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-secret-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await mkdir(join(root, "tools"), { recursive: true });
+      const source = "https://x-access-token:ghp_secret@example.com/acme/t.git";
+      const failing = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        prepare: async () => {},
+        runGit: async (args) => {
+          if (args.includes("core.sshCommand")) {
+            throw new Error("Git command failed");
+          }
+          if (args.includes("fetch")) {
+            // Git quotes the URL it was working with, credential and all.
+            throw new Error(
+              `Git command failed: fatal: could not read Password for '${source}'`,
+            );
+          }
+          if (args.includes("remote.origin.url")) {
+            return { stdout: `${source}\n` };
+          }
+          return { stdout: "\n" };
+        },
+      });
+
+      const failure: string = await failing.pin("tools", "v1.0.0").then(
+        () => "",
+        (error: Error) => error.message,
+      );
+      expect(failure).not.toContain("ghp_secret");
+      expect(failure).not.toContain("x-access-token");
+      // The host and path survive, because a user reads them to work out what
+      // failed; only the credential run is taken out.
+      expect(failure).toContain("https://example.com/acme/t.git");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("leaves the previous pin in place when a ref resolves nowhere", async () => {
     const temporaryRoot = await temporaryDirectory("tx-pin-rejected-");
     try {
