@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/fx/tx/compare/v1.1.0...v1.2.0) (2026-08-08)
+
+
+### Features
+
+* **marketplace:** retry a failed HTTPS clone over SSH ([#28](https://github.com/fx/tx/issues/28)) ([1b6b380](https://github.com/fx/tx/commit/1b6b3803ab0cfe74a7dce943cbbaafee38063a02))
+
+
+### Bug Fixes
+
+* **marketplace:** resolve plugin dependencies by Node's rules ([#31](https://github.com/fx/tx/issues/31)) ([aa7c7e6](https://github.com/fx/tx/commit/aa7c7e64d3c10f484c9c786823d2a6b3a5c75134))
+
 ## [1.1.0](https://github.com/fx/tx/compare/v1.0.0...v1.1.0) (2026-08-07)
 
 
