@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   chmod,
-  mkdir,
   readdir,
   readFile,
   rm,
@@ -22,16 +21,13 @@ import {
   ExecutableUpdater,
   type FetchResource,
   isCompiledModulePath,
+  isNewerRelease,
   type ManagerKind,
   publishedChecksum,
   type RunCommand,
   runCommand,
   stagingPath,
 } from "../plugins/executable/updater.ts";
-import {
-  compareVersions,
-  parseVersion,
-} from "../plugins/executable/version.ts";
 import updatePlugin from "../plugins/update/index.ts";
 import { createRootProgram, dispatch, EXIT_SUCCESS } from "../src/commands.ts";
 import type { UpdateItem } from "../src/plugin.ts";
@@ -40,6 +36,7 @@ import {
   type CapturedContext,
   captureContext,
   temporaryDirectory,
+  writeFixtureFiles,
 } from "./helpers.ts";
 
 const runningVersion = "1.2.0";
@@ -73,8 +70,7 @@ async function installedExecutable(
   path: string,
 ): Promise<string> {
   const target = join(root, path);
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, installedBytes);
+  await writeFixtureFiles(root, { [path]: installedBytes });
   await chmod(target, 0o755);
   return target;
 }
@@ -177,32 +173,29 @@ const availableItem: UpdateItem = {
 
 describe("semantic version ordering", () => {
   test.each([
-    ["1.3.0", "1.2.0", 1],
-    ["v1.3.0", "1.3.0", 0],
-    ["1.9.0", "1.10.0", -1],
-    ["2.0.0", "1.99.99", 1],
-    ["1.2.1", "1.2.0", 1],
-    ["1.3.0", "1.3.0-rc.1", 1],
-    ["1.3.0-rc.1", "1.3.0", -1],
-    ["1.3.0-rc.1", "1.3.0-rc.1", 0],
-    ["1.3.0-rc.2", "1.3.0-rc.1", 1],
-    ["1.3.0-rc.1", "1.3.0-rc.1.1", -1],
-    ["1.3.0-rc.1.1", "1.3.0-rc.1", 1],
-    ["1.3.0-alpha", "1.3.0-1", 1],
-    ["1.3.0-1", "1.3.0-alpha", -1],
-    ["1.3.0-alpha", "1.3.0-beta", -1],
-    ["1.3.0+build.5", "1.3.0", 0],
-  ])("orders %s against %s", (left, right, expected) => {
-    const parsedLeft = parseVersion(left);
-    const parsedRight = parseVersion(right);
-    if (!parsedLeft || !parsedRight) throw new Error("unparseable fixture");
-    expect(Math.sign(compareVersions(parsedLeft, parsedRight))).toBe(expected);
+    ["1.3.0", "1.2.0", true],
+    ["v1.3.0", "1.3.0", false],
+    ["1.9.0", "1.10.0", false],
+    ["2.0.0", "1.99.99", true],
+    ["1.2.1", "1.2.0", true],
+    ["1.3.0", "1.3.0-rc.1", true],
+    ["1.3.0-rc.1", "1.3.0", false],
+    ["1.3.0-rc.2", "1.3.0-rc.1", true],
+    ["1.3.0-rc.1.1", "1.3.0-rc.1", true],
+    ["1.3.0-alpha", "1.3.0-1", true],
+    ["1.3.0-alpha", "1.3.0-beta", false],
+    ["1.3.0+build.5", "1.3.0", false],
+  ])("reads %p against %p as newer: %p", (published, running, newer) => {
+    expect(isNewerRelease(published, running)).toBe(newer);
   });
 
   test.each(["", "1", "1.2", "1.2.3.4", "latest", "v1.2.x", "1.2.3-"])(
-    "reads %p as no semantic version at all",
+    "offers nothing for the unreadable version %p",
     (text) => {
-      expect(parseVersion(text)).toBeUndefined();
+      // Neither side may be coerced: reading `v1.2.x` as something above
+      // `1.2.0` would offer an update from a tag nothing can download.
+      expect(isNewerRelease(text, "1.2.0")).toBe(false);
+      expect(isNewerRelease("9.9.9", text)).toBe(false);
     },
   );
 });

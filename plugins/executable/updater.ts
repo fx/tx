@@ -8,8 +8,6 @@ import type {
   UpdateResult,
 } from "@fx/tx/plugin";
 
-import { compareVersions, parseVersion } from "./version.ts";
-
 export interface CommandResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -54,6 +52,9 @@ const tokenVariables = ["GH_TOKEN", "GITHUB_TOKEN"] as const;
  * filesystem, which is a property of the running program rather than of its
  * filename — a `bun` someone renamed to `tx` fails this and is left alone. */
 const compiledModulePattern = /^(?:\/\$bunfs[/\\]|[A-Za-z]:[/\\]~BUN[/\\])/;
+/** A semantic version, optionally spelled with the `v` the release tags carry. */
+const versionPattern =
+  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 interface Installation {
   readonly name: string;
@@ -140,6 +141,67 @@ function owner(
 
 export type ManagerKind = "mise" | "npm";
 
+interface Manager {
+  readonly name: string;
+  /** What this manager calls the thing that owns a path, for its failures. */
+  readonly noun: string;
+  readonly listing: readonly string[];
+  /** The installations the listing describes, or undefined when it cannot be
+   * read at all. */
+  read(stdout: string): readonly Installation[] | undefined;
+  upgrade(name: string): readonly string[];
+}
+
+/** mise reports one entry per installed version, keyed by tool name. */
+function readMiseListing(stdout: string): readonly Installation[] | undefined {
+  const parsed = parsedJson(stdout);
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const installations: Installation[] = [];
+  for (const [name, versions] of Object.entries(parsed)) {
+    if (!Array.isArray(versions)) continue;
+    for (const installed of versions as readonly unknown[]) {
+      const path = (installed as { install_path?: unknown }).install_path;
+      if (typeof path === "string") installations.push({ name, path });
+    }
+  }
+  return installations;
+}
+
+/** npm's own parseable listing: `<path>:<name>@<version>`, one per line. */
+function readNpmListing(stdout: string): readonly Installation[] {
+  const installations: Installation[] = [];
+  for (const line of stdout.split("\n")) {
+    const separator = line.lastIndexOf(":");
+    if (separator < 0) continue;
+    const label = line.slice(separator + 1);
+    // A scoped name keeps its leading `@`; only a later one separates the
+    // version this listing appends.
+    const version = label.lastIndexOf("@");
+    installations.push({
+      name: version > 0 ? label.slice(0, version) : label,
+      path: line.slice(0, separator),
+    });
+  }
+  return installations;
+}
+
+const managers: Readonly<Record<ManagerKind, Manager>> = Object.freeze({
+  mise: {
+    name: "mise",
+    noun: "tool",
+    listing: ["mise", "ls", "--installed", "--json"],
+    read: readMiseListing,
+    upgrade: (name: string) => ["mise", "upgrade", name],
+  },
+  npm: {
+    name: "npm",
+    noun: "package",
+    listing: ["npm", "ls", "--global", "--parseable", "--long"],
+    read: readNpmListing,
+    upgrade: (name: string) => ["npm", "install", "--global", name],
+  },
+});
+
 /**
  * Which of the two managers the project documents owns a resolved path, or
  * undefined for a location neither owns. mise is decided first because its npm
@@ -171,6 +233,22 @@ export function publishedChecksum(
     if (digest && rest.join(" ").replace(/^\*/, "") === asset) return digest;
   }
   return undefined;
+}
+
+/**
+ * Whether a published version is strictly newer than what is running, as
+ * semantic versions. Both are validated before they are ordered: the runtime's
+ * comparison coerces what it cannot parse — reading `v1.2.x` as something
+ * above `1.2.0` — and offering an update derived from a tag that cannot be
+ * read is worse than offering none. Anything the project did not publish as a
+ * semantic version therefore compares as no update at all, which is also how a
+ * locally built executable ahead of the last release is left alone.
+ */
+export function isNewerRelease(published: string, running: string): boolean {
+  const left = published.trim();
+  const right = running.trim();
+  if (!versionPattern.test(left) || !versionPattern.test(right)) return false;
+  return Bun.semver.order(left, right) > 0;
 }
 
 function parsedJson(text: string): unknown {
@@ -222,13 +300,7 @@ export class ExecutableUpdater implements UpdateParticipant {
 
   async gather(): Promise<readonly UpdateItem[]> {
     const tag = await this.#latestTag();
-    const published = parseVersion(tag);
-    const running = parseVersion(this.#version);
-    if (
-      published === undefined ||
-      running === undefined ||
-      compareVersions(published, running) <= 0
-    ) {
+    if (!isNewerRelease(tag, this.#version)) {
       return [
         { name: itemName, current: this.#version, detail: `latest ${tag}` },
       ];
@@ -312,20 +384,14 @@ export class ExecutableUpdater implements UpdateParticipant {
   }
 
   /**
-   * Runs the manager's own upgrade for the tool that owns this path. What the
-   * manager reported is what is reported back: a delegated upgrade may install
-   * elsewhere, and naming a version this participant did not observe would be
-   * a claim rather than an observation.
+   * Runs the manager's own upgrade for whatever it says owns this path. What
+   * the manager reported is what is reported back: a delegated upgrade may
+   * install elsewhere, and naming a version this participant did not observe
+   * would be a claim rather than an observation.
    */
-  async #delegate(manager: ManagerKind, target: string): Promise<UpdateResult> {
-    const tool =
-      manager === "mise"
-        ? await this.#miseTool(target)
-        : await this.#npmPackage(target);
-    const command =
-      manager === "mise"
-        ? ["mise", "upgrade", tool]
-        : ["npm", "install", "--global", tool];
+  async #delegate(kind: ManagerKind, target: string): Promise<UpdateResult> {
+    const manager = managers[kind];
+    const command = manager.upgrade(await this.#owningName(manager, target));
     const spelled = command.join(" ");
     const result = await this.#run(command);
     if (result.exitCode !== 0) {
@@ -340,70 +406,30 @@ export class ExecutableUpdater implements UpdateParticipant {
   }
 
   /**
-   * The tool mise says owns this path. The path is not asked to answer for
-   * itself: a backend, an owner, and a repository collapse into one directory
-   * component through a flattening that is not invertible, so reconstructing
-   * the name would upgrade a tool the user may not have.
+   * What the manager says owns this path, read from the manager's own
+   * listing. The path is not asked to answer for itself: a backend, an owner,
+   * and a repository collapse into one directory component through a
+   * flattening that is not invertible, so reconstructing the name would
+   * upgrade something the user may not have.
    */
-  async #miseTool(target: string): Promise<string> {
-    const listing = await this.#run(["mise", "ls", "--installed", "--json"]);
+  async #owningName(manager: Manager, target: string): Promise<string> {
+    const listing = await this.#run(manager.listing);
     if (listing.exitCode !== 0) {
       throw new Error(
-        `mise could not report which tool owns "${target}": ${oneLine(listing.stderr || listing.stdout)}`,
+        `${manager.name} could not report which ${manager.noun} owns "${target}": ${oneLine(listing.stderr || listing.stdout)}`,
       );
     }
-    const parsed = parsedJson(listing.stdout);
-    if (typeof parsed !== "object" || parsed === null) {
-      throw new Error(`mise did not report a readable list of installed tools`);
-    }
-
-    const installations: Installation[] = [];
-    for (const [name, versions] of Object.entries(parsed)) {
-      if (!Array.isArray(versions)) continue;
-      for (const installed of versions as readonly unknown[]) {
-        const path = (installed as { install_path?: unknown }).install_path;
-        if (typeof path === "string") installations.push({ name, path });
-      }
-    }
-    const tool = owner(target, installations);
-    if (tool === undefined) {
-      throw new Error(`mise reported no tool owning "${target}"`);
-    }
-    return tool;
-  }
-
-  /** The package npm says owns this path, read from its own parseable
-   * listing: `<path>:<name>@<version>`, one installation per line. */
-  async #npmPackage(target: string): Promise<string> {
-    const listing = await this.#run([
-      "npm",
-      "ls",
-      "--global",
-      "--parseable",
-      "--long",
-    ]);
-    if (listing.exitCode !== 0) {
+    const installations = manager.read(listing.stdout);
+    if (installations === undefined) {
       throw new Error(
-        `npm could not report which package owns "${target}": ${oneLine(listing.stderr || listing.stdout)}`,
+        `${manager.name} did not report a readable list of installed ${manager.noun}s`,
       );
-    }
-
-    const installations: Installation[] = [];
-    for (const line of listing.stdout.split("\n")) {
-      const separator = line.lastIndexOf(":");
-      if (separator < 0) continue;
-      const label = line.slice(separator + 1);
-      // A scoped name keeps its leading `@`; only a later one separates the
-      // version that this listing appends.
-      const version = label.lastIndexOf("@");
-      installations.push({
-        name: version > 0 ? label.slice(0, version) : label,
-        path: line.slice(0, separator),
-      });
     }
     const owning = owner(target, installations);
     if (owning === undefined) {
-      throw new Error(`npm reported no package owning "${target}"`);
+      throw new Error(
+        `${manager.name} reported no ${manager.noun} owning "${target}"`,
+      );
     }
     return owning;
   }
