@@ -468,6 +468,17 @@ export async function prepareMarketplace(
   }
 }
 
+/**
+ * Whether an installed marketplace is a live reference rather than a checkout
+ * tx owns. One predicate, because listing and updating have to agree about
+ * which marketplaces have a remote at all.
+ */
+export async function isMarketplaceReference(
+  checkout: string,
+): Promise<boolean> {
+  return (await lstat(checkout)).isSymbolicLink();
+}
+
 export async function pathExists(path: string): Promise<boolean> {
   try {
     await lstat(path);

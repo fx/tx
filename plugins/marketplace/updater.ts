@@ -1,5 +1,3 @@
-import { lstat } from "node:fs/promises";
-
 import type {
   UpdateItem,
   UpdateParticipant,
@@ -23,6 +21,7 @@ import {
 import {
   containedMarketplacePath,
   discoverInstalledMarketplaces,
+  isMarketplaceReference,
   prepareMarketplace,
 } from "./storage.ts";
 
@@ -41,11 +40,6 @@ function errorMessage(error: unknown): string {
  * of the report or allowed to fail the participant. */
 function unusableMarketplace(name: string, error: unknown): string {
   return `${errorMessage(error)}. Run "tx marketplace remove ${name}" to remove it.`;
-}
-
-/** A reference is the author's own directory, recorded as a symbolic link. */
-async function isReference(checkout: string): Promise<boolean> {
-  return (await lstat(checkout)).isSymbolicLink();
 }
 
 /**
@@ -89,7 +83,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
   async apply(item: UpdateItem): Promise<UpdateResult> {
     const checkout = containedMarketplacePath(this.#root, item.name);
     // A reference is the author's own tree: nothing about it is tx's to move.
-    if (await isReference(checkout)) {
+    if (await isMarketplaceReference(checkout)) {
       return { applied: false, detail: "live reference" };
     }
 
@@ -129,7 +123,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
     try {
       // A reference is live: nothing is fetched, moved, or modified, so no Git
       // command runs against it at all.
-      if (await isReference(checkout)) {
+      if (await isMarketplaceReference(checkout)) {
         return { name, current: liveMarketplaceVersion };
       }
 

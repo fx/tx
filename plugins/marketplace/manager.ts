@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import {
   containedMarketplacePath,
   discoverInstalledMarketplaces,
+  isMarketplaceReference,
   pathExists,
   prepareMarketplace,
   validateMarketplaceName,
@@ -598,6 +599,8 @@ export class MarketplaceManager implements MarketplaceOperations {
   readonly #prepare: ((checkout: string) => Promise<void>) | undefined;
   readonly #env: Readonly<Record<string, string | undefined>>;
   readonly #cwd: string;
+  /** How this manager drives Git, for the shared operations above. */
+  readonly #execution: GitExecution;
 
   constructor(root: string, options: MarketplaceManagerOptions = {}) {
     this.#root = root;
@@ -605,6 +608,7 @@ export class MarketplaceManager implements MarketplaceOperations {
     this.#prepare = options.prepare;
     this.#env = options.env ?? process.env;
     this.#cwd = options.cwd ?? process.cwd();
+    this.#execution = { runGit: this.#runGit, env: this.#env };
   }
 
   async add(source: string, requestedName?: string): Promise<string> {
@@ -718,11 +722,6 @@ export class MarketplaceManager implements MarketplaceOperations {
     throw cloneFailure(labels, failures, redactions);
   }
 
-  /** How this manager drives Git, for the shared operations above. */
-  get #execution(): GitExecution {
-    return { runGit: this.#runGit, env: this.#env };
-  }
-
   /**
    * Publication is deliberately outside the retry: preparation runs a trusted
    * lifecycle script and the name check reports a marketplace someone else
@@ -762,7 +761,7 @@ export class MarketplaceManager implements MarketplaceOperations {
           let source = unknownSource;
           let version = unknownMarketplaceVersion;
           try {
-            if ((await lstat(checkout)).isSymbolicLink()) {
+            if (await isMarketplaceReference(checkout)) {
               // A reference reports the directory tx reads, not the remote
               // that directory happens to have configured, and it has no
               // version: its contents are whatever that directory holds.
