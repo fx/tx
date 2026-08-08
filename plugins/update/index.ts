@@ -96,7 +96,10 @@ const updatePlugin: PluginDefinition = Object.freeze({
               else fail(gatherReport(item));
             }
 
-            if (gathered.length === 0 && !failed) {
+            // Only an unfiltered run can answer that there is nothing
+            // installed. With names given, an empty gather means those names
+            // matched nothing, which is the failure reported below.
+            if (gathered.length === 0 && names.length === 0 && !failed) {
               report("Nothing installed to update.");
             }
 

@@ -131,6 +131,25 @@ describe("bundled update plugin", () => {
     expect(context.stdoutText()).toBe("Nothing installed to update.\n");
   });
 
+  test("does not report nothing installed when the names matched nothing", async () => {
+    const context = captureContext();
+    const program = await setup(context);
+
+    // The run failed, so the answer an unfiltered run gives would contradict
+    // its outcome on the stream a caller reads results from.
+    expect(await dispatch(program, ["update", "ghost"], context)).toEqual({
+      exitCode: EXIT_FAILURE,
+    });
+    expect(context.stdoutText()).toBe("");
+    expect(context.stderrText()).toBe(
+      [
+        'Error: No update named "ghost".',
+        "Error: Update completed with failures",
+        "",
+      ].join("\n"),
+    );
+  });
+
   test("gathers without applying on a dry run", async () => {
     const context = captureContext();
     const participant = new StubParticipant([outdated, current]);
