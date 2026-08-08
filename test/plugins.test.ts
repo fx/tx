@@ -10,6 +10,8 @@ import type {
   PluginAPI,
   PluginDefinition,
   PluginIdentity,
+  UpdateParticipant,
+  UpdateParticipation,
 } from "../src/plugin.ts";
 import { coreDependencies, initializePlugins } from "../src/plugins.ts";
 import { captureContext } from "./helpers.ts";
@@ -23,6 +25,24 @@ function definition(
     identity: parent ? { name, parent } : { name },
     load: () => plugin,
   };
+}
+
+/** A participant the host is only ever expected to store and hand back. */
+function stubParticipant(): UpdateParticipant {
+  return {
+    gather: () => [],
+    apply: () => ({ applied: false }),
+  };
+}
+
+function participantOwners(
+  participations: readonly UpdateParticipation[],
+): string[] {
+  return participations.map(({ identity }) =>
+    identity.parent
+      ? `${identity.parent.name}/${identity.name}`
+      : identity.name,
+  );
 }
 
 function namespaceNames(
@@ -442,7 +462,7 @@ describe("initializePlugins", () => {
     expect(namespaceNames(namespaces)).toEqual(["first", "last"]);
   });
 
-  test("closes command and child contribution after initialization", async () => {
+  test("closes command, child, and participant contribution after initialization", async () => {
     let retainedAPI: PluginAPI | undefined;
 
     const { failures } = await initializePlugins([
@@ -459,6 +479,10 @@ describe("initializePlugins", () => {
     expect(() => retainedAPI?.plugin(definition("late", () => {}))).toThrow(
       "Plugin retained cannot contribute plugins after initialization",
     );
+    expect(() => retainedAPI?.update(stubParticipant())).toThrow(
+      "Plugin retained cannot contribute update participants after initialization",
+    );
+    expect(retainedAPI?.updaters()).toEqual([]);
   });
 
   test("supports empty defaults", async () => {
@@ -466,5 +490,121 @@ describe("initializePlugins", () => {
       namespaces: [],
       failures: [],
     });
+  });
+});
+
+describe("update participation", () => {
+  test("commits participants in FIFO order, frozen with their owner's identity", async () => {
+    const first = stubParticipant();
+    const second = stubParticipant();
+    const child = stubParticipant();
+    const late = stubParticipant();
+    let reader: PluginAPI | undefined;
+
+    const { namespaces, failures } = await initializePlugins([
+      definition("alpha", (api) => {
+        api.update(first);
+        api.update(second);
+        api.plugin(
+          definition(
+            "alpha-child",
+            ({ update }) => update(child),
+            api.identity,
+          ),
+        );
+      }),
+      definition("beta", (api) => {
+        api.update(late);
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(namespaces).toEqual([]);
+    const committed = reader?.updaters() ?? [];
+    expect(committed.map(({ participant }) => participant)).toEqual([
+      first,
+      second,
+      late,
+      child,
+    ]);
+    expect(participantOwners(committed)).toEqual([
+      "alpha",
+      "alpha",
+      "beta",
+      "alpha/alpha-child",
+    ]);
+    expect(Object.isFrozen(committed)).toBe(true);
+    expect(Object.isFrozen(committed[0])).toBe(true);
+  });
+
+  test("reads only what was committed before the reading plugin", async () => {
+    const early = stubParticipant();
+    let duringInitialization: readonly UpdateParticipation[] = [];
+    let reader: PluginAPI | undefined;
+
+    const { failures } = await initializePlugins([
+      definition("early", ({ update }) => update(early)),
+      definition("middle", (api) => {
+        api.update(stubParticipant());
+        duringInitialization = api.updaters();
+      }),
+      definition("late", (api) => {
+        api.update(stubParticipant());
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    // Its own contribution is still staged, and later plugins have not run.
+    expect(duringInitialization.map((entry) => entry.participant)).toEqual([
+      early,
+    ]);
+    // The snapshot is taken at call time rather than kept live.
+    expect(duringInitialization).toHaveLength(1);
+    expect(reader?.updaters()).toHaveLength(3);
+  });
+
+  test("discards participants staged by a plugin that fails", async () => {
+    let reader: PluginAPI | undefined;
+    const healthy = stubParticipant();
+
+    const { namespaces, failures } = await initializePlugins([
+      definition("broken", ({ command, update }) => {
+        command((namespace) => namespace.command("ghost"));
+        update(stubParticipant());
+        throw new Error("initialization failed");
+      }),
+      definition("healthy", (api) => {
+        api.update(healthy);
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([
+      { identity: { name: "broken" }, message: "initialization failed" },
+    ]);
+    expect(namespaces).toEqual([]);
+    expect(reader?.updaters().map((entry) => entry.participant)).toEqual([
+      healthy,
+    ]);
+  });
+
+  test("discards participants staged by a plugin whose namespace collides", async () => {
+    let reader: PluginAPI | undefined;
+
+    const { failures } = await initializePlugins([
+      definition("notes", ({ command }) => command(() => {})),
+      definition("notes", ({ command, update }) => {
+        command(() => {});
+        update(stubParticipant());
+      }),
+      definition("reader", (api) => {
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toHaveLength(1);
+    expect(reader?.updaters()).toEqual([]);
   });
 });

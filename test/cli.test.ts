@@ -139,6 +139,14 @@ describe("main", () => {
     expect(bare.stderrText()).not.toContain("marketplace");
   });
 
+  test("composes the update driver, which has nothing to drive yet", async () => {
+    const context = captureContext({ XDG_DATA_HOME: emptyDataHome });
+
+    expect(await main(["update"], defaultPlugins, context)).toBe(0);
+    expect(context.stdoutText()).toBe("Nothing installed to update.\n");
+    expect(context.stderrText()).toBe("");
+  });
+
   // The bundled plugin keeps the parser's implicit help subcommand, so these
   // three outcomes are user-reachable today and must stay distinct.
   test.each([
