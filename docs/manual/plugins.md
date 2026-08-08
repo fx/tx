@@ -65,7 +65,9 @@ tx update --dry-run
 tx update tools
 ```
 
-Gathering prints one tab-separated line per item — its name, its current version label, either `-> <version>` or `up to date`, and whatever detail its owner supplied — followed by one line per applied item. Results go to standard output and failures to standard error, so you can pipe one without losing the other. A name matching no gathered item is reported as a failure, and so is a participant that cannot report, an item that reports itself as unusable, and an item whose update fails; each of those exits `1` while the rest of the run continues. Applying nothing is not a failure. A dry run exits `0` whether or not updates are available: the exit code answers "did the command work", not "is anything out of date".
+Gathering prints one tab-separated line per item — its name, its current version label, either `-> <version>` or `up to date`, and whatever detail its owner supplied — followed by one line per item that was applied. An item reporting nothing available is reported and left alone; nothing is asked to update it.
+
+Results go to standard output and failures to standard error, so you can pipe one without losing the other. An item that reports itself as unusable is reported on standard error instead, with `failed: <reason>` in place of what it would have moved to, and is never applied. A name matching no gathered item is a failure too, and so is a participant that cannot report and an item whose update fails; each of those exits `1` while the rest of the run continues. Applying nothing is not a failure. A dry run exits `0` whether or not updates are available: the exit code answers "did the command work", not "is anything out of date".
 
 `tx` never checks for updates on its own. No other invocation contacts a remote to learn what is available, caches a result, or prints a notice, and there is no flag or configuration key that turns such a check on.
 
@@ -164,7 +166,7 @@ export default plugin;
 ```
 
 - `gather` reports what you have. Leave `available` out when there is nothing to apply, and set `failure` on an item to report that one thing as unusable while your other items are still reported and applied. Gathering may contact a remote — that is what gathering is — but must change nothing installed, in a dry run or a real one.
-- `apply` returns a result or throws. Returning `applied: false` means you deliberately changed nothing and is not a failure; throwing is, and neither one stops the items beside it. It is called only for items in scope, never for an item carrying a `failure`, and never at all on a dry run.
+- `apply` returns a result or throws. Returning `applied: false` means you deliberately changed nothing and is not a failure; throwing is, and neither one stops the items beside it. It is called only for an in-scope item that reported an `available` version and no `failure`, and never at all on a dry run.
 - Version labels are opaque strings the driver never parses, compares, or orders. Deciding whether something is out of date is yours.
 - Participants are staged with your commands and child definitions: a plugin that fails initialization contributes none. Contributing one claims no namespace, so a plugin may participate without defining a single command.
 - `updaters()` returns what is committed at the moment you call it, so read it inside a command action rather than during initialization. Participants come back in the host's FIFO commit order, which for the bundled plugins is the order `cli.ts` composes them in.

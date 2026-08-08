@@ -79,6 +79,11 @@ const outdated: UpdateItem = {
   detail: "two commits behind",
 };
 const current: UpdateItem = { name: "beta", current: "2.0.0" };
+const stale: UpdateItem = {
+  name: "gamma",
+  current: "3.0.0",
+  available: "3.1.0",
+};
 
 describe("bundled update plugin", () => {
   test("declares its namespace, item argument, and dry-run flag", async () => {
@@ -143,23 +148,26 @@ describe("bundled update plugin", () => {
     expect(participant.applied).toEqual([]);
   });
 
-  test("applies every gathered item and reports each outcome", async () => {
+  test("applies what is available, leaving an item with nothing to apply alone", async () => {
     const context = captureContext();
-    const participant = new StubParticipant([outdated, current], {
-      beta: { applied: false, detail: "already current" },
+    const participant = new StubParticipant([outdated, current, stale], {
+      gamma: { applied: false, detail: "already current" },
     });
     const program = await setup(context, [contributor("stub", participant)]);
 
     expect(await dispatch(program, ["update"], context)).toEqual({
       exitCode: EXIT_SUCCESS,
     });
-    expect(participant.applied).toEqual(["alpha", "beta"]);
+    // An item reporting nothing available is never handed back to its owner,
+    // and one the owner declined to change is not a failure.
+    expect(participant.applied).toEqual(["alpha", "gamma"]);
     expect(context.stdoutText()).toBe(
       [
         "alpha\t1.0.0\t-> 1.1.0\ttwo commits behind",
         "beta\t2.0.0\tup to date",
+        "gamma\t3.0.0\t-> 3.1.0",
         "alpha\tupdated to 1.1.0",
-        "beta\tnothing to apply\talready current",
+        "gamma\tnothing to apply\talready current",
       ]
         .map((line) => `${line}\n`)
         .join(""),
@@ -169,15 +177,15 @@ describe("bundled update plugin", () => {
 
   test("reports an applied item that named no version", async () => {
     const context = captureContext();
-    const participant = new StubParticipant([current], {
-      beta: { applied: true },
+    const participant = new StubParticipant([stale], {
+      gamma: { applied: true },
     });
     const program = await setup(context, [contributor("stub", participant)]);
 
     expect(await dispatch(program, ["update"], context)).toEqual({
       exitCode: EXIT_SUCCESS,
     });
-    expect(context.stdoutText()).toEndWith("beta\tupdated\n");
+    expect(context.stdoutText()).toEndWith("gamma\tupdated\n");
   });
 
   test("gathers and applies participants in commit order", async () => {
@@ -211,15 +219,15 @@ describe("bundled update plugin", () => {
 
   test("applies only the items named on the command line", async () => {
     const context = captureContext();
-    const participant = new StubParticipant([outdated, current]);
+    const participant = new StubParticipant([outdated, stale]);
     const program = await setup(context, [contributor("stub", participant)]);
 
-    expect(await dispatch(program, ["update", "beta"], context)).toEqual({
+    expect(await dispatch(program, ["update", "gamma"], context)).toEqual({
       exitCode: EXIT_SUCCESS,
     });
-    expect(participant.applied).toEqual(["beta"]);
+    expect(participant.applied).toEqual(["gamma"]);
     expect(context.stdoutText()).toContain("alpha\t1.0.0\t-> 1.1.0");
-    expect(context.stdoutText()).toEndWith("beta\tupdated\n");
+    expect(context.stdoutText()).toEndWith("gamma\tupdated to 3.1.0\n");
   });
 
   test("fails a name matching no gathered item while applying the rest", async () => {
@@ -242,7 +250,7 @@ describe("bundled update plugin", () => {
 
   test("isolates a participant that fails while gathering", async () => {
     const context = captureContext();
-    const healthy = new StubParticipant([current]);
+    const healthy = new StubParticipant([stale]);
     const program = await setup(context, [
       contributor("broken", new StubParticipant(new Error("remote refused")), {
         name: "marketplace",
@@ -253,9 +261,9 @@ describe("bundled update plugin", () => {
     expect(await dispatch(program, ["update"], context)).toEqual({
       exitCode: EXIT_FAILURE,
     });
-    expect(healthy.applied).toEqual(["beta"]);
+    expect(healthy.applied).toEqual(["gamma"]);
     expect(context.stdoutText()).toBe(
-      "beta\t2.0.0\tup to date\nbeta\tupdated\n",
+      "gamma\t3.0.0\t-> 3.1.0\ngamma\tupdated to 3.1.0\n",
     );
     expect(context.stderrText()).toBe(
       [
@@ -268,26 +276,19 @@ describe("bundled update plugin", () => {
 
   test("isolates an item that fails while applying", async () => {
     const context = captureContext();
-    const participant = new StubParticipant(
-      [
-        outdated,
-        current,
-        { name: "gamma", current: "3.0.0", available: "3.1" },
-      ],
-      { alpha: new Error("checkout is dirty") },
-    );
+    const participant = new StubParticipant([outdated, current, stale], {
+      alpha: new Error("checkout is dirty"),
+    });
     const program = await setup(context, [contributor("stub", participant)]);
 
     expect(await dispatch(program, ["update"], context)).toEqual({
       exitCode: EXIT_FAILURE,
     });
-    expect(participant.applied).toEqual(["alpha", "beta", "gamma"]);
-    expect(context.stdoutText()).toEndWith(
-      "beta\tupdated\ngamma\tupdated to 3.1\n",
-    );
+    expect(participant.applied).toEqual(["alpha", "gamma"]);
+    expect(context.stdoutText()).toEndWith("gamma\tupdated to 3.1.0\n");
     expect(context.stderrText()).toBe(
       [
-        'Error: Update "alpha" failed: checkout is dirty',
+        "Error: alpha\tfailed: checkout is dirty",
         "Error: Update completed with failures",
         "",
       ].join("\n"),
@@ -297,21 +298,28 @@ describe("bundled update plugin", () => {
   test("reports an item carrying its own failure without applying it", async () => {
     const context = captureContext();
     const participant = new StubParticipant([
-      { name: "alpha", current: "1.0.0", failure: "checkout is missing" },
-      current,
+      {
+        name: "alpha",
+        current: "1.0.0",
+        available: "1.1.0",
+        failure: "checkout is missing",
+      },
+      stale,
     ]);
     const program = await setup(context, [contributor("stub", participant)]);
 
     expect(await dispatch(program, ["update"], context)).toEqual({
       exitCode: EXIT_FAILURE,
     });
-    expect(participant.applied).toEqual(["beta"]);
+    expect(participant.applied).toEqual(["gamma"]);
     expect(context.stdoutText()).toBe(
-      "beta\t2.0.0\tup to date\nbeta\tupdated\n",
+      "gamma\t3.0.0\t-> 3.1.0\ngamma\tupdated to 3.1.0\n",
     );
+    // The failure replaces what it would have moved to, and its name, current
+    // label, and detail are reported with it.
     expect(context.stderrText()).toBe(
       [
-        'Error: Update "alpha" failed: checkout is missing',
+        "Error: alpha\t1.0.0\tfailed: checkout is missing",
         "Error: Update completed with failures",
         "",
       ].join("\n"),
@@ -345,8 +353,22 @@ describe("bundled update plugin", () => {
     });
     expect(participant.applied).toEqual([]);
     expect(context.stderrText()).toContain(
-      'Error: Update "alpha" failed: checkout is missing',
+      "Error: alpha\t1.0.0\tfailed: checkout is missing",
     );
+  });
+
+  test("treats an empty failure as the failure it is", async () => {
+    const context = captureContext();
+    const participant = new StubParticipant([
+      { name: "alpha", current: "1.0.0", available: "1.1.0", failure: "" },
+    ]);
+    const program = await setup(context, [contributor("stub", participant)]);
+
+    expect(await dispatch(program, ["update"], context)).toEqual({
+      exitCode: EXIT_FAILURE,
+    });
+    expect(participant.applied).toEqual([]);
+    expect(context.stderrText()).toStartWith("Error: alpha\t1.0.0\tfailed: \n");
   });
 
   test("reports a participant that fails with a non-error value", async () => {

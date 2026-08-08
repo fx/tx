@@ -28,24 +28,27 @@ function ownerName(identity: PluginIdentity): string {
   return names.reverse().join("/");
 }
 
-function line(values: readonly (string | undefined)[]): string {
-  return `${values.filter((value) => value !== undefined).join("\t")}\n`;
+function columns(values: readonly (string | undefined)[]): string {
+  return values.filter((value) => value !== undefined).join("\t");
 }
 
-function gatherLine(item: UpdateItem): string {
-  return line([
-    item.name,
-    item.current,
-    item.available === undefined ? "up to date" : `-> ${item.available}`,
-    item.detail,
-  ]);
+/** What the item answers about itself: what it would move to, that it has
+ * nothing to move to, or that it is unusable and will not be applied. */
+function availability(item: UpdateItem): string {
+  if (item.failure !== undefined) return `failed: ${item.failure}`;
+  if (item.available === undefined) return "up to date";
+  return `-> ${item.available}`;
 }
 
-function applyLine(item: UpdateItem, result: UpdateResult): string {
+function gatherReport(item: UpdateItem): string {
+  return columns([item.name, item.current, availability(item), item.detail]);
+}
+
+function applyReport(item: UpdateItem, result: UpdateResult): string {
   const outcome = result.applied
     ? `updated${result.version === undefined ? "" : ` to ${result.version}`}`
     : "nothing to apply";
-  return line([item.name, outcome, result.detail]);
+  return columns([item.name, outcome, result.detail]);
 }
 
 const identity: PluginIdentity = Object.freeze({ name: "update" });
@@ -64,9 +67,12 @@ const updatePlugin: PluginDefinition = Object.freeze({
           .option("--dry-run", "Report what would be updated, applying nothing")
           .action(async (names: string[], flags: { dryRun?: boolean }) => {
             let failed = false;
-            const fail = (message: string): void => {
+            const report = (text: string): void => {
+              context.stdout.write(`${text}\n`);
+            };
+            const fail = (text: string): void => {
               failed = true;
-              context.stderr.write(`Error: ${message}\n`);
+              context.stderr.write(`Error: ${text}\n`);
             };
 
             const gathered: GatheredItem[] = [];
@@ -82,14 +88,16 @@ const updatePlugin: PluginDefinition = Object.freeze({
               }
             }
 
+            // Every gathered item is reported with what it answered, and an
+            // item that reports itself unusable is reported as the failure it
+            // is, on the stream failures belong on.
             for (const { item } of gathered) {
-              if (item.failure)
-                fail(`Update "${item.name}" failed: ${item.failure}`);
-              else context.stdout.write(gatherLine(item));
+              if (item.failure === undefined) report(gatherReport(item));
+              else fail(gatherReport(item));
             }
 
             if (gathered.length === 0 && !failed) {
-              context.stdout.write("Nothing installed to update.\n");
+              report("Nothing installed to update.");
             }
 
             // Everything is in scope until names narrow it, and the names are
@@ -107,12 +115,15 @@ const updatePlugin: PluginDefinition = Object.freeze({
 
             if (!flags.dryRun) {
               for (const { participation, item } of scoped) {
-                if (item.failure) continue;
+                // An item with nothing available has nothing to apply, and one
+                // that came back unusable is never handed back to its owner.
+                if (item.available === undefined) continue;
+                if (item.failure !== undefined) continue;
                 try {
                   const result = await participation.participant.apply(item);
-                  context.stdout.write(applyLine(item, result));
+                  report(applyReport(item, result));
                 } catch (error) {
-                  fail(`Update "${item.name}" failed: ${errorMessage(error)}`);
+                  fail(columns([item.name, `failed: ${errorMessage(error)}`]));
                 }
               }
             }
