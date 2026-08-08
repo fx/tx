@@ -5,7 +5,7 @@
 Make `tx` able to update itself. A bundled plugin that defines no commands contributes an update participant for the running executable: it reports the installed version against the latest published release, and applying it either delegates to the version manager that installed `tx` or downloads the published executable, verifies its checksum, confirms its version, and moves it into place atomically.
 
 **Spec:** [Updates](../specs/updates/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0012
 
 ## Motivation
@@ -122,40 +122,40 @@ Every failure path removes the staged file, through a helper that swallows a ref
   - [x] Add scenarios for direct replacement, delegation, a checksum mismatch, a source checkout, and an unwritable path (PR #30)
   - [x] Update the specs' references and changelogs, and both documentation indexes (PR #30)
 
-- [ ] Add the bundled executable plugin under `plugins/executable/`
-  - [ ] Contribute an update participant and claim no namespace
-  - [ ] Inject network access, subprocess execution, and the resolved executable path, with real defaults
-  - [ ] Compose the plugin in `cli.ts` after the marketplace plugin, with the ordering stated
+- [x] Add the bundled executable plugin under `plugins/executable/`
+  - [x] Contribute an update participant and claim no namespace
+  - [x] Inject network access, subprocess execution, and the resolved executable path, with real defaults
+  - [x] Compose the plugin in `cli.ts` after the marketplace plugin, with the ordering stated
 
-- [ ] Gather the executable item
-  - [ ] Read the running version from injected dependencies and the latest published release from the project's releases
-  - [ ] Send a token from `GH_TOKEN`, then `GITHUB_TOKEN`, and from no other variable
-  - [ ] Compare semantically and report an available version only when the release is strictly greater and this executable could be replaced
-  - [ ] Report nothing to apply for a source checkout and for a platform with no published executable, naming the reason and still naming the newer release as detail
+- [x] Gather the executable item
+  - [x] Read the running version from injected dependencies and the latest published release from the project's releases
+  - [x] Send a token from `GH_TOKEN`, then `GITHUB_TOKEN`, and from no other variable
+  - [x] Compare semantically and report an available version only when the release is strictly greater and this executable could be replaced
+  - [x] Report nothing to apply for a source checkout and for a platform with no published executable, naming the reason and still naming the newer release as detail
 
-- [ ] Apply through a version manager when one owns the executable
-  - [ ] Detect mise and npm from the resolved executable path, treating every other location as unmanaged
-  - [ ] Ask the manager which tool owns that path and run its upgrade command for that tool
-  - [ ] Report the command, its output, and its outcome, and fail without replacing anything when the manager cannot be interrogated
+- [x] Apply through a version manager when one owns the executable
+  - [x] Detect mise and npm from the resolved executable path, treating every other location as unmanaged
+  - [x] Ask the manager which tool owns that path and run its upgrade command for that tool
+  - [x] Report the command, its output, and its outcome, and fail without replacing anything when the manager cannot be interrogated
 
-- [ ] Apply by replacement when no manager owns the executable
-  - [ ] Download the published executable and checksum assets for the running platform
-  - [ ] Verify the digest and refuse on any mismatch
-  - [ ] Stage beside the target with the executable bit set, run it, and require the published version
-  - [ ] Replace the target with one rename, and report the version now installed
-  - [ ] Report an unwritable location by name without attempting to acquire privileges
-  - [ ] Remove every staged file on every exit path through a helper whose refused removal does not replace the failure that preceded it
+- [x] Apply by replacement when no manager owns the executable
+  - [x] Download the published executable and checksum assets for the running platform
+  - [x] Verify the digest and refuse on any mismatch
+  - [x] Stage beside the target with the executable bit set, run it, and require the published version
+  - [x] Replace the target with one rename, and report the version now installed
+  - [x] Report an unwritable location by name without attempting to acquire privileges
+  - [x] Remove every staged file on every exit path through a helper whose refused removal does not replace the failure that preceded it
 
-- [ ] Cover the new behavior in a new test module
-  - [ ] Gathering: newer, equal, older, and unparseable published versions; each recognized token variable present, both present, neither present, and an unrelated token-shaped variable that MUST NOT be sent; a lookup failure
-  - [ ] Guards: a source checkout and an unsupported platform, asserting nothing is downloaded, executed, or replaced
-  - [ ] Delegation: a manager-owned path, a manager that answers nothing usable, and an unowned path
-  - [ ] Replacement against real files in a temporary directory: a successful swap, a checksum mismatch, a staged file whose version does not match, an unwritable target, and a refused cleanup that does not mask its failure
-  - [ ] A dry run that performs the lookup and nothing else
-  - [ ] Boundary: `test/plugin-boundary.test.ts` covering the new plugin directory
+- [x] Cover the new behavior in a new test module
+  - [x] Gathering: newer, equal, older, and unparseable published versions; each recognized token variable present, both present, neither present, and an unrelated token-shaped variable that MUST NOT be sent; a lookup failure
+  - [x] Guards: a source checkout and an unsupported platform, asserting nothing is downloaded, executed, or replaced
+  - [x] Delegation: a manager-owned path, a manager that answers nothing usable, and an unowned path
+  - [x] Replacement against real files in a temporary directory: a successful swap, a checksum mismatch, a staged file whose version does not match, an unwritable target, and a refused cleanup that does not mask its failure
+  - [x] A dry run that performs the lookup and nothing else
+  - [x] Boundary: `test/plugin-boundary.test.ts` covering the new plugin directory
 
-- [ ] Document `tx update` for the executable in `README.md` and `docs/manual/plugins.md`, in the pull request that implements it
-- [ ] Verify 100% coverage and `bun run check`
+- [x] Document `tx update` for the executable in `README.md` and `docs/manual/plugins.md`, in the pull request that implements it
+- [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 
