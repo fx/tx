@@ -5,7 +5,7 @@
 Let the marketplace plugin participate in `tx update`. Every installed marketplace is gathered as one item: a cloned one reports the commit it holds and the commit its remote offers, a referenced local one reports that it is live and has nothing to apply. Applying moves a clone's checkout forward and reinstalls its dependencies exactly as adding it would, refuses to touch a checkout carrying local modifications, and puts the previous commit back if the new one fails to validate.
 
 **Spec:** [Updates](../specs/updates/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0012
 
 ## Motivation
@@ -82,7 +82,7 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
   - **Alternatives considered:** A `--force` flag was rejected as surface for a case whose remedy — remove and add — already exists and is unambiguous. Detecting the rewrite and re-cloning automatically was rejected: it is `marketplace add` with extra steps and a directory removal the user did not ask for.
 
 - **Decision:** Restore the previous commit when validation or dependency installation fails after the checkout moved, and say that dependencies were not restored.
-  - **Why:** Leaving a marketplace on a commit that failed validation is the one outcome worse than not updating: the user's next invocation reports a broken marketplace they did not have before. The blocking checks guarantee the checkout was clean and its previous commit is known, so restoring it is exactly reversible for tracked content. Installed dependencies are not, because installation is trusted code that owns what it writes, and a claim to have undone it would be false.
+  - **Why:** Leaving a marketplace on a commit that failed validation is the one outcome worse than not updating: the user's next invocation reports a broken marketplace they did not have before. The blocking checks guarantee the checkout was clean and its previous commit is known, so restoring it is exactly reversible for tracked content. Making that true costs the restoration one thing the forward move refuses itself: it is forced. Preparation may have rewritten a tracked file before failing — a dependency install rewriting a committed lockfile is ordinary, not exotic — and an ordinary checkout would then refuse to overwrite it and leave the marketplace exactly where this decision exists to keep it from being. Nothing a forced restoration can discard is the user's, because the blocking checks found the checkout clean before `tx` moved it, so every tracked change it undoes was made after that point by the preparation being undone. Installed dependencies are not, because installation is trusted code that owns what it writes, and a claim to have undone it would be false.
   - **Alternatives considered:** Staging the update in a second checkout and swapping it in, the way `add` stages a clone, was rejected as a full second copy of every marketplace on every update for a failure case a restore already covers. Leaving the new commit in place with a warning was rejected as handing the user a broken installation.
 
 - **Decision:** Gather by fetching, and let a dry run perform the fetch.
@@ -120,38 +120,39 @@ Applying an item re-reads the checkout rather than trusting what gathering saw, 
   - [x] Add scenarios for a forward move, an untouched live reference, both blocked cases, and a restored commit (PR #30)
   - [x] Update the specs' references and changelogs, and both documentation indexes (PR #30)
 
-- [ ] Extend the marketplace manager's Git surface in `plugins/marketplace/manager.ts`
-  - [ ] Export the non-interactive environment so cloning and fetching share one definition, without changing what cloning does with it
-  - [ ] Add reads for the current commit, its label preferring a reachable tag, tracked-file modifications, and ancestry between two commits
-  - [ ] Add the fetch, including tags and re-resolution of the remote's default branch
-  - [ ] Add the checkout move, used for both applying and restoring
+- [x] Extend the marketplace manager's Git surface in `plugins/marketplace/manager.ts`
+  - [x] Export the non-interactive environment so cloning and fetching share one definition, without changing what cloning does with it
+  - [x] Add reads for the current commit, its label preferring a reachable tag, tracked-file modifications, and ancestry between two commits
+  - [x] Add the fetch, including tags and re-resolution of the remote's default branch
+  - [x] Add the checkout move, used for both applying and restoring
 
-- [ ] Add the update participant under `plugins/marketplace/`
-  - [ ] Gather every installed marketplace in discovery order, reporting a live label for a reference and a commit label for a clone
-  - [ ] Resolve the tracked target from the remote's default branch and report an available version only when it differs from the current commit
-  - [ ] Report a blocking condition as item detail
-  - [ ] Re-check blocking conditions when applying, including an untracked file occupying a path the target tracks, and refuse without moving the checkout or discarding the file
-  - [ ] Move the checkout, run the same preparation adding a marketplace runs, and report the new label
-  - [ ] Restore the recorded commit when preparation fails, and state that installed dependencies were not restored
-  - [ ] Report a corrupt or unreadable checkout as a failed item naming its `marketplace remove` remedy, without failing the participant or hiding the marketplaces around it
-  - [ ] Contribute the participant from `plugins/marketplace/index.ts` during initialization
+- [x] Add the update participant under `plugins/marketplace/`
+  - [x] Gather every installed marketplace in discovery order, reporting a live label for a reference and a commit label for a clone
+  - [x] Resolve the tracked target from the remote's default branch and report an available version only when it differs from the current commit
+  - [x] Report a blocking condition as item detail
+  - [x] Re-check blocking conditions when applying, including an untracked file occupying a path the target tracks, and refuse without moving the checkout or discarding the file
+  - [x] Move the checkout, run the same preparation adding a marketplace runs, and report the new label
+  - [x] Restore the recorded commit when preparation fails, and state that installed dependencies were not restored
+  - [x] Report a corrupt or unreadable checkout as a failed item naming its `marketplace remove` remedy, without failing the participant or hiding the marketplaces around it
+  - [x] Contribute the participant from `plugins/marketplace/index.ts` during initialization
 
-- [ ] Add the version column to `marketplace list` without contacting any remote
+- [x] Add the version column to `marketplace list` without contacting any remote
 
-- [ ] Cover the new behavior in `test/marketplaces.test.ts` and a new participant test
-  - [ ] Gathering: a clone with and without an available commit, a live reference that reaches Git not at all, a corrupt checkout reported as a failed item beside healthy ones that still report and still apply, and an assertion that nothing in the checkout changed
-  - [ ] Applying: a forward move with preparation, a no-op when nothing is available, a modified tracked file, an untracked file that does not block, an untracked file in the way of a tracked path that does, a non-ancestor target, and a preparation failure that restores the previous commit
-  - [ ] Environment: a fetch running non-interactively, and `marketplace list` and dependency installation keeping the invoking environment
-  - [ ] Ordering: marketplaces gathered and applied in sorted name order
-  - [ ] Listing: the version column for a clone and for a reference, with no Git call reaching a remote
+- [x] Cover the new behavior in `test/marketplaces.test.ts` and a new participant test
+  - [x] Gathering: a clone with and without an available commit, a live reference that reaches Git not at all, a corrupt checkout reported as a failed item beside healthy ones that still report and still apply, and an assertion that nothing in the checkout changed
+  - [x] Applying: a forward move with preparation, a no-op when nothing is available, a modified tracked file, an untracked file that does not block, an untracked file in the way of a tracked path that does, a non-ancestor target, and a preparation failure that restores the previous commit
+  - [x] Environment: a fetch running non-interactively, and `marketplace list` and dependency installation keeping the invoking environment
+  - [x] Ordering: marketplaces gathered and applied in sorted name order
+  - [x] Listing: the version column for a clone and for a reference, with no Git call reaching a remote
 
-- [ ] Document updating marketplaces in `docs/manual/plugins.md`, in the pull request that implements it
-- [ ] Verify 100% coverage and `bun run check`
+- [x] Document updating marketplaces in `docs/manual/plugins.md`, in the pull request that implements it
+- [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 
 - [ ] Should a blocked marketplace be reported through the plugin's recovery diagnostics on ordinary invocations, rather than only during an update? It would tell users something is wrong sooner, at the cost of a Git read on every startup, which the eager-initialization open question in [Architecture](../specs/architecture/index.md#open-questions) already worries about.
 - [ ] Should the participant report how many commits an update spans, or their subjects? It is one more Git read and genuinely useful, and it is also the beginning of a changelog feature with no boundaries.
+- [ ] Should a lockfile that `tx`'s own dependency installation rewrote count as a user modification? A marketplace that commits `bun.lock` and whose install rewrites it acquires a modified tracked file that nothing the user did produced, and the blocking rule then refuses every later update until they resolve it by hand. Exempting a path because `tx` wrote it is a hole in a rule whose whole value is that it has none, and the alternative — refusing on a modification the tool itself made — is a trap. Changing either needs an amendment to [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates), which owns the rule.
 - [ ] Should a marketplace be updatable while a dependency installation from a previous update left the checkout half-installed? There is no way to detect that state today, and Bun's own install is the thing that would have to report it.
 
 ## References

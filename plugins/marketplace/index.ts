@@ -9,6 +9,7 @@ import {
   resolveMarketplaceDirectory,
   validateMarketplaceName,
 } from "./storage.ts";
+import { MarketplaceUpdater } from "./updater.ts";
 
 export type { MarketplaceOperations } from "./manager.ts";
 
@@ -137,7 +138,7 @@ export function createMarketplacePlugin(
   return Object.freeze({
     identity,
     load(): Plugin {
-      return ({ command, context, env, plugin }) => {
+      return ({ command, context, env, plugin, update }) => {
         const root = resolveMarketplaceDirectory({ env });
         const manager =
           options.manager ??
@@ -170,11 +171,13 @@ export function createMarketplacePlugin(
 
           namespace
             .command("list")
-            .description("List installed marketplaces and their sources")
+            .description(
+              "List installed marketplaces, their versions, and their sources",
+            )
             .action(async () => {
               for (const marketplace of await manager.list()) {
                 context.stdout.write(
-                  `${marketplace.name}\t${marketplace.source}\n`,
+                  `${marketplace.name}\t${marketplace.version}\t${marketplace.source}\n`,
                 );
               }
             });
@@ -188,6 +191,11 @@ export function createMarketplacePlugin(
               context.stdout.write(`Removed marketplace "${name}".\n`);
             });
         });
+
+        // Contributed by the root plugin and reading storage directly, so a
+        // marketplace whose current commit fails to load — which is exactly
+        // the one an update fixes — is still gathered and still applied.
+        update(new MarketplaceUpdater(root, { env }));
 
         plugin(discoveryDefinition(root, identity));
       };

@@ -115,7 +115,7 @@ changes:
     path: changes/0013-update-installed-marketplaces.md
     description: Contribute a marketplace update participant that fetches, moves a clean checkout forward, reprepares it, and restores it on failure.
     spec: updates
-    status: draft
+    status: complete
     depends_on:
       - "0012"
   - id: "0014"
