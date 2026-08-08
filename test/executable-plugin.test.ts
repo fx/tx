@@ -525,6 +525,45 @@ describe("executable update delegation", () => {
     ]);
   });
 
+  test("stops rather than asking mise when npm cannot be interrogated", async () => {
+    // The next candidate would answer about the Node this install sits
+    // inside, and upgrading that would report success while leaving tx where
+    // it was.
+    const root = await workspace("npm-unanswerable");
+    const target = await installedExecutable(
+      root,
+      join(
+        "mise",
+        "installs",
+        "node",
+        "22.18.0",
+        "lib",
+        "node_modules",
+        "@fx",
+        "tx",
+        "dist",
+        "tx",
+      ),
+    );
+    const { run, commands } = recorder(() => ({
+      exitCode: 127,
+      stdout: "",
+      stderr: "npm: command not found\n",
+    }));
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    await expect(updater.apply(availableItem)).rejects.toThrow(
+      "npm could not report which package owns",
+    );
+    expect(commands).toEqual([
+      ["npm", "ls", "--global", "--parseable", "--long"],
+    ]);
+    expect(await readFile(target, "utf8")).toBe(installedBytes);
+  });
+
   test("falls back to mise for a store npm does not claim", async () => {
     // mise's own npm backend installs into a prefix of its own, which the
     // ambient npm knows nothing about, so mise is the owner after all.
@@ -888,23 +927,49 @@ describe("executable update effects", () => {
   test.each([
     {
       path: "/home/user/.local/share/mise/installs/github-fx-tx/1.2.0/bin/tx",
+      env: {} as Record<string, string>,
       managers: ["mise"],
     },
     // Both markers: mise's npm backend and a global npm install under a
     // mise-managed Node produce the same shape, so npm is asked first.
     {
       path: "/home/user/.local/share/mise/installs/npm-fx-tx/1.2.0/lib/node_modules/@fx/tx/dist/tx",
+      env: {},
       managers: ["npm", "mise"],
     },
     {
       path: "/home/user/.local/share/mise/installs/node/22.18.0/lib/node_modules/@fx/tx/dist/tx",
+      env: {},
       managers: ["npm", "mise"],
     },
-    { path: "/usr/lib/node_modules/@fx/tx/dist/tx", managers: ["npm"] },
-    { path: "/usr/local/bin/tx", managers: [] },
-    { path: "/home/mise/bin/tx", managers: [] },
-  ])("detects the managers that could own $path", ({ path, managers }) => {
-    expect(detectManagers(path)).toEqual(managers as readonly ManagerKind[]);
+    {
+      path: "/usr/lib/node_modules/@fx/tx/dist/tx",
+      env: {},
+      managers: ["npm"],
+    },
+    { path: "/usr/local/bin/tx", env: {}, managers: [] },
+    { path: "/home/mise/bin/tx", env: {}, managers: [] },
+    // A store the environment moved carries no `mise` component of its own,
+    // so it would look unmanaged and be written into rather than delegated to.
+    {
+      path: "/opt/tool-cache/installs/github-fx-tx/1.2.0/bin/tx",
+      env: { MISE_DATA_DIR: "/opt/tool-cache" },
+      managers: ["mise"],
+    },
+    {
+      path: "/opt/tools/github-fx-tx/1.2.0/bin/tx",
+      env: { MISE_INSTALLS_DIR: "/opt/tools" },
+      managers: ["mise"],
+    },
+    {
+      path: "/opt/elsewhere/github-fx-tx/1.2.0/bin/tx",
+      env: { MISE_DATA_DIR: "/opt/tool-cache" },
+      managers: [],
+    },
+  ])("detects the managers that could own $path", ({ path, env, managers }) => {
+    expect(detectManagers(path, env)).toEqual(
+      managers as readonly ManagerKind[],
+    );
   });
 
   test.each([

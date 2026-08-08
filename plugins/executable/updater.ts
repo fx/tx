@@ -206,6 +206,24 @@ const managers: Readonly<Record<ManagerKind, Manager>> = Object.freeze({
   },
 });
 
+/** Where mise keeps its installs when the environment moves them, and the
+ * child of each such directory the installs actually live under. */
+const miseStoreVariables = [
+  ["MISE_INSTALLS_DIR", ""],
+  ["MISE_DATA_DIR", "installs"],
+] as const;
+
+function miseStores(
+  env: Readonly<Record<string, string | undefined>>,
+): readonly string[] {
+  const stores: string[] = [];
+  for (const [variable, child] of miseStoreVariables) {
+    const configured = env[variable];
+    if (configured) stores.push(child ? join(configured, child) : configured);
+  }
+  return stores;
+}
+
 /**
  * The managers the project documents that could own a resolved path, in the
  * order to ask them, or nothing for a location neither owns.
@@ -218,13 +236,22 @@ const managers: Readonly<Record<ManagerKind, Manager>> = Object.freeze({
  * answers for whatever npm does not claim. Getting this backwards would run
  * `mise upgrade node` for a `tx` npm installed, report it as done, and leave
  * the executable exactly where it was.
+ *
+ * The environment is read for the same reason: mise's default layout is the
+ * only one a path announces on its own, so a store moved to somewhere like
+ * `/opt/tool-cache/installs` would look unmanaged and be written into rather
+ * than delegated to.
  */
-export function detectManagers(target: string): readonly ManagerKind[] {
+export function detectManagers(
+  target: string,
+  env: Readonly<Record<string, string | undefined>> = {},
+): readonly ManagerKind[] {
   const segments = target.split(sep);
-  const mise = segments.some(
-    (segment, index) =>
-      segment === "mise" && segments[index + 1] === "installs",
-  );
+  const mise =
+    segments.some(
+      (segment, index) =>
+        segment === "mise" && segments[index + 1] === "installs",
+    ) || miseStores(env).some((store) => isWithin(store, target));
   const npm = segments.includes("node_modules");
   if (mise && npm) return ["npm", "mise"];
   if (mise) return ["mise"];
@@ -348,7 +375,7 @@ export class ExecutableUpdater implements UpdateParticipant {
     }
 
     const target = await realpath(this.#executablePath);
-    const kinds = detectManagers(target);
+    const kinds = detectManagers(target, this.#env);
     if (kinds.length > 0) return this.#delegate(kinds, target);
     return this.#replace(target, published);
   }
@@ -425,10 +452,13 @@ export class ExecutableUpdater implements UpdateParticipant {
 
   /**
    * The first candidate manager that claims this path, and what it says owns
-   * it. A candidate that does not claim it is passed over while another
-   * remains; the last one's refusal is the failure, because a recognized
-   * manager that cannot say what owns its own store is not something to write
-   * into anyway.
+   * it.
+   *
+   * Only a manager that answered and did not claim the path is passed over. An
+   * interrogation that failed throws straight out of here rather than moving
+   * on: the next candidate would answer about something else — the Node a
+   * global npm install sits inside, say — and running an upgrade for that
+   * would report success while leaving `tx` exactly where it was.
    */
   async #owningManager(
     kinds: readonly ManagerKind[],
@@ -437,11 +467,11 @@ export class ExecutableUpdater implements UpdateParticipant {
     let refusal = new Error(`No version manager owns "${target}"`);
     for (const kind of kinds) {
       const manager = managers[kind];
-      try {
-        return { manager, name: await this.#owningName(manager, target) };
-      } catch (error) {
-        refusal = error as Error;
-      }
+      const name = await this.#owningName(manager, target);
+      if (name !== undefined) return { manager, name };
+      refusal = new Error(
+        `${manager.name} reported no ${manager.noun} owning "${target}"`,
+      );
     }
     throw refusal;
   }
@@ -456,8 +486,13 @@ export class ExecutableUpdater implements UpdateParticipant {
    * The listing is read before its exit status is judged, because npm exits
    * non-zero for any problem anywhere in a global tree — an extraneous package
    * somebody else installed — after printing the very answer being asked for.
+   * Undefined means the manager answered and does not own the path; a manager
+   * that could not answer at all throws instead.
    */
-  async #owningName(manager: Manager, target: string): Promise<string> {
+  async #owningName(
+    manager: Manager,
+    target: string,
+  ): Promise<string | undefined> {
     const listing = await this.#run(manager.listing);
     const installations = manager.read(listing.stdout);
     const owning =
@@ -473,9 +508,7 @@ export class ExecutableUpdater implements UpdateParticipant {
         `${manager.name} did not report a readable list of installed ${manager.noun}s`,
       );
     }
-    throw new Error(
-      `${manager.name} reported no ${manager.noun} owning "${target}"`,
-    );
+    return undefined;
   }
 
   /**
@@ -516,7 +549,10 @@ export class ExecutableUpdater implements UpdateParticipant {
     const staged = this.#staging(target);
     try {
       try {
-        await writeFile(staged, executable);
+        // Exclusive creation, so the staged name is one this process made:
+        // opening it any other way would follow a symlink somebody planted at
+        // the path and write the download through it.
+        await writeFile(staged, executable, { flag: "wx" });
         await chmod(staged, 0o755);
       } catch (error) {
         // Named rather than forced: acquiring privileges to write somewhere
