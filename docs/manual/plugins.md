@@ -55,6 +55,22 @@ A local source is validated and has its selected dependency manifests installed 
 
 Marketplaces and their plugins execute in deterministic order: installed marketplace names are sorted, entries retain their manifest order, and the host initializes roots followed by contributed children in FIFO order.
 
+## Update what is installed
+
+`tx update` updates everything `tx` has installed. `tx update --dry-run` reports exactly the same thing and applies nothing, and positional names limit a run to the items you name.
+
+```sh
+tx update
+tx update --dry-run
+tx update tools
+```
+
+Gathering prints one tab-separated line per item — its name, its current version label, either `-> <version>` or `up to date`, and whatever detail its owner supplied — followed by one line per item that was applied. An item reporting nothing available is reported and left alone; nothing is asked to update it.
+
+Results go to standard output and failures to standard error, so you can pipe one without losing the other. An item that reports itself as unusable is reported on standard error instead, with `failed: <reason>` in place of what it would have moved to, and is never applied. A name matching no gathered item is a failure too, and so is a participant that cannot report and an item whose update fails; each of those exits `1` while the rest of the run continues. Applying nothing is not a failure. A dry run exits `0` whether or not updates are available: the exit code answers "did the command work", not "is anything out of date".
+
+`tx` never checks for updates on its own. No other invocation contacts a remote to learn what is available, caches a result, or prints a notice, and there is no flag or configuration key that turns such a check on.
+
 ## Marketplace layout
 
 The canonical manifest is `.tx/config.json` at the repository root:
@@ -112,7 +128,7 @@ const plugin: Plugin = ({ command, context }) => {
 export default plugin;
 ```
 
-The initialization API provides an immutable `identity`, read-only `env`, the generic command `context`, shared `dependencies`, `command(build)`, and `plugin(childDefinition)`. The `context` carries process streams, environment, working directory, and the owning plugin identity, so your actions keep whatever signature you give them. Loading, initialization, and command actions may be asynchronous.
+The initialization API provides an immutable `identity`, read-only `env`, the generic command `context`, shared `dependencies`, `command(build)`, `plugin(childDefinition)`, `update(participant)`, and `updaters()`. The `context` carries process streams, environment, working directory, and the owning plugin identity, so your actions keep whatever signature you give them. Loading, initialization, and command actions may be asynchronous.
 
 Use the initialization API's `dependencies.react` and `dependencies.ink` instead of importing separate runtime copies; the injected values share the host's React and Ink instances and include tx and dependency version metadata.
 
@@ -129,6 +145,35 @@ A few rules follow from the host owning the naming decision:
 - The builder must finish before it returns. An `async` builder is rejected, because the rest of its work would land after tx has already committed what you staged.
 - A second plugin claiming a name that is already committed is rejected, and the diagnostic names both plugins.
 
+## Participate in updates
+
+Anything your plugin installs on a user's behalf can appear in `tx update`. Contribute an update participant during initialization; the driver knows nothing about what you own, and you never learn about anyone else's.
+
+```ts
+import type { Plugin, UpdateItem } from "@fx/tx/plugin";
+
+const plugin: Plugin = ({ update }) => {
+  update({
+    gather: async () => [
+      { name: "tools", current: "1.0.0", available: "1.1.0", detail: "two commits behind" },
+      { name: "notes", current: "3.2.0" },
+    ],
+    apply: async (item: UpdateItem) =>
+      item.available === undefined
+        ? { applied: false }
+        : { applied: true, version: item.available },
+  });
+};
+
+export default plugin;
+```
+
+- `gather` reports what you have. Leave `available` out when there is nothing to apply, and set `failure` on an item to report that one thing as unusable while your other items are still reported and applied. Gathering may contact a remote — that is what gathering is — but must change nothing installed, in a dry run or a real one.
+- `apply` returns a result or throws. Returning `applied: false` means you deliberately changed nothing and is not a failure; throwing is, and neither one stops the items beside it. It is called only for an in-scope item that reported an `available` version and no `failure`, and never at all on a dry run.
+- Version labels are opaque strings the driver never parses, compares, or orders. Deciding whether something is out of date is yours.
+- Participants are staged with your commands and child definitions: a plugin that fails initialization contributes none. Contributing one claims no namespace, so a plugin may participate without defining a single command.
+- `updaters()` returns what is committed at the moment you call it, so read it inside a command action rather than during initialization. Participants come back in the host's FIFO commit order, which for the bundled plugins is the order `cli.ts` composes them in.
+
 ## What tx interprets and what you own
 
 tx resolves the first argument only. The host owns exactly two root options — help, spelled `--help` or `-h`, and version, spelled `--version` or `-V` — and recognizes either one only in that position; `tx --version extra` behaves exactly like `tx --version`. Any other first argument selects a plugin namespace, and every argument after it — including options tx itself defines, and including help requests — is yours to interpret. `tx notes --version` gives `--version` to the `notes` plugin. tx reserves no top-level `help` word, so a plugin may be named `help`.
@@ -144,7 +189,7 @@ Every byte the host writes — root help, generated usage, version, and parser d
 
 Usage that a user did not ask for — the help printed because your namespace needed a subcommand and got none — prints on standard error and counts as a failure, exactly as `tx` with no arguments prints root help on standard error and exits non-zero.
 
-Commands and child definitions registered during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, namespace validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed on standard error and do not change the exit code of the command you ran, so a dispatched command keeps its own exit code — an action that succeeds still exits `0` — while a broken plugin is reported alongside it. Because a failed plugin claims nothing, invoking the namespace it would have owned is reported as an unknown command.
+Commands, child definitions, and update participants contributed during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, namespace validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed on standard error and do not change the exit code of the command you ran, so a dispatched command keeps its own exit code — an action that succeeds still exits `0` — while a broken plugin is reported alongside it. Because a failed plugin claims nothing, invoking the namespace it would have owned is reported as an unknown command.
 
 ## Bundled plugins
 

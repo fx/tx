@@ -107,7 +107,7 @@ changes:
     path: changes/0012-add-generic-update-lifecycle.md
     description: Add generic update participants to the host and a bundled update plugin owning tx update and its dry run.
     spec: updates
-    status: draft
+    status: complete
     depends_on:
       - "0007"
   - id: "0013"
