@@ -10,11 +10,21 @@ interface CommandBlockProps {
 export function CommandBlock({ commands, label }: CommandBlockProps) {
   const [copied, setCopied] = useState(false);
   const timeout = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const mounted = useRef(true);
 
-  useEffect(() => () => clearTimeout(timeout.current), []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      clearTimeout(timeout.current);
+    };
+  }, []);
 
   async function copy() {
     if (!(await writeToClipboard(commands.join("\n")))) return;
+    // The write is awaited, so the block can be gone by the time it resolves;
+    // starting the reset timer then would leave it running past cleanup.
+    if (!mounted.current) return;
     setCopied(true);
     clearTimeout(timeout.current);
     timeout.current = setTimeout(() => setCopied(false), 1500);
