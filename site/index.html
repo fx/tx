@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>tx — extensible command-line toolbox</title>
+    <meta
+      name="description"
+      content="tx is an extensible command-line toolbox: a single self-updating executable that hosts plugins from trusted Git marketplaces."
+    />
+    <meta property="og:title" content="tx — extensible command-line toolbox" />
+    <meta
+      property="og:description"
+      content="A single self-updating executable that hosts plugins from trusted Git marketplaces."
+    />
+    <meta property="og:url" content="https://tx.fx.gd" />
+    <meta property="og:type" content="website" />
+    <script>
+      (() => {
+        const stored = localStorage.getItem("theme");
+        const dark =
+          stored === "dark" ||
+          ((stored === null || stored === "system") &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
