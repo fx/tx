@@ -14,19 +14,7 @@ export function CommandBlock({ commands, label }: CommandBlockProps) {
   useEffect(() => () => clearTimeout(timeout.current), []);
 
   async function copy() {
-    // navigator.clipboard only exists in a secure context, so a page served
-    // over plain HTTP has to fall back to a selection-based copy.
-    const text = commands.join("\n");
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-      } else if (!copyViaSelection(text)) {
-        // execCommand reports failure by returning false rather than throwing.
-        return;
-      }
-    } catch {
-      return;
-    }
+    if (!(await writeToClipboard(commands.join("\n")))) return;
     setCopied(true);
     clearTimeout(timeout.current);
     timeout.current = setTimeout(() => setCopied(false), 1500);
@@ -60,6 +48,28 @@ export function CommandBlock({ commands, label }: CommandBlockProps) {
   );
 }
 
+/**
+ * `navigator.clipboard` is absent outside a secure context and can still
+ * reject inside one when permission is denied, so the selection-based copy
+ * backs up both cases rather than only the missing-API one.
+ */
+async function writeToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the selection-based copy.
+    }
+  }
+  try {
+    return copyViaSelection(text);
+  } catch {
+    return false;
+  }
+}
+
+/** Reports failure by returning false rather than throwing. */
 function copyViaSelection(text: string): boolean {
   const area = document.createElement("textarea");
   area.value = text;
