@@ -38,7 +38,10 @@ jobs:
       - name: Build
         working-directory: site
         run: bun run build
-      - uses: actions/configure-pages@v5
+      # No configure-pages step: it exists to hand a base path to a static site
+      # generator, and nothing here consumes its outputs. Vite builds against
+      # the site root because Pages serves this from a custom domain. Keeping it
+      # would mean granting the build job pages: write for a no-op.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/dist
