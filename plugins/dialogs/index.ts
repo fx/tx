@@ -170,6 +170,12 @@ class OutputAdapter extends streams.Writable {
     return this.#source.rows;
   }
 
+  async flush(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.write("", () => resolve());
+    });
+  }
+
   cleanup(): void {
     this.#source.removeListener("error", this.#captureError);
     this.#source.removeListener("resize", this.#forwardResize);
@@ -300,6 +306,7 @@ const definition: PluginDefinition = {
                 renderer.unmount();
                 unmounted = true;
               } catch (reason) {
+                failure = recordFailure(failure, terminalFailures.failure);
                 failure = recordFailure(failure, { present: true, reason });
               }
             }
@@ -308,10 +315,12 @@ const definition: PluginDefinition = {
               try {
                 await exited;
               } catch (reason) {
+                failure = recordFailure(failure, terminalFailures.failure);
                 failure = recordFailure(failure, { present: true, reason });
               }
             }
             input.cleanup();
+            await output.flush();
             output.cleanup();
             failure = recordFailure(failure, terminalFailures.failure);
           }

@@ -120,6 +120,31 @@ class AsyncFailingOutput extends CapturedOutput {
   }
 }
 
+class BlockingOutput extends CapturedOutput {
+  blockNext = false;
+  blocked = false;
+  #release: (() => void) | undefined;
+
+  release(): void {
+    this.#release?.();
+    this.#release = undefined;
+  }
+
+  override _transform(
+    chunk: Buffer,
+    encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    if (!this.blockNext) {
+      super._transform(chunk, encoding, callback);
+      return;
+    }
+    this.blockNext = false;
+    this.blocked = true;
+    this.#release = () => super._transform(chunk, encoding, callback);
+  }
+}
+
 class ThrowingOutput extends CapturedOutput {
   failWrites = false;
 
@@ -888,5 +913,116 @@ describe("bundled dialogs provider", () => {
     if (!actualRenderer) throw new Error("renderer was not created");
     actualRenderer.unmount();
     await actualRenderer.waitUntilExit();
+  });
+
+  test("waits for pending output when renderer unmount persistently throws", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new BlockingOutput();
+    let failure: unknown;
+    let unmountCalls = 0;
+    let actualRenderer:
+      | ReturnType<CoreDependencies["ink"]["render"]>
+      | undefined;
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        actualRenderer = renderer;
+        return {
+          ...renderer,
+          unmount() {
+            unmountCalls++;
+            throw new Error(`persistent renderer failure ${unmountCalls}`);
+          },
+        };
+      },
+    };
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          try {
+            await dialogs.select({
+              message: "Pending output",
+              options: [
+                { label: "One", value: 1 },
+                { label: "Two", value: 2 },
+              ],
+            });
+          } catch (error) {
+            failure = error;
+          }
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    await until(() => stderr.text().includes("Two"));
+    stderr.blockNext = true;
+    stdin.write("[B");
+    await until(() => stderr.blocked);
+    stdin.write("");
+    await until(() => unmountCalls === 2);
+
+    let settled = false;
+    void running.then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    stderr.release();
+
+    expect(await running).toBe(0);
+    expect((failure as Error).message).toBe("persistent renderer failure 1");
+    if (!actualRenderer) throw new Error("renderer was not created");
+    actualRenderer.unmount();
+    await actualRenderer.waitUntilExit();
+  });
+
+  test("preserves terminal cleanup failure over a later unmount wrapper failure", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let failure: unknown;
+    let unmountCalls = 0;
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        return {
+          ...renderer,
+          unmount() {
+            unmountCalls++;
+            renderer.unmount();
+            throw new Error(`wrapper failure ${unmountCalls}`);
+          },
+        };
+      },
+    };
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          try {
+            await dialogs.select({
+              message: "Cleanup precedence",
+              options: [{ label: "One", value: 1 }],
+            });
+          } catch (error) {
+            failure = error;
+          }
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    await until(() => stderr.text().includes("One"));
+    stdin.failRawModeDisable = true;
+    stdin.write("");
+
+    expect(await running).toBe(0);
+    expect(unmountCalls).toBe(2);
+    expect((failure as Error).message).toBe("raw mode cleanup failed");
   });
 });
