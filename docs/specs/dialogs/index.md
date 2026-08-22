@@ -104,7 +104,8 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - The dialog MUST read input only from the dialogs provider's injected standard-input stream.
 - The dialog MUST render its prompt and options only to the dialogs provider's injected standard-error stream, leaving standard output untouched for the consumer's data.
 - `select` MUST reject before rendering when its injected standard-input or standard-error stream is not an interactive terminal; it MUST NOT provide a non-interactive fallback.
-- `select` MUST restore terminal state and finish unmounting before its promise settles after selection, cancellation, or rendering failure.
+- `select` MUST restore the injected terminal's prior state and finish unmounting before its promise settles after selection, cancellation, or rendering failure.
+- If an injected `setRawMode(false)` or `unref()` method persistently throws, restoration through that API is impossible: `select` MUST retry finitely, reject with the first cleanup failure, and treat only that exceptional path as best-effort rather than hanging indefinitely.
 - A rendering or interaction failure MUST reject `select` and MUST NOT terminate the process directly.
 
 #### Scenario: Command output remains clean
