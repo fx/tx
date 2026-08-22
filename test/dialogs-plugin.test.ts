@@ -827,4 +827,66 @@ describe("bundled dialogs provider", () => {
     expect(stdin.listenerCount("data")).toBe(0);
     expect(stdin.listenerCount("error")).toBe(0);
   });
+
+  test("rejects after finite retries when renderer unmount persistently throws", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let failure: unknown;
+    let unmountCalls = 0;
+    let actualRenderer:
+      | ReturnType<CoreDependencies["ink"]["render"]>
+      | undefined;
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        actualRenderer = renderer;
+        return {
+          ...renderer,
+          unmount() {
+            unmountCalls++;
+            throw new Error(`persistent renderer failure ${unmountCalls}`);
+          },
+        };
+      },
+    };
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          try {
+            await dialogs.select({
+              message: "Persistent unmount failure",
+              options: [{ label: "One", value: 1 }],
+            });
+          } catch (error) {
+            failure = error;
+          }
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    await until(() => stderr.text().includes("One"));
+    stdin.write("");
+
+    const timeout = Symbol("timeout");
+    const result = await Promise.race([
+      running,
+      new Promise<typeof timeout>((resolve) =>
+        setTimeout(() => resolve(timeout), 100),
+      ),
+    ]);
+    expect(result).toBe(0);
+    expect(unmountCalls).toBe(2);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe("persistent renderer failure 1");
+    expect(stdin.listenerCount("data")).toBe(0);
+    expect(stdin.listenerCount("error")).toBe(0);
+
+    if (!actualRenderer) throw new Error("renderer was not created");
+    actualRenderer.unmount();
+    await actualRenderer.waitUntilExit();
+  });
 });
