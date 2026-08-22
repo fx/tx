@@ -283,6 +283,8 @@ async function runRejected<T>(
 
 describe("bundled dialogs provider", () => {
   test("registers one namespace-free capability without changing root help", async () => {
+    expect(Object.isFrozen(dialogsPlugin)).toBe(true);
+    expect(Object.isFrozen(dialogsPlugin.identity)).toBe(true);
     const stdin = new TerminalInput();
     const stderr = new CapturedOutput();
     const commandContext = context(stdin, stderr);

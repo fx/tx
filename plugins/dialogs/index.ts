@@ -1,6 +1,6 @@
 const streams: typeof import("node:stream") = require("node:stream");
 
-import type { PluginDefinition } from "@fx/tx/plugin";
+import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
 
 type SelectOption<T> = {
   readonly label: string;
@@ -207,11 +207,12 @@ function recordFailure(current: Failure, candidate: Failure): Failure {
   return current.present ? current : candidate;
 }
 
-const definition: PluginDefinition = {
-  identity: { name: "dialogs" },
-  load:
-    () =>
-    ({ context, dependencies, register }) => {
+const identity: PluginIdentity = Object.freeze({ name: "dialogs" });
+
+const definition: PluginDefinition = Object.freeze({
+  identity,
+  load(): Plugin {
+    return ({ context, dependencies, register }) => {
       const { react, ink } = dependencies;
 
       const dialogs: Dialogs = {
@@ -331,7 +332,8 @@ const definition: PluginDefinition = {
       };
 
       register<Dialogs>("dialogs", dialogs);
-    },
-};
+    };
+  },
+});
 
 export default definition;
