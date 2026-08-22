@@ -97,6 +97,7 @@ const definition: PluginDefinition = {
             ]);
             renderer.unmount();
             await renderer.waitUntilExit();
+            renderer = undefined;
             return outcome.type === "selected" ? outcome.value : undefined;
           } catch (error) {
             primaryFailure = error;
