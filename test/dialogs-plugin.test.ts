@@ -684,6 +684,42 @@ describe("bundled dialogs provider", () => {
     expect(stdin.unrefs).toBe(0);
   });
 
+  test("releases every successfully owned input reference", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const options = args[1] as { readonly stdin: NodeJS.ReadStream };
+        for (let reference = 0; reference < 5; reference++) {
+          options.stdin.ref();
+        }
+        return coreDependencies.ink.render(...args);
+      },
+    };
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          await dialogs.select({
+            message: "Many references",
+            options: [{ label: "One", value: 1 }],
+          });
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    await until(() => stderr.text().includes("One"));
+    stdin.write("");
+
+    expect(await running).toBe(0);
+    expect(stdin.refs).toBeGreaterThan(3);
+    expect(stdin.unrefs).toBe(stdin.refs);
+    expect(stdin.activeReferences).toBe(0);
+  });
+
   test("forwards TTY dimensions and resize events to Ink", async () => {
     const stdin = new TerminalInput();
     const stderr = new CapturedOutput();

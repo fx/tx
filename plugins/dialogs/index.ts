@@ -115,8 +115,12 @@ class InputAdapter extends streams.PassThrough {
     for (let attempt = 0; this.#rawModeMayBeEnabled && attempt < 2; attempt++) {
       this.#disableRawMode();
     }
-    for (let attempt = 0; this.#ownedReferences > 0 && attempt < 3; attempt++) {
+    let consecutiveUnrefFailures = 0;
+    while (this.#ownedReferences > 0 && consecutiveUnrefFailures < 3) {
+      const before = this.#ownedReferences;
       this.unref();
+      consecutiveUnrefFailures =
+        this.#ownedReferences < before ? 0 : consecutiveUnrefFailures + 1;
     }
     this.destroy();
   }
