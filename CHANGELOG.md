@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/fx/tx/compare/v1.2.0...v1.3.0) (2026-08-22)
+
+
+### Features
+
+* **dialogs:** add bundled select provider ([#39](https://github.com/fx/tx/issues/39)) ([0c56587](https://github.com/fx/tx/commit/0c565878f58d875d58031766a2aa4b16ee0c0258))
+* **marketplace:** update installed marketplaces ([#35](https://github.com/fx/tx/issues/35)) ([c2e27ff](https://github.com/fx/tx/commit/c2e27ffda7117daa313908f3829fc29a466c13d1))
+* **plugins:** add generic capability registry ([#38](https://github.com/fx/tx/issues/38)) ([551197e](https://github.com/fx/tx/commit/551197e4bf3209780e5d7e2b0db3b78ddd3ebcff))
+* **site:** add the tx landing page and publish it to GitHub Pages ([#36](https://github.com/fx/tx/issues/36)) ([904da23](https://github.com/fx/tx/commit/904da23cb27b264611aaa0d3ba685025b5de0885))
+* **update:** add a generic update lifecycle and the tx update command ([#32](https://github.com/fx/tx/issues/32)) ([158845a](https://github.com/fx/tx/commit/158845a72cd2e33c2b74be11953579211a1bcd91))
+* **update:** update the tx executable ([#34](https://github.com/fx/tx/issues/34)) ([b869b94](https://github.com/fx/tx/commit/b869b944627dc7fde327aedd5987ffd7435b9da8))
+
 ## [1.2.0](https://github.com/fx/tx/compare/v1.1.0...v1.2.0) (2026-08-08)
 
 
