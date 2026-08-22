@@ -28,4 +28,4 @@
 | 0013 | [Update Installed Marketplaces](changes/0013-update-installed-marketplaces.md) | [Updates](specs/updates/) | complete | 0012 |
 | 0014 | [Pin Marketplace Versions](changes/0014-pin-marketplace-versions.md) | [Updates](specs/updates/) | draft | 0013 |
 | 0015 | [Update the tx Executable](changes/0015-update-the-tx-executable.md) | [Updates](specs/updates/) | complete | 0012 |
-| 0016 | [Add Plugin Capabilities and Dialogs](changes/0016-add-plugin-capabilities-and-dialogs.md) | [Dialogs](specs/dialogs/) | draft | — |
+| 0016 | [Add Plugin Capabilities and Dialogs](changes/0016-add-plugin-capabilities-and-dialogs.md) | [Dialogs](specs/dialogs/) | complete | — |

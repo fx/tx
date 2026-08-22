@@ -143,5 +143,5 @@ changes:
     path: changes/0016-add-plugin-capabilities-and-dialogs.md
     description: Add an opaque plugin registry and a bundled dialogs provider whose initial capability is single-choice selection.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on: []

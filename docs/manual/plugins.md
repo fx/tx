@@ -230,6 +230,28 @@ The registry contract is deliberately small:
 
 This is not a dependency-injection or lifecycle container. There are no schemas, runtime type checks, key factories, symbol tokens, ownership metadata, collision or duplicate policy, provider selection, priorities, versions, scopes, unregistering, replacement, subscriptions, events, factories, dependency ordering, disposal, health checks, retries, or caching. Failures while a consumer uses an opaque value belong to that consumer.
 
+## Use the bundled dialogs capability
+
+The namespace-free bundled dialogs provider registers one internal capability under the exact opaque key `dialogs`. Its current local structural shape is:
+
+```ts
+type Dialogs = {
+  select<T>(request: {
+    readonly message: string
+    readonly options: readonly {
+      readonly label: string
+      readonly value: T
+    }[]
+  }): Promise<T | undefined>
+}
+```
+
+A bundled consumer declares that compatible type locally and reads `registrations<Dialogs>("dialogs")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`; an absent capability and multiple registered providers remain the consumer's responsibility, and tx defines no winner semantics.
+
+`select` requires both the provider's injected standard input and standard error to be TTYs and rejects an empty options list or non-interactive stream before rendering or changing terminal state. It uses the injected React and Ink instances, reads only injected standard input, and renders the message plus every label in supplied order on injected standard error. Standard output stays untouched for the consuming command. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
+
+Up and Down move one position and clamp at the list boundaries. Enter returns the active option's exact value. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored. Selection, cancellation, rendering failure, and interaction failure all finish renderer unmounting, terminal restoration, listener teardown, and pending output before the promise fulfills or rejects. There is no non-interactive fallback, concurrency policy, nested-dialog support, or multi-provider selection policy.
+
 ## One namespace per plugin
 
 `command(build)` hands you your plugin's namespace: a command object named after your plugin's identity and already attached to the tree tx dispatches. Declaring commands, subcommands of any depth, arguments, options, and descriptions beneath it requires no parser dependency of your own. If you also want the parser itself — to build a detached command, share option definitions, or reuse its helpers — take it from `dependencies.commander` so you share the host's instance.

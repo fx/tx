@@ -4,7 +4,7 @@
 
 `tx` provides a bundled dialogs plugin for terminal interactions shared by its own plugins. The plugin MUST expose dialogs through the generic registry rather than through core vocabulary, and its initial contract MUST contain only a single-choice `select` dialog.
 
-The desired behavior is not implemented. [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) plans the minimal generic registry and the first dialogs provider.
+The behavior is implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md): the generic registry carries the internal capability, and the namespace-free bundled provider supplies `select`.
 
 ## Background
 
@@ -162,3 +162,4 @@ The provider registers during initialization. Consumers read committed values in
 | Date | Change | Document |
 |------|--------|----------|
 | 2026-08-22 | Initial desired dialogs capability and select behavior | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
+| 2026-08-22 | Implemented the namespace-free bundled provider and single-choice `select` | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
