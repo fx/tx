@@ -8,6 +8,8 @@ The approved target architecture is implemented: the core is generic, the market
 
 [Update Participation](#update-participation) is implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md): the contribution, its staging, and its public types are in the shipped `@fx/tx/plugin` contract, and no bundled plugin contributes a participant yet. The marketplace version and pin behavior that section points at is not implemented, and is planned by [Change 0013](../../changes/0013-update-installed-marketplaces.md) and [Change 0014](../../changes/0014-pin-marketplace-versions.md).
 
+[Generic Registry](#generic-registry) is desired but not implemented. [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) plans the minimal registry and its first concrete provider, specified by [Dialogs](../dialogs/).
+
 ## Requirements
 
 ### Generic Plugin Host
@@ -15,7 +17,7 @@ The approved target architecture is implemented: the core is generic, the market
 - Every plugin definition MUST have an immutable, marketplace-agnostic identity.
 - A plugin definition MAY lazily provide child plugin definitions.
 - The host MUST initialize root and child plugin definitions in deterministic FIFO order.
-- Commands, child plugin definitions, and update participants contributed during one plugin initialization MUST be staged atomically.
+- Commands, child plugin definitions, update participants, and generic registry entries contributed during one plugin initialization MUST be staged atomically.
 - If initialization succeeds, the host MUST commit all staged contributions together.
 - If initialization fails, the host MUST discard all contributions staged by that plugin, report the failure on standard error against its generic identity, and continue initializing unrelated plugins.
 - A failed plugin MUST NOT prevent commands committed by healthy plugins from dispatching.
@@ -26,9 +28,9 @@ The approved target architecture is implemented: the core is generic, the market
 
 #### Scenario: Atomic initialization
 
-- **GIVEN** a plugin stages commands, child definitions, and an update participant
+- **GIVEN** a plugin stages commands, child definitions, an update participant, and a registry entry
 - **WHEN** its initialization throws
-- **THEN** none of those commands, child definitions, or participants become visible
+- **THEN** none of those commands, child definitions, participants, or registry entries become visible
 
 #### Scenario: Deterministic child initialization
 
@@ -51,7 +53,7 @@ The approved target architecture is implemented: the core is generic, the market
 ### Public Plugin Contract
 
 - The public package MUST expose the plugin contract through `@fx/tx/plugin`.
-- The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, namespace registration, update participation, command context, and React, Ink, command-parser, and version dependencies.
+- The public contract MUST include generic plugin identity, lazy plugin definitions, initialization context, namespace registration, generic registry access, update participation, command context, and React, Ink, command-parser, and version dependencies.
 - Public plugin types and initialization context MUST NOT contain marketplace names, paths, manifests, storage services, Git services, dependency installers, or marketplace-specific diagnostics.
 - Plugin identity MUST be assigned by the definition's owner and MUST NOT be mutable by the plugin during initialization.
 - Initialization context MUST expose only generic host capabilities.
@@ -89,6 +91,8 @@ export interface PluginAPI {
   readonly dependencies: CoreDependencies
   command(build: (namespace: Command) => void): void
   plugin(definition: PluginDefinition): void
+  register<T>(key: string, value: T): void
+  registrations<T>(key: string): readonly T[]
   update(participant: UpdateParticipant): void
   updaters(): readonly UpdateParticipation[]
 }
@@ -121,6 +125,57 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - **GIVEN** a plugin defines commands and options using only the namespace the host supplies
 - **WHEN** it is built and type-checked as an external consumer
 - **THEN** it needs no parser dependency, package manifest, or build step of its own
+
+### Generic Registry
+
+The generic registry is an initialization-staged, append-only keyed bag for runtime capabilities whose domain belongs to plugins. It is not a dependency-injection container, lifecycle system, or replacement for typed host contributions such as [Update Participation](#update-participation).
+
+- A plugin MAY register any number of values under opaque string keys during initialization, and registration alone MUST NOT claim a command namespace.
+- Registry entries MUST be staged, committed, and discarded under the atomic-staging rules in [Generic Plugin Host](#generic-plugin-host), which owns them for every contribution.
+- The host MUST compare keys by exact string equality and MUST NOT reserve, normalize, parse, trim, namespace, or version them.
+- The host MUST store and return each value unchanged and MUST NOT inspect, validate, invoke, clone, or freeze it.
+- Matching values MUST be readable through the initialization API in deterministic FIFO commit order, with registrations made by one plugin retaining their call order.
+- Reading one key MUST return a fresh, frozen snapshot of matching values committed at the moment of the call; an absent key MUST return an empty frozen snapshot.
+- A plugin reading during its own initialization MUST see only earlier committed values, not its own staged values or later plugins, so a consumer that needs every provider MUST read while its command runs.
+- A registration attempted after the contributing plugin finishes initialization MUST be rejected as a late contribution.
+- The generic type asserted while reading MUST be a caller-side TypeScript assertion only; the host MUST NOT establish or check a runtime relationship between a key and its values.
+- The host MUST NOT attach provider identity or a registry-specific failure channel to an entry; failures from using a value belong to its consumer.
+- Repeated keys and repeated values MUST remain distinct entries; the host MUST NOT reject, merge, overwrite, select, or deduplicate them.
+
+The initial public shape is conceptual:
+
+```ts
+interface PluginAPI {
+  register<T>(key: string, value: T): void
+  registrations<T>(key: string): readonly T[]
+}
+```
+
+The exact structural representation MAY vary, but it MUST preserve the owned contracts above.
+
+#### Scenario: Registry entry commits atomically
+
+- **GIVEN** a plugin registers a value and completes initialization successfully
+- **WHEN** a later command reads that key
+- **THEN** the returned snapshot contains the exact registered value
+
+#### Scenario: Failed provider remains absent
+
+- **GIVEN** a plugin registers a value and then fails initialization
+- **WHEN** a consumer reads that key
+- **THEN** the failed plugin's value is absent and healthy plugins' committed values remain readable
+
+#### Scenario: Snapshot reflects call time
+
+- **GIVEN** one provider has committed and another provider has not initialized yet
+- **WHEN** a plugin reads during initialization and later reads again while its command runs
+- **THEN** the first snapshot contains only the earlier provider and the command-time snapshot contains both successful providers
+
+#### Scenario: Repeated entries remain distinct
+
+- **GIVEN** providers register the same value more than once under the same key
+- **WHEN** a consumer reads that key
+- **THEN** every registration appears in commit order without a host-selected winner
 
 ### Update Participation
 
@@ -441,6 +496,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - Automatic update checking is prohibited rather than merely unimplemented, and user-invoked updating is specified by [Updates](../updates/index.md).
 - One installed checkout represents a cloned marketplace's current version, which [Updates](../updates/index.md) moves and pins. A referenced local marketplace has no version to pin; its current version is whatever its directory holds when `tx` runs.
 - Dependency environment isolation between plugins is not required.
+- Registry key factories, symbol tokens, schemas, runtime type validation, ownership metadata, provider selection, priorities, version negotiation, scopes, unregistering, replacement, subscriptions, events, lazy factories, dependency resolution, lifecycle, disposal, health checks, retries, caching, and persistence are out of scope.
 - Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
 
 ## Open Questions
@@ -464,6 +520,8 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0012: Add a Generic Update Lifecycle](../../changes/0012-add-generic-update-lifecycle.md)
 - [Change 0013: Update Installed Marketplaces](../../changes/0013-update-installed-marketplaces.md)
 - [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
+- [Change 0016: Add Plugin Capabilities and Dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md)
+- [Dialogs](../dialogs/)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -486,3 +544,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-07 | Added generic update participants as a staged, isolated, host-recorded contribution to the plugin host and its public contract | [0012-add-generic-update-lifecycle](../../changes/0012-add-generic-update-lifecycle.md) |
 | 2026-08-07 | Gave the marketplace plugin the update participant and version labels, and extended non-interactive execution from cloning to every operation against a remote | [0013-update-installed-marketplaces](../../changes/0013-update-installed-marketplaces.md) |
 | 2026-08-07 | Gave the marketplace plugin marketplace version pins, including the source suffix and the commands that change one | [0014-pin-marketplace-versions](../../changes/0014-pin-marketplace-versions.md) |
+| 2026-08-22 | Specified the minimal opaque plugin registry used by the bundled dialogs provider | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
