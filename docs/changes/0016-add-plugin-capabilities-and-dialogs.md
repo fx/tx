@@ -111,7 +111,7 @@ The dialogs provider registers one local structural service under `dialogs`. Its
   - [x] Update `docs/manual/plugins.md` with the implemented registry contract
   - [x] Verify 100% coverage and `bun run check`
 
-- [x] Add the bundled dialogs provider after the registry lands
+- [x] Add the bundled dialogs provider after the registry lands (PR #39)
   - [x] Add a namespace-free provider under `plugins/dialogs/` and compose it in `cli.ts`
   - [x] Implement the local structural `Dialogs` capability with only `select`, using injected React, Ink, standard input, and standard error
   - [x] Reject empty options and non-interactive streams before rendering; preserve order, duplicates, and opaque value identity
