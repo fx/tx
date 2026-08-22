@@ -8,7 +8,11 @@ specs:
     status: active
   - name: plugin-system
     path: specs/plugin-system/
-    description: Generic plugin hosting and externalized marketplace-plugin ownership contracts.
+    description: Generic plugin hosting, opaque capability registration, and externalized marketplace-plugin ownership contracts.
+    status: active
+  - name: dialogs
+    path: specs/dialogs/
+    description: Shared terminal dialogs supplied by a bundled plugin, beginning with single-choice selection.
     status: active
   - name: updates
     path: specs/updates/
@@ -134,3 +138,10 @@ changes:
     status: complete
     depends_on:
       - "0012"
+  - id: "0016"
+    name: add-plugin-capabilities-and-dialogs
+    path: changes/0016-add-plugin-capabilities-and-dialogs.md
+    description: Add an opaque plugin registry and a bundled dialogs provider whose initial capability is single-choice selection.
+    spec: dialogs
+    status: draft
+    depends_on: []
