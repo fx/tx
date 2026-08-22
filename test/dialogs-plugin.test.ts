@@ -21,6 +21,10 @@ class TerminalInput extends PassThrough {
   refs = 0;
   unrefs = 0;
   failRawMode = false;
+  failRawModeDisable = false;
+  failRawModeDisableOnce = false;
+  failUnref = false;
+  failUnrefOnce = false;
 
   constructor(readonly isTTY = true) {
     super();
@@ -29,6 +33,10 @@ class TerminalInput extends PassThrough {
   setRawMode(enabled: boolean): this {
     this.rawModes.push(enabled);
     if (enabled && this.failRawMode) throw new Error("raw mode failed");
+    if (!enabled && (this.failRawModeDisable || this.failRawModeDisableOnce)) {
+      this.failRawModeDisableOnce = false;
+      throw new Error("raw mode cleanup failed");
+    }
     return this;
   }
 
@@ -39,6 +47,10 @@ class TerminalInput extends PassThrough {
 
   unref(): this {
     this.unrefs++;
+    if (this.failUnref || this.failUnrefOnce) {
+      this.failUnrefOnce = false;
+      throw new Error("unref cleanup failed");
+    }
     return this;
   }
 }
@@ -57,6 +69,36 @@ class CapturedOutput extends PassThrough {
 
   text(): string {
     return this.output;
+  }
+}
+
+class ThrowingOutput extends CapturedOutput {
+  failWrites = false;
+
+  override write(
+    chunk: unknown,
+    callback?: (error: Error | null | undefined) => void,
+  ): boolean;
+  override write(
+    chunk: unknown,
+    encoding: BufferEncoding,
+    callback?: (error: Error | null | undefined) => void,
+  ): boolean;
+  override write(
+    chunk: unknown,
+    encodingOrCallback?:
+      | BufferEncoding
+      | ((error: Error | null | undefined) => void),
+    callback?: (error: Error | null | undefined) => void,
+  ): boolean {
+    if (this.failWrites) throw new Error("output cleanup failed");
+    if (typeof encodingOrCallback === "function") {
+      return super.write(chunk, encodingOrCallback);
+    }
+    if (encodingOrCallback === undefined) return super.write(chunk);
+    return callback
+      ? super.write(chunk, encodingOrCallback, callback)
+      : super.write(chunk, encodingOrCallback);
   }
 }
 
@@ -238,6 +280,18 @@ describe("bundled dialogs provider", () => {
     expect(output).toContain("Last");
   });
 
+  test("applies coalesced navigation before selection", async () => {
+    const result = await runSelection(
+      [
+        { label: "First", value: 1 },
+        { label: "Second", value: 2 },
+      ],
+      "[B\r",
+    );
+
+    expect(result.value).toBe(2);
+  });
+
   test("returns an Error option by identity instead of treating it as failure", async () => {
     const selected = new Error("selected value");
     const result = await runSelection(
@@ -321,7 +375,128 @@ describe("bundled dialogs provider", () => {
       expect((result.failure as Error).message).toContain(
         kind === "render" ? "render failed" : "raw mode failed",
       );
+      if (kind === "interaction") {
+        expect(result.stdin.refs).toBe(1);
+        expect(result.stdin.unrefs).toBe(1);
+        expect(result.stdin.rawModes).toEqual([true, false]);
+        expect(result.stdin.listenerCount("readable")).toBe(0);
+      }
       expect(process.exitCode).not.toBe(1);
+    }
+  });
+
+  test("does not retain beforeExit listeners after repeated initial render failures", async () => {
+    const beforeExitListeners = process.listenerCount("beforeExit");
+    const option = Object.defineProperty({ value: 1 }, "label", {
+      get() {
+        throw new Error("render failed");
+      },
+    }) as SelectOption<number>;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await runRejected([option]);
+      expect(result.failure).toBeInstanceOf(Error);
+      expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
+    }
+  });
+
+  test("rejects renderer unmount failure without retaining its listener", async () => {
+    const beforeExitListeners = process.listenerCount("beforeExit");
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let writableStateFailures = 0;
+    Object.defineProperty(stderr, "writableEnded", {
+      configurable: true,
+      get() {
+        if (writableStateFailures > 0) {
+          writableStateFailures--;
+          throw new Error("renderer unmount failed");
+        }
+        return false;
+      },
+    });
+    let failure: unknown;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          try {
+            await dialogs.select({
+              message: "Unmount",
+              options: [{ label: "One", value: 1 }],
+            });
+          } catch (error) {
+            failure = error;
+          }
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    writableStateFailures = 1;
+    stdin.write("\r");
+
+    expect(await running).toBe(0);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("renderer unmount failed");
+    expect(stdin.refs).toBe(stdin.unrefs);
+    expect(stdin.listenerCount("readable")).toBe(0);
+    expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
+  });
+
+  test("rejects synchronous terminal teardown failures after cleanup", async () => {
+    for (const kind of [
+      "raw mode",
+      "raw mode persistent",
+      "output",
+      "unref once",
+      "unref persistent",
+    ] as const) {
+      const stdin = new TerminalInput();
+      const stderr =
+        kind === "output" ? new ThrowingOutput() : new CapturedOutput();
+      if (kind === "raw mode") stdin.failRawModeDisableOnce = true;
+      if (kind === "raw mode persistent") stdin.failRawModeDisable = true;
+      if (kind === "unref once") stdin.failUnrefOnce = true;
+      if (kind === "unref persistent") stdin.failUnref = true;
+      let failure: unknown;
+      const running = main(
+        ["choose"],
+        [
+          dialogsPlugin,
+          consumer(async (dialogs) => {
+            try {
+              await dialogs.select({
+                message: "Teardown",
+                options: [{ label: "One", value: 1 }],
+              });
+            } catch (error) {
+              failure = error;
+            }
+          }),
+        ],
+        context(stdin, stderr),
+      );
+      await until(() => stdin.rawModes.includes(true));
+      if (stderr instanceof ThrowingOutput) stderr.failWrites = true;
+      stdin.write("\r");
+
+      expect(await running).toBe(0);
+      expect({ kind, failure }).toEqual({ kind, failure: expect.any(Error) });
+      expect((failure as Error).message).toContain(
+        kind.startsWith("raw mode")
+          ? "raw mode cleanup failed"
+          : kind === "output"
+            ? "output cleanup failed"
+            : "unref cleanup failed",
+      );
+      if (kind.startsWith("raw mode") || kind === "output") {
+        expect(stdin.refs).toBe(stdin.unrefs);
+      } else {
+        expect(stdin.unrefs).toBeGreaterThanOrEqual(stdin.refs);
+      }
+      expect(stdin.listenerCount("readable")).toBe(0);
     }
   });
 
