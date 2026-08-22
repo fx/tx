@@ -78,6 +78,18 @@ export function clearPluginContributionStage(
   stage.participants.length = 0;
 }
 
+interface SingleAppendTarget<T> {
+  push(value: T): unknown;
+}
+
+/** @internal Commit staged references without a bulk argument list. */
+export function appendPluginContributions<T>(
+  target: SingleAppendTarget<T>,
+  staged: readonly T[],
+): void {
+  for (const contribution of staged) target.push(contribution);
+}
+
 /** Non-empty, whitespace-free, and never confusable with an option. */
 const namespaceNamePattern = /^[^\s-]\S*$/;
 
@@ -258,11 +270,9 @@ export async function initializePlugins(
         namespaces.push(contribution);
       }
 
-      for (const entry of stage.registryEntries) entries.push(entry);
-      for (const participation of stage.participants) {
-        participants.push(participation);
-      }
-      for (const child of stage.children) queue.push(child);
+      appendPluginContributions(entries, stage.registryEntries);
+      appendPluginContributions(participants, stage.participants);
+      appendPluginContributions(queue, stage.children);
     } catch (error) {
       failures.push(Object.freeze({ identity, message: errorMessage(error) }));
     } finally {

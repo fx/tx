@@ -19,6 +19,7 @@ import type {
   UpdateParticipation,
 } from "../src/plugin.ts";
 import {
+  appendPluginContributions,
   clearPluginContributionStage,
   coreDependencies,
   createPluginContributionStage,
@@ -589,35 +590,30 @@ describe("generic registry", () => {
     expect(reader?.registrations("subclass-timing")).toEqual([]);
   });
 
-  test("commits a large registry without spread argument limits", async () => {
-    const registrationCount = 700_000;
-    const spreadProbe = new Array(registrationCount);
-    expect(() => {
-      const target: unknown[] = [];
-      target.push(...spreadProbe);
-    }).toThrow(RangeError);
-    spreadProbe.length = 0;
+  test("commits a large registry one entry at a time in FIFO order", () => {
+    const registrationCount = 50_000;
+    const staged = Array.from(
+      { length: registrationCount },
+      (_, index) => ["large", index] as const,
+    );
+    const committed: Array<readonly [string, number]> = [];
+    let largestBatch = 0;
 
-    const value = {};
-    let reader: PluginAPI | undefined;
+    appendPluginContributions(
+      {
+        push(...entries: Array<readonly [string, number]>) {
+          largestBatch = Math.max(largestBatch, entries.length);
+          const [entry] = entries;
+          if (entry) committed.push(entry);
+        },
+      },
+      staged,
+    );
 
-    const { namespaces, failures } = await initializePlugins([
-      definition("provider", ({ register }) => {
-        for (let index = 0; index < registrationCount; index += 1) {
-          register("large", value);
-        }
-      }),
-      definition("reader", (api) => {
-        reader = api;
-      }),
-    ]);
-
-    expect(failures).toEqual([]);
-    expect(namespaces).toEqual([]);
-    const committed = reader?.registrations("large") ?? [];
+    expect(largestBatch).toBe(1);
     expect(committed).toHaveLength(registrationCount);
-    expect(committed[0]).toBe(value);
-    expect(committed.at(-1)).toBe(value);
+    expect(committed[0]).toEqual(["large", 0]);
+    expect(committed.at(-1)).toEqual(["large", registrationCount - 1]);
   });
 
   test("clears every reference owned by successful and failed stages", () => {
