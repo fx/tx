@@ -31,9 +31,21 @@ class TerminalInput extends PassThrough {
   failRawModeDisableOnce = false;
   failUnref = false;
   failUnrefOnce = false;
+  isRaw: boolean;
+  referenced: boolean;
 
-  constructor(readonly isTTY = true) {
+  constructor(
+    readonly isTTY = true,
+    initialRaw = false,
+    initialReferenced = false,
+  ) {
     super();
+    this.isRaw = initialRaw;
+    this.referenced = initialReferenced;
+  }
+
+  hasRef(): boolean {
+    return this.referenced;
   }
 
   setRawMode(enabled: boolean): this {
@@ -43,12 +55,14 @@ class TerminalInput extends PassThrough {
       this.failRawModeDisableOnce = false;
       throw new Error("raw mode cleanup failed");
     }
+    this.isRaw = enabled;
     return this;
   }
 
   ref(): this {
     this.refs++;
     this.activeReferences++;
+    this.referenced = true;
     return this;
   }
 
@@ -59,13 +73,14 @@ class TerminalInput extends PassThrough {
       throw new Error("unref cleanup failed");
     }
     this.activeReferences = Math.max(0, this.activeReferences - 1);
+    this.referenced = false;
     return this;
   }
 }
 
 class CapturedOutput extends PassThrough {
-  readonly columns = 80;
-  readonly rows = 24;
+  columns = 80;
+  rows = 24;
   private output = "";
 
   constructor(readonly isTTY = true) {
@@ -422,21 +437,6 @@ describe("bundled dialogs provider", () => {
     }
   });
 
-  test("does not retain beforeExit listeners after repeated initial render failures", async () => {
-    const beforeExitListeners = process.listenerCount("beforeExit");
-    const option = Object.defineProperty({ value: 1 }, "label", {
-      get() {
-        throw new Error("render failed");
-      },
-    }) as SelectOption<number>;
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await runRejected([option]);
-      expect(result.failure).toBeInstanceOf(Error);
-      expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
-    }
-  });
-
   test("rejects synchronous terminal teardown failures after cleanup", async () => {
     for (const kind of [
       "raw mode",
@@ -585,10 +585,7 @@ describe("bundled dialogs provider", () => {
     expect(result.stderr.text()).toContain("> Two");
   });
 
-  test("supports sequential reuse without retaining process or input listeners", async () => {
-    const beforeExitListeners = process.listenerCount("beforeExit");
-    const unrelatedBeforeExit = () => {};
-    process.on("beforeExit", unrelatedBeforeExit);
+  test("supports sequential reuse without retaining input listeners", async () => {
     const stdin = new TerminalInput();
     const unrelatedReadable = () => {};
     stdin.on("readable", unrelatedReadable);
@@ -626,42 +623,170 @@ describe("bundled dialogs provider", () => {
     expect(stdin.rawModes).toEqual([true, false, true, false]);
     expect(stdin.activeReferences).toBe(0);
     expect(stdin.listeners("readable")).toContain(unrelatedReadable);
-    expect(process.listeners("beforeExit")).toContain(unrelatedBeforeExit);
     stdin.removeListener("readable", unrelatedReadable);
-    process.removeListener("beforeExit", unrelatedBeforeExit);
     expect(stdin.listenerCount("readable")).toBe(0);
-    expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
   });
 
-  test("rejects without waiting for renderer exit when unmount throws", async () => {
-    const beforeExitListeners = process.listenerCount("beforeExit");
-    const unrelatedBeforeExit = () => {};
-    process.on("beforeExit", unrelatedBeforeExit);
-    const stdin = new TerminalInput();
-    const unrelatedReadable = () => {};
-    stdin.on("readable", unrelatedReadable);
+  test("restores paused input and preserves preexisting raw and referenced state", async () => {
+    const stdin = new TerminalInput(true, true, true);
+    stdin.pause();
     const stderr = new CapturedOutput();
-    let failure: unknown;
-    const unsettled = new Promise<never>(() => {});
+    let value: number | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          value = await dialogs.select({
+            message: "Preserve source",
+            options: [{ label: "One", value: 1 }],
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stderr.text().includes("One"));
+    stdin.write("\r");
+
+    expect(await running).toBe(0);
+    expect(value).toBe(1);
+    expect(stdin.readableFlowing).toBe(false);
+    expect(stdin.isRaw).toBe(true);
+    expect(stdin.referenced).toBe(true);
+    expect(stdin.refs).toBe(0);
+    expect(stdin.unrefs).toBe(0);
+  });
+
+  test("forwards TTY dimensions and resize events to Ink", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let initial: readonly [
+      boolean | undefined,
+      number | undefined,
+      number | undefined,
+    ] = [] as never;
+    let resized: readonly [number | undefined, number | undefined] | undefined;
     const ink: CoreDependencies["ink"] = {
       ...coreDependencies.ink,
       render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const options = args[1] as { readonly stdout: NodeJS.WriteStream };
+        const output = options.stdout;
+        initial = [output.isTTY, output.columns, output.rows];
+        const onResize = () => {
+          resized = [output.columns, output.rows];
+        };
+        output.on("resize", onResize);
         const renderer = coreDependencies.ink.render(...args);
-        const rendererBeforeExit = () => {};
         return {
           ...renderer,
           unmount() {
+            output.removeListener("resize", onResize);
             renderer.unmount();
-            throw new Error("renderer unmount failed");
-          },
-          waitUntilExit() {
-            process.on("beforeExit", rendererBeforeExit);
-            return unsettled;
           },
         };
       },
     };
-    const dependencies: CoreDependencies = { ...coreDependencies, ink };
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          await dialogs.select({
+            message: "Resize",
+            options: [{ label: "One", value: 1 }],
+          });
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    await until(() => stderr.text().includes("One"));
+    stderr.columns = 120;
+    stderr.rows = 40;
+    stderr.emit("resize");
+    stdin.write("");
+
+    expect(await running).toBe(0);
+    expect(initial).toEqual([true, 80, 24]);
+    expect(resized).toEqual([120, 40]);
+  });
+
+  test("stops forwarding input while renderer exit is pending", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    const release = Promise.withResolvers<void>();
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        return {
+          ...renderer,
+          waitUntilExit() {
+            return renderer.waitUntilExit().then(() => release.promise);
+          },
+        };
+      },
+    };
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          await dialogs.select({
+            message: "Pending exit",
+            options: [{ label: "One", value: 1 }],
+          });
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    await until(() => stderr.text().includes("One"));
+    stdin.write("\r");
+    await until(() => stdin.rawModes.includes(false));
+
+    expect(stdin.listenerCount("data")).toBe(0);
+    expect(stdin.listenerCount("error")).toBe(0);
+    let settled = false;
+    void running.then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    release.resolve();
+    expect(await running).toBe(0);
+  });
+
+  test("waits for interrupted renderer teardown and its output barrier", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    const releaseBarrier = Promise.withResolvers<void>();
+    let failure: unknown;
+    let unmountCalls = 0;
+    let barrierReached = false;
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        return {
+          ...renderer,
+          unmount() {
+            unmountCalls++;
+            if (unmountCalls === 1) {
+              throw new Error("renderer unmount interrupted");
+            }
+            renderer.unmount();
+          },
+          waitUntilExit() {
+            return renderer.waitUntilExit().then(async (result) => {
+              await releaseBarrier.promise;
+              barrierReached = true;
+              return result;
+            });
+          },
+        };
+      },
+    };
     const running = main(
       ["choose"],
       [
@@ -678,28 +803,28 @@ describe("bundled dialogs provider", () => {
         }),
       ],
       context(stdin, stderr),
-      dependencies,
+      { ...coreDependencies, ink },
     );
     await until(() => stderr.text().includes("One"));
     stdin.emit("error", new Error("dialog failed"));
+    await until(() => unmountCalls === 2);
 
-    const timeout = Symbol("timeout");
-    const result = await Promise.race([
-      running,
-      new Promise<typeof timeout>((resolve) =>
-        setTimeout(() => resolve(timeout), 100),
-      ),
-    ]);
-    expect(result).toBe(0);
+    let settled = false;
+    void running.then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    expect(barrierReached).toBe(false);
+    releaseBarrier.resolve();
+
+    expect(await running).toBe(0);
+    expect(barrierReached).toBe(true);
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe("dialog failed");
     expect(stdin.rawModes).toEqual([true, false]);
     expect(stdin.activeReferences).toBe(0);
-    expect(stdin.listeners("readable")).toEqual([unrelatedReadable]);
-    expect(process.listeners("beforeExit")).toContain(unrelatedBeforeExit);
-    process.removeListener("beforeExit", unrelatedBeforeExit);
-    stdin.removeListener("readable", unrelatedReadable);
-    expect(stdin.listenerCount("readable")).toBe(0);
-    expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
+    expect(stdin.listenerCount("data")).toBe(0);
+    expect(stdin.listenerCount("error")).toBe(0);
   });
 });

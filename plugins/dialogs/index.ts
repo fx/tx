@@ -42,6 +42,10 @@ class InputAdapter extends streams.PassThrough {
   readonly #source: NodeJS.ReadStream;
   readonly #forward: (chunk: string | Buffer) => boolean;
   readonly #captureError: (error: unknown) => void;
+  readonly #sourceWasFlowing: boolean;
+  readonly #sourceWasRaw: boolean;
+  readonly #sourceWasReferenced: boolean;
+  #forwarding = true;
   #ownedReferences = 0;
   #rawModeMayBeEnabled = false;
 
@@ -49,14 +53,25 @@ class InputAdapter extends streams.PassThrough {
     super();
     this.#source = source;
     this.failures = failures;
+    this.#sourceWasFlowing = source.readableFlowing === true;
+    this.#sourceWasRaw = source.isRaw === true;
+    const referenceSource = source as NodeJS.ReadStream & {
+      hasRef?: () => boolean;
+      _handle?: { hasRef?: () => boolean };
+    };
+    this.#sourceWasReferenced =
+      referenceSource.hasRef?.call(source) === true ||
+      referenceSource._handle?.hasRef?.() === true;
     this.#forward = this.write.bind(this);
     this.#captureError = failures.fail.bind(failures);
     source.on("data", this.#forward);
     source.on("error", this.#captureError);
+    source.resume();
   }
 
   setRawMode(enabled: boolean): this {
     if (enabled) {
+      if (this.#sourceWasRaw) return this;
       this.#rawModeMayBeEnabled = true;
       try {
         this.#source.setRawMode(true);
@@ -71,6 +86,7 @@ class InputAdapter extends streams.PassThrough {
   }
 
   ref(): this {
+    if (this.#sourceWasReferenced) return this;
     try {
       this.#source.ref();
       this.#ownedReferences++;
@@ -86,9 +102,16 @@ class InputAdapter extends streams.PassThrough {
     return this;
   }
 
-  cleanup(): void {
+  stopForwarding(): void {
+    if (!this.#forwarding) return;
+    this.#forwarding = false;
     this.#source.removeListener("data", this.#forward);
     this.#source.removeListener("error", this.#captureError);
+    if (!this.#sourceWasFlowing) this.#source.pause();
+  }
+
+  cleanup(): void {
+    this.stopForwarding();
     for (let attempt = 0; this.#rawModeMayBeEnabled && attempt < 2; attempt++) {
       this.#disableRawMode();
     }
@@ -123,17 +146,33 @@ class OutputAdapter extends streams.Writable {
   readonly failures: FailureTracker;
   readonly #source: NodeJS.WriteStream;
   readonly #captureError: (error: unknown) => void;
+  readonly #forwardResize: () => boolean;
 
   constructor(source: NodeJS.WriteStream, failures: FailureTracker) {
     super();
     this.#source = source;
     this.failures = failures;
     this.#captureError = failures.fail.bind(failures);
+    this.#forwardResize = this.emit.bind(this, "resize");
     source.on("error", this.#captureError);
+    source.on("resize", this.#forwardResize);
+  }
+
+  get isTTY(): boolean | undefined {
+    return this.#source.isTTY;
+  }
+
+  get columns(): number | undefined {
+    return this.#source.columns;
+  }
+
+  get rows(): number | undefined {
+    return this.#source.rows;
   }
 
   cleanup(): void {
     this.#source.removeListener("error", this.#captureError);
+    this.#source.removeListener("resize", this.#forwardResize);
     this.destroy();
   }
 
@@ -223,7 +262,6 @@ const definition: PluginDefinition = {
 
           let renderer: ReturnType<typeof ink.render> | undefined;
           let exited: Promise<unknown> | undefined;
-          let rendererBeforeExitListeners: NodeJS.BeforeExitListener[] = [];
           let outcome: Selection<T> | undefined;
           try {
             renderer = ink.render(react.createElement(ink.Text, null, ""), {
@@ -234,13 +272,7 @@ const definition: PluginDefinition = {
               interactive: true,
               patchConsole: false,
             });
-            const previousBeforeExitListeners = new Set(
-              process.listeners("beforeExit"),
-            );
             exited = renderer.waitUntilExit();
-            rendererBeforeExitListeners = process
-              .listeners("beforeExit")
-              .filter((listener) => !previousBeforeExitListeners.has(listener));
             renderer.rerender(react.createElement(Select));
             const result = await Promise.race([
               selected.promise,
@@ -259,7 +291,11 @@ const definition: PluginDefinition = {
             failure = { present: true, reason };
           } finally {
             let unmounted = false;
-            if (renderer) {
+            for (
+              let attempt = 0;
+              renderer && !unmounted && attempt < 2;
+              attempt++
+            ) {
               try {
                 renderer.unmount();
                 unmounted = true;
@@ -267,15 +303,12 @@ const definition: PluginDefinition = {
                 failure = recordFailure(failure, { present: true, reason });
               }
             }
+            input.stopForwarding();
             if (unmounted && exited) {
               try {
                 await exited;
               } catch (reason) {
                 failure = recordFailure(failure, { present: true, reason });
-              }
-            } else {
-              for (const listener of rendererBeforeExitListeners) {
-                process.removeListener("beforeExit", listener);
               }
             }
             input.cleanup();
