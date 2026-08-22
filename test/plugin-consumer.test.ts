@@ -80,7 +80,16 @@ test("the packed package installs a standalone CLI and public plugin types", asy
         join(consumerRoot, "plugin.ts"),
         `import type { Command, Plugin } from "@fx/tx/plugin";
 
-const plugin: Plugin = ({ command, context }) => {
+interface Greeter {
+  greet(name?: string): string;
+}
+
+const greeter: Greeter = {
+  greet: (name) => \`hello \${name ?? "world"}\`,
+};
+
+const plugin: Plugin = ({ command, context, register, registrations }) => {
+  register<Greeter>("greeter", greeter);
   command((namespace: Command) => {
     namespace.description("Greet from an external plugin");
     namespace
@@ -89,7 +98,8 @@ const plugin: Plugin = ({ command, context }) => {
       .argument("[name]", "who to greet")
       .option("--loud", "shout the greeting")
       .action((name: string | undefined, options: { loud?: boolean }) => {
-        const greeting = \`hello \${name ?? "world"}\`;
+        const available: readonly Greeter[] = registrations<Greeter>("greeter");
+        const greeting = available[0]?.greet(name) ?? greeter.greet(name);
         context.stdout.write(\`\${options.loud ? greeting.toUpperCase() : greeting}\\n\`);
       });
   });

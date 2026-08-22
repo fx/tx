@@ -1,3 +1,4 @@
+import { types as utilTypes } from "node:util";
 import type { Command } from "commander";
 import * as commander from "commander";
 import * as ink from "ink";
@@ -44,6 +45,49 @@ export interface InitializePluginsOptions {
 export interface InitializedPlugins {
   readonly namespaces: readonly PluginNamespace[];
   readonly failures: readonly PluginLoadFailure[];
+}
+
+/** @internal Mutable ownership boundary for one plugin's staged references. */
+export interface PluginContributionStage {
+  namespace: Command | undefined;
+  violation: Error | undefined;
+  readonly children: PluginDefinition[];
+  readonly registryEntries: Array<readonly [string, unknown]>;
+  readonly participants: UpdateParticipation[];
+}
+
+/** @internal Pure construction seam for deterministic ownership tests. */
+export function createPluginContributionStage(): PluginContributionStage {
+  return {
+    namespace: undefined,
+    violation: undefined,
+    children: [],
+    registryEntries: [],
+    participants: [],
+  };
+}
+
+/** @internal Release every reference owned only by a completed stage. */
+export function clearPluginContributionStage(
+  stage: PluginContributionStage,
+): void {
+  stage.namespace = undefined;
+  stage.violation = undefined;
+  stage.children.length = 0;
+  stage.registryEntries.length = 0;
+  stage.participants.length = 0;
+}
+
+interface SingleAppendTarget<T> {
+  push(value: T): unknown;
+}
+
+/** @internal Commit staged references without a bulk argument list. */
+export function appendPluginContributions<T>(
+  target: SingleAppendTarget<T>,
+  staged: readonly T[],
+): void {
+  for (const contribution of staged) target.push(contribution);
 }
 
 /** Non-empty, whitespace-free, and never confusable with an option. */
@@ -99,7 +143,14 @@ export async function initializePlugins(
   >;
   const dependencies = options.dependencies ?? coreDependencies;
   const namespaces: PluginNamespace[] = [];
+  const entries: Array<readonly [string, unknown]> = [];
   const participants: UpdateParticipation[] = [];
+  const registrations = <T>(key: string): readonly T[] =>
+    Object.freeze(
+      entries
+        .filter(([registeredKey]) => registeredKey === key)
+        .map(([, value]) => value as T),
+    );
   // Read at call time rather than delivered at initialization: a plugin that
   // reads during its own initialization sees only what was committed before
   // it, which is why a driver reads them when its command runs.
@@ -125,36 +176,42 @@ export async function initializePlugins(
     }
 
     let staging = true;
-    let namespace: Command | undefined;
-    let violation: Error | undefined;
-    const children: PluginDefinition[] = [];
-    const staged: UpdateParticipation[] = [];
+    let initialization: Promise<void> | undefined;
+    const stage = createPluginContributionStage();
     /**
      * Remember a registration violation as well as raising it. A plugin that
      * catches the throw must still fail rather than commit what it staged.
      */
     const reject = (error: Error): never => {
-      violation ??= error;
-      throw violation;
+      stage.violation ??= error;
+      throw stage.violation;
     };
     /** Staging is over once initialization returns, for every contribution. */
     const closed = (contribution: string): Error =>
       new Error(
         `Plugin ${identity.name} cannot ${contribution} after initialization`,
       );
+    const ensureStaging = (contribution: string): void => {
+      if (
+        !staging ||
+        (initialization && Bun.peek.status(initialization) !== "pending")
+      ) {
+        throw closed(contribution);
+      }
+    };
     const api: PluginAPI = Object.freeze({
       identity,
       env,
       context: { ...processContext, env, plugin: identity },
       dependencies,
       command(build: (namespace: Command) => void) {
-        if (!staging) throw closed("register commands");
-        if (!namespace) {
+        ensureStaging("register commands");
+        if (!stage.namespace) {
           const claimError = namespaceClaimError(identity);
           if (claimError) reject(claimError);
-          namespace = new dependencies.commander.Command(identity.name);
+          stage.namespace = new dependencies.commander.Command(identity.name);
         }
-        const result: unknown = build(namespace);
+        const result: unknown = build(stage.namespace);
         if (isThenable(result)) {
           // The builder's own promise stays the plugin's business, but an
           // unobserved rejection would fault the host, so its outcome is
@@ -168,12 +225,17 @@ export async function initializePlugins(
         }
       },
       plugin(child: PluginDefinition) {
-        if (!staging) throw closed("contribute plugins");
-        children.push(child);
+        ensureStaging("contribute plugins");
+        stage.children.push(child);
       },
+      register<T>(key: string, value: T) {
+        ensureStaging("register values");
+        stage.registryEntries.push([key, value]);
+      },
+      registrations,
       update(participant: UpdateParticipant) {
-        if (!staging) throw closed("contribute update participants");
-        staged.push(Object.freeze({ identity, participant }));
+        ensureStaging("contribute update participants");
+        stage.participants.push(Object.freeze({ identity, participant }));
       },
       updaters,
     });
@@ -183,28 +245,40 @@ export async function initializePlugins(
       if (typeof plugin !== "function") {
         throw new Error("Plugin definition must load a function");
       }
-      await plugin(api);
+      const result = plugin(api);
+      if (isThenable(result)) {
+        const awaited = Promise.resolve(result);
+        initialization = utilTypes.isPromise(result) ? result : awaited;
+        await awaited;
+      }
       staging = false;
-      if (violation) throw violation;
+      if (stage.violation) throw stage.violation;
 
-      if (namespace) {
-        verifyNamespaceName(namespace, identity);
+      if (stage.namespace) {
+        verifyNamespaceName(stage.namespace, identity);
         const owner = claimed.get(identity.name);
         if (owner) {
           throw new Error(
             `Namespace "${identity.name}" is already claimed by ${identityName(owner.identity)}; cannot claim it for ${identityName(identity)}`,
           );
         }
-        const contribution = Object.freeze({ identity, command: namespace });
+        const contribution = Object.freeze({
+          identity,
+          command: stage.namespace,
+        });
         claimed.set(identity.name, contribution);
         namespaces.push(contribution);
       }
 
-      participants.push(...staged);
-      queue.push(...children);
+      appendPluginContributions(entries, stage.registryEntries);
+      appendPluginContributions(participants, stage.participants);
+      appendPluginContributions(queue, stage.children);
     } catch (error) {
-      staging = false;
       failures.push(Object.freeze({ identity, message: errorMessage(error) }));
+    } finally {
+      staging = false;
+      initialization = undefined;
+      clearPluginContributionStage(stage);
     }
   }
 

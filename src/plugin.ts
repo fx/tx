@@ -73,6 +73,8 @@ export interface PluginAPI {
   readonly dependencies: CoreDependencies;
   command(build: (namespace: Command) => void): void;
   plugin(definition: PluginDefinition): void;
+  register<T>(key: string, value: T): void;
+  registrations<T>(key: string): readonly T[];
   update(participant: UpdateParticipant): void;
   /** What is committed at the moment of the call, in commit order. */
   updaters(): readonly UpdateParticipation[];
