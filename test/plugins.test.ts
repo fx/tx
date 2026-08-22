@@ -18,7 +18,12 @@ import type {
   UpdateParticipant,
   UpdateParticipation,
 } from "../src/plugin.ts";
-import { coreDependencies, initializePlugins } from "../src/plugins.ts";
+import {
+  clearPluginContributionStage,
+  coreDependencies,
+  createPluginContributionStage,
+  initializePlugins,
+} from "../src/plugins.ts";
 import { captureContext } from "./helpers.ts";
 
 function definition(
@@ -615,35 +620,35 @@ describe("generic registry", () => {
     expect(committed.at(-1)).toBe(value);
   });
 
-  test("releases a value held only by a failed retained API stage", async () => {
-    let retainedAPI: PluginAPI | undefined;
-    let finalized = false;
-    const registry = new FinalizationRegistry(() => {
-      finalized = true;
-    });
+  test("clears every reference owned by successful and failed stages", () => {
+    const committedValue = {};
+    const successful = createPluginContributionStage();
+    successful.registryEntries.push(["released", committedValue]);
+    const committed = [...successful.registryEntries];
+    clearPluginContributionStage(successful);
 
-    const { failures } = await initializePlugins([
-      definition("failed", (api) => {
-        retainedAPI = api;
-        const value = {};
-        registry.register(value, undefined);
-        api.register("released", value);
-        throw new Error("initialization failed");
+    expect(committed).toEqual([["released", committedValue]]);
+    expect(successful.registryEntries).toEqual([]);
+
+    const discardedValue = {};
+    const failed = createPluginContributionStage();
+    failed.namespace = new coreDependencies.commander.Command("discarded");
+    failed.violation = new Error("discarded");
+    failed.children.push(definition("discarded", () => {}));
+    failed.registryEntries.push(["discarded", discardedValue]);
+    failed.participants.push(
+      Object.freeze({
+        identity: { name: "discarded" },
+        participant: stubParticipant(),
       }),
-    ]);
-
-    expect(failures).toEqual([
-      { identity: { name: "failed" }, message: "initialization failed" },
-    ]);
-    expect(() => retainedAPI?.register("late", {})).toThrow(
-      "Plugin failed cannot register values after initialization",
     );
+    clearPluginContributionStage(failed);
 
-    for (let attempt = 0; attempt < 20 && !finalized; attempt += 1) {
-      Bun.gc(true);
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
-    expect(finalized).toBe(true);
+    expect(failed.namespace).toBeUndefined();
+    expect(failed.violation).toBeUndefined();
+    expect(failed.children).toEqual([]);
+    expect(failed.registryEntries).toEqual([]);
+    expect(failed.participants).toEqual([]);
   });
 
   test("commits opaque repeated values in root, call, and child FIFO order", async () => {

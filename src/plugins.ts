@@ -47,6 +47,37 @@ export interface InitializedPlugins {
   readonly failures: readonly PluginLoadFailure[];
 }
 
+/** @internal Mutable ownership boundary for one plugin's staged references. */
+export interface PluginContributionStage {
+  namespace: Command | undefined;
+  violation: Error | undefined;
+  readonly children: PluginDefinition[];
+  readonly registryEntries: Array<readonly [string, unknown]>;
+  readonly participants: UpdateParticipation[];
+}
+
+/** @internal Pure construction seam for deterministic ownership tests. */
+export function createPluginContributionStage(): PluginContributionStage {
+  return {
+    namespace: undefined,
+    violation: undefined,
+    children: [],
+    registryEntries: [],
+    participants: [],
+  };
+}
+
+/** @internal Release every reference owned only by a completed stage. */
+export function clearPluginContributionStage(
+  stage: PluginContributionStage,
+): void {
+  stage.namespace = undefined;
+  stage.violation = undefined;
+  stage.children.length = 0;
+  stage.registryEntries.length = 0;
+  stage.participants.length = 0;
+}
+
 /** Non-empty, whitespace-free, and never confusable with an option. */
 const namespaceNamePattern = /^[^\s-]\S*$/;
 
@@ -134,18 +165,14 @@ export async function initializePlugins(
 
     let staging = true;
     let initialization: Promise<void> | undefined;
-    let namespace: Command | undefined;
-    let violation: Error | undefined;
-    const children: PluginDefinition[] = [];
-    const stagedEntries: Array<readonly [string, unknown]> = [];
-    const staged: UpdateParticipation[] = [];
+    const stage = createPluginContributionStage();
     /**
      * Remember a registration violation as well as raising it. A plugin that
      * catches the throw must still fail rather than commit what it staged.
      */
     const reject = (error: Error): never => {
-      violation ??= error;
-      throw violation;
+      stage.violation ??= error;
+      throw stage.violation;
     };
     /** Staging is over once initialization returns, for every contribution. */
     const closed = (contribution: string): Error =>
@@ -167,12 +194,12 @@ export async function initializePlugins(
       dependencies,
       command(build: (namespace: Command) => void) {
         ensureStaging("register commands");
-        if (!namespace) {
+        if (!stage.namespace) {
           const claimError = namespaceClaimError(identity);
           if (claimError) reject(claimError);
-          namespace = new dependencies.commander.Command(identity.name);
+          stage.namespace = new dependencies.commander.Command(identity.name);
         }
-        const result: unknown = build(namespace);
+        const result: unknown = build(stage.namespace);
         if (isThenable(result)) {
           // The builder's own promise stays the plugin's business, but an
           // unobserved rejection would fault the host, so its outcome is
@@ -187,16 +214,16 @@ export async function initializePlugins(
       },
       plugin(child: PluginDefinition) {
         ensureStaging("contribute plugins");
-        children.push(child);
+        stage.children.push(child);
       },
       register<T>(key: string, value: T) {
         ensureStaging("register values");
-        stagedEntries.push([key, value]);
+        stage.registryEntries.push([key, value]);
       },
       registrations,
       update(participant: UpdateParticipant) {
         ensureStaging("contribute update participants");
-        staged.push(Object.freeze({ identity, participant }));
+        stage.participants.push(Object.freeze({ identity, participant }));
       },
       updaters,
     });
@@ -213,34 +240,35 @@ export async function initializePlugins(
         await awaited;
       }
       staging = false;
-      if (violation) throw violation;
+      if (stage.violation) throw stage.violation;
 
-      if (namespace) {
-        verifyNamespaceName(namespace, identity);
+      if (stage.namespace) {
+        verifyNamespaceName(stage.namespace, identity);
         const owner = claimed.get(identity.name);
         if (owner) {
           throw new Error(
             `Namespace "${identity.name}" is already claimed by ${identityName(owner.identity)}; cannot claim it for ${identityName(identity)}`,
           );
         }
-        const contribution = Object.freeze({ identity, command: namespace });
+        const contribution = Object.freeze({
+          identity,
+          command: stage.namespace,
+        });
         claimed.set(identity.name, contribution);
         namespaces.push(contribution);
       }
 
-      for (const entry of stagedEntries) entries.push(entry);
-      for (const participation of staged) participants.push(participation);
-      for (const child of children) queue.push(child);
+      for (const entry of stage.registryEntries) entries.push(entry);
+      for (const participation of stage.participants) {
+        participants.push(participation);
+      }
+      for (const child of stage.children) queue.push(child);
     } catch (error) {
       failures.push(Object.freeze({ identity, message: errorMessage(error) }));
     } finally {
       staging = false;
       initialization = undefined;
-      namespace = undefined;
-      violation = undefined;
-      children.length = 0;
-      stagedEntries.length = 0;
-      staged.length = 0;
+      clearPluginContributionStage(stage);
     }
   }
 
