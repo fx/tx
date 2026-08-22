@@ -103,7 +103,7 @@ The dialogs provider registers one local structural service under `dialogs`. Its
 
 ## Tasks
 
-- [x] Add the minimal generic plugin registry
+- [x] Add the minimal generic plugin registry (PR #38)
   - [x] Extend `PluginAPI` in `src/plugin.ts` with generic registration and plural lookup methods while keeping the module types-only
   - [x] Stage, commit, discard, and snapshot opaque keyed values in `src/plugins.ts` alongside existing contributions
   - [x] Preserve exact key matching, value identity, registration order, repeated entries, frozen snapshots, and empty results without runtime value validation
