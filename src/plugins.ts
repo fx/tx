@@ -132,6 +132,7 @@ export async function initializePlugins(
     }
 
     let staging = true;
+    let initialization: Promise<void> | undefined;
     let namespace: Command | undefined;
     let violation: Error | undefined;
     const children: PluginDefinition[] = [];
@@ -150,13 +151,21 @@ export async function initializePlugins(
       new Error(
         `Plugin ${identity.name} cannot ${contribution} after initialization`,
       );
+    const ensureStaging = (contribution: string): void => {
+      if (
+        !staging ||
+        (initialization && Bun.peek.status(initialization) !== "pending")
+      ) {
+        throw closed(contribution);
+      }
+    };
     const api: PluginAPI = Object.freeze({
       identity,
       env,
       context: { ...processContext, env, plugin: identity },
       dependencies,
       command(build: (namespace: Command) => void) {
-        if (!staging) throw closed("register commands");
+        ensureStaging("register commands");
         if (!namespace) {
           const claimError = namespaceClaimError(identity);
           if (claimError) reject(claimError);
@@ -176,16 +185,16 @@ export async function initializePlugins(
         }
       },
       plugin(child: PluginDefinition) {
-        if (!staging) throw closed("contribute plugins");
+        ensureStaging("contribute plugins");
         children.push(child);
       },
       register<T>(key: string, value: T) {
-        if (!staging) throw closed("register values");
+        ensureStaging("register values");
         stagedEntries.push([key, value]);
       },
       registrations,
       update(participant: UpdateParticipant) {
-        if (!staging) throw closed("contribute update participants");
+        ensureStaging("contribute update participants");
         staged.push(Object.freeze({ identity, participant }));
       },
       updaters,
@@ -196,8 +205,11 @@ export async function initializePlugins(
       if (typeof plugin !== "function") {
         throw new Error("Plugin definition must load a function");
       }
-      const initialization = plugin(api);
-      if (isThenable(initialization)) await initialization;
+      const result = plugin(api);
+      if (isThenable(result)) {
+        initialization = Promise.resolve(result);
+        await initialization;
+      }
       staging = false;
       if (violation) throw violation;
 
@@ -221,6 +233,7 @@ export async function initializePlugins(
       failures.push(Object.freeze({ identity, message: errorMessage(error) }));
     } finally {
       staging = false;
+      initialization = undefined;
       namespace = undefined;
       violation = undefined;
       children.length = 0;

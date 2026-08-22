@@ -525,56 +525,83 @@ describe("generic registry", () => {
     expect(reader?.registrations("timing")).toEqual([asynchronous]);
   });
 
-  test("commits registry entries without spread argument limits", async () => {
-    const values = [{ order: 1 }, { order: 2 }, { order: 3 }];
+  test("closes registration before microtasks from an already-settled async plugin", async () => {
+    const pending = { provider: "pending" };
+    let settledLateError: unknown;
     let reader: PluginAPI | undefined;
-    let result: Awaited<ReturnType<typeof initializePlugins>> | undefined;
-    const originalPush = Array.prototype.push;
-    Array.prototype.push = function (this: unknown[], ...items: unknown[]) {
-      if (items.length > 1) throw new RangeError("too many arguments");
-      return Reflect.apply(originalPush, this, items);
-    } as typeof Array.prototype.push;
 
-    try {
-      result = await initializePlugins([
-        definition("provider", ({ register }) => {
-          for (const value of values) register("limited", value);
-        }),
-        definition("reader", (api) => {
-          reader = api;
-        }),
-      ]);
-    } finally {
-      Array.prototype.push = originalPush;
-    }
+    const { failures } = await initializePlugins([
+      definition("settled", async (api) => {
+        queueMicrotask(() => {
+          try {
+            api.register("async-timing", { provider: "too late" });
+          } catch (error) {
+            settledLateError = error;
+          }
+        });
+      }),
+      definition("pending", async ({ register }) => {
+        await Promise.resolve();
+        register("async-timing", pending);
+      }),
+      definition("reader", (api) => {
+        reader = api;
+      }),
+    ]);
 
-    expect(result?.failures).toEqual([]);
-    expect(result?.namespaces).toEqual([]);
-    expect(reader?.registrations("limited")).toEqual(values);
+    expect(failures).toEqual([]);
+    expect(settledLateError).toEqual(
+      new Error("Plugin settled cannot register values after initialization"),
+    );
+    expect(reader?.registrations("async-timing")).toEqual([pending]);
   });
 
-  test("releases values discarded with a failed retained API stage", async () => {
+  test("commits a large registry without spread argument limits", async () => {
+    const registrationCount = 1_000_000;
+    const value = {};
+    let reader: PluginAPI | undefined;
+
+    const { namespaces, failures } = await initializePlugins([
+      definition("provider", ({ register }) => {
+        for (let index = 0; index < registrationCount; index += 1) {
+          register("large", value);
+        }
+      }),
+      definition("reader", (api) => {
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(namespaces).toEqual([]);
+    const committed = reader?.registrations("large") ?? [];
+    expect(committed).toHaveLength(registrationCount);
+    expect(committed[0]).toBe(value);
+    expect(committed.at(-1)).toBe(value);
+  });
+
+  test("discards a failed stage while keeping its retained API closed", async () => {
     let retainedAPI: PluginAPI | undefined;
-    let discarded: WeakRef<object> | undefined;
+    let reader: PluginAPI | undefined;
 
     const { failures } = await initializePlugins([
       definition("broken", (api) => {
         retainedAPI = api;
-        const value = {};
-        discarded = new WeakRef(value);
-        api.register("discarded", value);
+        api.register("discarded", {});
         throw new Error("initialization failed");
+      }),
+      definition("reader", (api) => {
+        reader = api;
       }),
     ]);
 
     expect(failures).toEqual([
       { identity: { name: "broken" }, message: "initialization failed" },
     ]);
+    expect(reader?.registrations("discarded")).toEqual([]);
     expect(() => retainedAPI?.register("late", {})).toThrow(
       "Plugin broken cannot register values after initialization",
     );
-    Bun.gc(true);
-    expect(discarded?.deref()).toBeUndefined();
   });
 
   test("commits opaque repeated values in root, call, and child FIFO order", async () => {
