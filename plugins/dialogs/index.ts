@@ -1,3 +1,5 @@
+const streams: typeof import("node:stream") = require("node:stream");
+
 import type { PluginDefinition } from "@fx/tx/plugin";
 
 type SelectOption<T> = {
@@ -18,132 +20,146 @@ type Selection<T> =
   | { readonly type: "selected"; readonly value: T }
   | { readonly type: "cancelled" };
 
-type FailureTracker = {
-  readonly promise: Promise<unknown>;
-  readonly value: () => unknown;
-  fail(error: unknown): void;
-};
+type Failure =
+  | { readonly present: false }
+  | { readonly present: true; readonly reason: unknown };
 
-function failureTracker(): FailureTracker {
-  const failed = Promise.withResolvers<unknown>();
-  let failure: unknown;
-  return {
-    promise: failed.promise,
-    value: () => failure,
-    fail(error) {
-      if (failure !== undefined) return;
-      failure = error;
-      failed.resolve(error);
-    },
-  };
+class FailureTracker {
+  readonly #failed = Promise.withResolvers<unknown>();
+  readonly promise = this.#failed.promise;
+  failure: Failure = { present: false };
+
+  fail(reason: unknown): void {
+    if (this.failure.present) return;
+    this.failure = { present: true, reason };
+    this.#failed.resolve(reason);
+  }
 }
 
-function controlledOutput(stderr: NodeJS.WriteStream): {
-  readonly stream: NodeJS.WriteStream;
+class InputAdapter extends streams.PassThrough {
+  readonly isTTY = true;
   readonly failures: FailureTracker;
-} {
-  const failures = failureTracker();
-  const stream = new Proxy(stderr, {
-    get(target, property) {
-      if (property === "write") {
-        return (...args: unknown[]) => {
-          try {
-            return Reflect.apply(target.write, target, args);
-          } catch (error) {
-            failures.fail(error);
-            const callback = args.at(-1);
-            if (typeof callback === "function") {
-              queueMicrotask(() => Reflect.apply(callback, undefined, []));
-            }
-            return true;
-          }
-        };
+  readonly #source: NodeJS.ReadStream;
+  readonly #forward: (chunk: string | Buffer) => boolean;
+  readonly #captureError: (error: unknown) => void;
+  #ownedReferences = 0;
+  #rawModeMayBeEnabled = false;
+
+  constructor(source: NodeJS.ReadStream, failures: FailureTracker) {
+    super();
+    this.#source = source;
+    this.failures = failures;
+    this.#forward = this.write.bind(this);
+    this.#captureError = failures.fail.bind(failures);
+    source.on("data", this.#forward);
+    source.on("error", this.#captureError);
+  }
+
+  setRawMode(enabled: boolean): this {
+    if (enabled) {
+      this.#rawModeMayBeEnabled = true;
+      try {
+        this.#source.setRawMode(true);
+      } catch (error) {
+        this.failures.fail(error);
+        throw error;
       }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-  return { stream, failures };
+    } else {
+      this.#disableRawMode();
+    }
+    return this;
+  }
+
+  ref(): this {
+    try {
+      this.#source.ref();
+      this.#ownedReferences++;
+    } catch (error) {
+      this.failures.fail(error);
+      throw error;
+    }
+    return this;
+  }
+
+  unref(): this {
+    this.#releaseReference();
+    return this;
+  }
+
+  cleanup(): void {
+    this.#source.removeListener("data", this.#forward);
+    this.#source.removeListener("error", this.#captureError);
+    for (let attempt = 0; this.#rawModeMayBeEnabled && attempt < 2; attempt++) {
+      this.#disableRawMode();
+    }
+    for (let attempt = 0; this.#ownedReferences > 0 && attempt < 3; attempt++) {
+      this.unref();
+    }
+    this.destroy();
+  }
+
+  #disableRawMode(): void {
+    if (!this.#rawModeMayBeEnabled) return;
+    try {
+      this.#source.setRawMode(false);
+      this.#rawModeMayBeEnabled = false;
+    } catch (error) {
+      this.failures.fail(error);
+    }
+  }
+
+  #releaseReference(): void {
+    if (this.#ownedReferences === 0) return;
+    try {
+      this.#source.unref();
+      this.#ownedReferences--;
+    } catch (error) {
+      this.failures.fail(error);
+    }
+  }
 }
 
-function controlledInput(stdin: NodeJS.ReadStream): {
-  readonly stream: NodeJS.ReadStream;
-  cleanup(): unknown;
-} {
-  const initialReadableListeners = new Set(stdin.listeners("readable"));
-  const failures = failureTracker();
-  let references = 0;
-  let rawModeNeedsRestoring = false;
-  let stream: NodeJS.ReadStream;
+class OutputAdapter extends streams.Writable {
+  readonly failures: FailureTracker;
+  readonly #source: NodeJS.WriteStream;
+  readonly #captureError: (error: unknown) => void;
 
-  stream = new Proxy(stdin, {
-    get(target, property) {
-      if (property === "ref") {
-        return () => {
-          target.ref();
-          references++;
-          return stream;
-        };
-      }
-      if (property === "unref") {
-        return () => {
-          try {
-            target.unref();
-            references = Math.max(0, references - 1);
-          } catch (error) {
-            failures.fail(error);
-          }
-          return stream;
-        };
-      }
-      if (property === "setRawMode") {
-        return (enabled: boolean) => {
-          if (enabled) {
-            rawModeNeedsRestoring = true;
-            target.setRawMode(true);
-          } else {
-            try {
-              target.setRawMode(false);
-              rawModeNeedsRestoring = false;
-            } catch (error) {
-              failures.fail(error);
-            }
-          }
-          return stream;
-        };
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
+  constructor(source: NodeJS.WriteStream, failures: FailureTracker) {
+    super();
+    this.#source = source;
+    this.failures = failures;
+    this.#captureError = failures.fail.bind(failures);
+    source.on("error", this.#captureError);
+  }
 
-  return {
-    stream,
-    cleanup() {
-      for (const listener of stdin.listeners("readable")) {
-        if (!initialReadableListeners.has(listener)) {
-          stdin.removeListener("readable", listener);
-        }
-      }
-      if (rawModeNeedsRestoring) {
-        try {
-          stdin.setRawMode(false);
-          rawModeNeedsRestoring = false;
-        } catch (error) {
-          failures.fail(error);
-        }
-      }
-      while (references > 0) {
-        references--;
-        try {
-          stdin.unref();
-        } catch (error) {
-          failures.fail(error);
-        }
-      }
-      return failures.value();
-    },
-  };
+  cleanup(): void {
+    this.#source.removeListener("error", this.#captureError);
+    this.destroy();
+  }
+
+  override _write(
+    chunk: Buffer,
+    encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    let completed = false;
+    const complete = (error?: Error | null) => {
+      if (completed) return;
+      completed = true;
+      if (error) this.failures.fail(error);
+      callback();
+    };
+    try {
+      this.#source.write(chunk, encoding, complete);
+    } catch (error) {
+      this.failures.fail(error);
+      complete();
+    }
+  }
+}
+
+function recordFailure(current: Failure, candidate: Failure): Failure {
+  return current.present ? current : candidate;
 }
 
 const definition: PluginDefinition = {
@@ -165,14 +181,16 @@ const definition: PluginDefinition = {
           }
 
           const selected = Promise.withResolvers<Selection<T>>();
-          const input = controlledInput(context.stdin);
-          const output = controlledOutput(context.stderr);
+          const terminalFailures = new FailureTracker();
+          const input = new InputAdapter(context.stdin, terminalFailures);
+          const output = new OutputAdapter(context.stderr, terminalFailures);
+          let failure: Failure = { present: false };
 
           const Select = () => {
             const active = react.useRef(0);
             const [activeIndex, setActiveIndex] = react.useState(0);
-            ink.useInput((input, key) => {
-              if (key.escape || (key.ctrl && input === "c")) {
+            ink.useInput((value, key) => {
+              if (key.escape || (key.ctrl && value === "c")) {
                 selected.resolve({ type: "cancelled" });
               } else if (key.return) {
                 const option = options[active.current] as SelectOption<T>;
@@ -203,70 +221,56 @@ const definition: PluginDefinition = {
             );
           };
 
-          const renderer = ink.render(react.createElement(ink.Text, null, ""), {
-            stdout: output.stream,
-            stdin: input.stream,
-            stderr: output.stream,
-            exitOnCtrlC: false,
-            interactive: true,
-            patchConsole: false,
-          });
-          const previousBeforeExitListeners = new Set(
-            process.listeners("beforeExit"),
-          );
-          const exited = renderer.waitUntilExit();
-          const rendererBeforeExitListeners = process
-            .listeners("beforeExit")
-            .filter((listener) => !previousBeforeExitListeners.has(listener));
+          let renderer: ReturnType<typeof ink.render> | undefined;
+          let exited: Promise<unknown> | undefined;
           let outcome: Selection<T> | undefined;
-          let primaryFailure: unknown;
-
           try {
+            renderer = ink.render(react.createElement(ink.Text, null, ""), {
+              stdout: output as unknown as NodeJS.WriteStream,
+              stdin: input as unknown as NodeJS.ReadStream,
+              stderr: output as unknown as NodeJS.WriteStream,
+              exitOnCtrlC: false,
+              interactive: true,
+              patchConsole: false,
+            });
+            exited = renderer.waitUntilExit();
             renderer.rerender(react.createElement(Select));
-            outcome = await Promise.race([
+            const result = await Promise.race([
               selected.promise,
-              exited.then(
-                () => {
-                  throw new Error(
-                    "Select renderer exited before the dialog completed",
-                  );
-                },
-                (error: unknown) => {
-                  throw error;
-                },
-              ),
-              output.failures.promise.then((error) => {
+              exited,
+              terminalFailures.promise.then((error) => {
                 throw error;
               }),
             ]);
-          } catch (error) {
-            primaryFailure = error;
-          } finally {
-            let unmounted = false;
-            try {
-              renderer.unmount();
-              unmounted = true;
-            } catch (error) {
-              primaryFailure ??= error;
+            if (result === undefined) {
+              throw new Error(
+                "Select renderer exited before the dialog completed",
+              );
             }
-            if (unmounted) {
+            outcome = result as Selection<T>;
+          } catch (reason) {
+            failure = { present: true, reason };
+          } finally {
+            if (renderer) {
+              try {
+                renderer.unmount();
+              } catch (reason) {
+                failure = recordFailure(failure, { present: true, reason });
+              }
+            }
+            if (exited) {
               try {
                 await exited;
-              } catch (error) {
-                primaryFailure ??= error;
-              }
-            } else {
-              for (const listener of rendererBeforeExitListeners) {
-                process.removeListener("beforeExit", listener);
+              } catch (reason) {
+                failure = recordFailure(failure, { present: true, reason });
               }
             }
-            const outputFailure = output.failures.value();
-            primaryFailure ??= outputFailure;
-            const inputFailure = input.cleanup();
-            primaryFailure ??= inputFailure;
+            input.cleanup();
+            output.cleanup();
+            failure = recordFailure(failure, terminalFailures.failure);
           }
 
-          if (primaryFailure !== undefined) throw primaryFailure;
+          if (failure.present) throw failure.reason;
           return outcome?.type === "selected" ? outcome.value : undefined;
         },
       };

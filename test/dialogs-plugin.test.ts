@@ -20,6 +20,7 @@ class TerminalInput extends PassThrough {
   readonly rawModes: boolean[] = [];
   refs = 0;
   unrefs = 0;
+  activeReferences = 0;
   failRawMode = false;
   failRawModeDisable = false;
   failRawModeDisableOnce = false;
@@ -42,6 +43,7 @@ class TerminalInput extends PassThrough {
 
   ref(): this {
     this.refs++;
+    this.activeReferences++;
     return this;
   }
 
@@ -51,6 +53,7 @@ class TerminalInput extends PassThrough {
       this.failUnrefOnce = false;
       throw new Error("unref cleanup failed");
     }
+    this.activeReferences = Math.max(0, this.activeReferences - 1);
     return this;
   }
 }
@@ -69,6 +72,31 @@ class CapturedOutput extends PassThrough {
 
   text(): string {
     return this.output;
+  }
+}
+
+class AsyncFailingOutput extends CapturedOutput {
+  failure: "callback" | "event" | undefined;
+
+  override _transform(
+    chunk: Buffer,
+    encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    if (this.failure === "callback") {
+      this.failure = undefined;
+      queueMicrotask(() => callback(new Error("async output callback failed")));
+      return;
+    }
+    if (this.failure === "event") {
+      this.failure = undefined;
+      queueMicrotask(() => {
+        this.emit("error", new Error("async output event failed"));
+        callback();
+      });
+      return;
+    }
+    super._transform(chunk, encoding, callback);
   }
 }
 
@@ -360,7 +388,10 @@ describe("bundled dialogs provider", () => {
     for (const kind of ["render", "interaction"] as const) {
       const stdin = new TerminalInput();
       const stderr = new CapturedOutput();
-      if (kind === "interaction") stdin.failRawMode = true;
+      if (kind === "interaction") {
+        stdin.failRawMode = true;
+        stdin.failUnrefOnce = true;
+      }
       const option: SelectOption<number> =
         kind === "render"
           ? (Object.defineProperty({ value: 1 }, "label", {
@@ -377,7 +408,8 @@ describe("bundled dialogs provider", () => {
       );
       if (kind === "interaction") {
         expect(result.stdin.refs).toBe(1);
-        expect(result.stdin.unrefs).toBe(1);
+        expect(result.stdin.unrefs).toBe(2);
+        expect(result.stdin.activeReferences).toBe(0);
         expect(result.stdin.rawModes).toEqual([true, false]);
         expect(result.stdin.listenerCount("readable")).toBe(0);
       }
@@ -398,51 +430,6 @@ describe("bundled dialogs provider", () => {
       expect(result.failure).toBeInstanceOf(Error);
       expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
     }
-  });
-
-  test("rejects renderer unmount failure without retaining its listener", async () => {
-    const beforeExitListeners = process.listenerCount("beforeExit");
-    const stdin = new TerminalInput();
-    const stderr = new CapturedOutput();
-    let writableStateFailures = 0;
-    Object.defineProperty(stderr, "writableEnded", {
-      configurable: true,
-      get() {
-        if (writableStateFailures > 0) {
-          writableStateFailures--;
-          throw new Error("renderer unmount failed");
-        }
-        return false;
-      },
-    });
-    let failure: unknown;
-    const running = main(
-      ["choose"],
-      [
-        dialogsPlugin,
-        consumer(async (dialogs) => {
-          try {
-            await dialogs.select({
-              message: "Unmount",
-              options: [{ label: "One", value: 1 }],
-            });
-          } catch (error) {
-            failure = error;
-          }
-        }),
-      ],
-      context(stdin, stderr),
-    );
-    await until(() => stdin.rawModes.includes(true));
-    writableStateFailures = 1;
-    stdin.write("\r");
-
-    expect(await running).toBe(0);
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toContain("renderer unmount failed");
-    expect(stdin.refs).toBe(stdin.unrefs);
-    expect(stdin.listenerCount("readable")).toBe(0);
-    expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
   });
 
   test("rejects synchronous terminal teardown failures after cleanup", async () => {
@@ -500,6 +487,82 @@ describe("bundled dialogs provider", () => {
     }
   });
 
+  test("captures asynchronous output callback and error-event failures", async () => {
+    for (const kind of ["callback", "event"] as const) {
+      const stdin = new TerminalInput();
+      const stderr = new AsyncFailingOutput();
+      let failure: unknown;
+      const running = main(
+        ["choose"],
+        [
+          dialogsPlugin,
+          consumer(async (dialogs) => {
+            try {
+              await dialogs.select({
+                message: "Async output",
+                options: [
+                  { label: "One", value: 1 },
+                  { label: "Two", value: 2 },
+                ],
+              });
+            } catch (error) {
+              failure = error;
+            }
+          }),
+        ],
+        context(stdin, stderr),
+      );
+      await until(() => stdin.rawModes.includes(true));
+      stderr.failure = kind;
+      stdin.write("[B");
+
+      expect(await running).toBe(0);
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain(
+        kind === "callback"
+          ? "async output callback failed"
+          : "async output event failed",
+      );
+      expect(stdin.activeReferences).toBe(0);
+      expect(stdin.listenerCount("readable")).toBe(0);
+    }
+  });
+
+  test("preserves undefined and null primary failures over cleanup failures", async () => {
+    for (const reason of [undefined, null] as const) {
+      const stdin = new TerminalInput();
+      const stderr = new CapturedOutput();
+      let caught:
+        | { readonly present: true; readonly reason: unknown }
+        | undefined;
+      const running = main(
+        ["choose"],
+        [
+          dialogsPlugin,
+          consumer(async (dialogs) => {
+            try {
+              await dialogs.select({
+                message: "Sentinel",
+                options: [{ label: "One", value: 1 }],
+              });
+            } catch (error) {
+              caught = { present: true, reason: error };
+            }
+          }),
+        ],
+        context(stdin, stderr),
+      );
+      await until(() => stdin.rawModes.includes(true));
+      stdin.failRawModeDisableOnce = true;
+      stdin.emit("error", reason);
+
+      expect(await running).toBe(0);
+      expect(caught).toEqual({ present: true, reason });
+      expect(stdin.activeReferences).toBe(0);
+      expect(stdin.listenerCount("readable")).toBe(0);
+    }
+  });
+
   test("restores raw mode, listeners, refs, and flushed output before settling", async () => {
     const result = await runSelection(
       [
@@ -519,7 +582,11 @@ describe("bundled dialogs provider", () => {
 
   test("supports sequential reuse without retaining process or input listeners", async () => {
     const beforeExitListeners = process.listenerCount("beforeExit");
+    const unrelatedBeforeExit = () => {};
+    process.on("beforeExit", unrelatedBeforeExit);
     const stdin = new TerminalInput();
+    const unrelatedReadable = () => {};
+    stdin.on("readable", unrelatedReadable);
     const stderr = new CapturedOutput();
     const commandContext = context(stdin, stderr);
     const values: (number | undefined)[] = [];
@@ -545,13 +612,18 @@ describe("bundled dialogs provider", () => {
       commandContext,
     );
     await until(() => stdin.rawModes.length === 1);
-    stdin.write("\r");
+    stdin.emit("data", Buffer.from("\r"));
     await until(() => stdin.rawModes.length === 3);
-    stdin.write("\r");
+    stdin.emit("data", Buffer.from("\r"));
 
     expect(await running).toBe(0);
     expect(values).toEqual([1, 2]);
     expect(stdin.rawModes).toEqual([true, false, true, false]);
+    expect(stdin.activeReferences).toBe(0);
+    expect(stdin.listeners("readable")).toContain(unrelatedReadable);
+    expect(process.listeners("beforeExit")).toContain(unrelatedBeforeExit);
+    stdin.removeListener("readable", unrelatedReadable);
+    process.removeListener("beforeExit", unrelatedBeforeExit);
     expect(stdin.listenerCount("readable")).toBe(0);
     expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
   });
