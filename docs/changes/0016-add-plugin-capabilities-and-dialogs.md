@@ -5,7 +5,7 @@
 Add the smallest generic runtime registry that lets plugins contribute opaque capabilities, then use it for a bundled dialogs provider whose initial surface is only a single-choice `select`. [Plugin System: Generic Registry](../specs/plugin-system/index.md#generic-registry) owns the host contract, and [Dialogs](../specs/dialogs/) owns the provider's observable behavior.
 
 **Specs:** [Plugin System](../specs/plugin-system/), [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** —
 
 ## Motivation
@@ -59,7 +59,7 @@ registrations<T>(key: string): readonly T[]
 
 `src/plugins.ts` stores committed registry entries and gives each initializing plugin a local staged list. Registration is accepted only during initialization. Successful initialization appends the stage in call order; failure drops it. A read filters currently committed entries by exact key and returns a frozen snapshot, so a read during initialization sees earlier commits but not the caller's own stage or later plugins. Commands read at execution time to see every successful initialization.
 
-The dialogs provider registers one local structural service under `dialogs`. Its `select` implementation renders through the injected terminal streams, resolves the selected opaque value or `undefined` for cancellation, and completes renderer cleanup before settling. A controlled test consumer proves that the registry crosses plugin boundaries without creating a production namespace solely for demonstration.
+The dialogs provider registers one local structural service under `dialogs`. Its `select` implementation renders through the injected terminal streams, resolves the selected opaque value or `undefined` for cancellation, and completes renderer cleanup before settling. Normal cleanup restores the terminal's prior input state and completes renderer teardown; if an injected raw-mode disable, unref, or renderer unmount method persistently throws, the provider retries finitely and rejects with the first applicable cleanup failure because restoration or teardown through that method is impossible. A controlled test consumer proves that the registry crosses plugin boundaries without creating a production namespace solely for demonstration.
 
 ### Decisions
 
@@ -111,15 +111,15 @@ The dialogs provider registers one local structural service under `dialogs`. Its
   - [x] Update `docs/manual/plugins.md` with the implemented registry contract
   - [x] Verify 100% coverage and `bun run check`
 
-- [ ] Add the bundled dialogs provider after the registry lands
-  - [ ] Add a namespace-free provider under `plugins/dialogs/` and compose it in `cli.ts`
-  - [ ] Implement the local structural `Dialogs` capability with only `select`, using injected React, Ink, standard input, and standard error
-  - [ ] Reject empty options and non-interactive streams before rendering; preserve order, duplicates, and opaque value identity
-  - [ ] Implement clamped Up/Down movement, Enter selection, Escape and Ctrl-C cancellation, and complete cleanup before settlement
-  - [ ] Add controlled Bun tests covering rendering, streams, navigation, selection, cancellation, invalid requests, failures, cleanup, and consumption through the registry
-  - [ ] Keep the bundled plugin boundary and coverage gates passing
-  - [ ] Document the implemented provider for plugin authors without promising a public dialogs package
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Add the bundled dialogs provider after the registry lands (PR #39)
+  - [x] Add a namespace-free provider under `plugins/dialogs/` and compose it in `cli.ts`
+  - [x] Implement the local structural `Dialogs` capability with only `select`, using injected React, Ink, standard input, and standard error
+  - [x] Reject empty options and non-interactive streams before rendering; preserve order, duplicates, and opaque value identity
+  - [x] Implement clamped Up/Down movement, Enter selection, Escape and Ctrl-C cancellation, and complete cleanup before settlement
+  - [x] Add controlled Bun tests covering rendering, streams, navigation, selection, cancellation, invalid requests, failures, cleanup, and consumption through the registry
+  - [x] Keep the bundled plugin boundary and coverage gates passing
+  - [x] Document the implemented provider for plugin authors without promising a public dialogs package
+  - [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 

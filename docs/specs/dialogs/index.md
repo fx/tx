@@ -4,7 +4,7 @@
 
 `tx` provides a bundled dialogs plugin for terminal interactions shared by its own plugins. The plugin MUST expose dialogs through the generic registry rather than through core vocabulary, and its initial contract MUST contain only a single-choice `select` dialog.
 
-The desired behavior is not implemented. [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) plans the minimal generic registry and the first dialogs provider.
+The behavior is implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md): the generic registry carries the internal capability, and the namespace-free bundled provider supplies `select`.
 
 ## Background
 
@@ -104,7 +104,8 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - The dialog MUST read input only from the dialogs provider's injected standard-input stream.
 - The dialog MUST render its prompt and options only to the dialogs provider's injected standard-error stream, leaving standard output untouched for the consumer's data.
 - `select` MUST reject before rendering when its injected standard-input or standard-error stream is not an interactive terminal; it MUST NOT provide a non-interactive fallback.
-- `select` MUST restore terminal state and finish unmounting before its promise settles after selection, cancellation, or rendering failure.
+- `select` MUST restore the injected terminal's prior state and finish unmounting before its promise settles after selection, cancellation, or rendering failure.
+- If an injected `setRawMode(false)`, `unref()`, or renderer `unmount()` method persistently throws, restoration or teardown through that API is impossible: `select` MUST retry finitely, reject with the first applicable cleanup failure, and permit incomplete restoration or renderer teardown only on that exceptional path rather than hanging indefinitely.
 - A rendering or interaction failure MUST reject `select` and MUST NOT terminate the process directly.
 
 #### Scenario: Command output remains clean
@@ -162,3 +163,4 @@ The provider registers during initialization. Consumers read committed values in
 | Date | Change | Document |
 |------|--------|----------|
 | 2026-08-22 | Initial desired dialogs capability and select behavior | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
+| 2026-08-22 | Implemented the namespace-free bundled provider and single-choice `select` | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |

@@ -149,6 +149,7 @@ describe("main", () => {
     expect(defaultPlugins.map((plugin) => plugin.identity.name)).toEqual([
       "marketplace",
       "update",
+      "dialogs",
       "executable",
     ]);
   });
@@ -350,6 +351,7 @@ describe("entrypoint", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain("Usage: tx [options] [command]");
     expect(result.stdout.toString()).toContain("marketplace");
+    expect(result.stdout.toString()).not.toContain("dialogs");
     expect(result.stderr.toString()).toBe("");
   });
 

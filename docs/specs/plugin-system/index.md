@@ -8,7 +8,7 @@ The approved target architecture is implemented: the core is generic, the market
 
 [Update Participation](#update-participation) is implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md): the contribution, its staging, and its public types are in the shipped `@fx/tx/plugin` contract, and no bundled plugin contributes a participant yet. The marketplace version and pin behavior that section points at is not implemented, and is planned by [Change 0013](../../changes/0013-update-installed-marketplaces.md) and [Change 0014](../../changes/0014-pin-marketplace-versions.md).
 
-[Generic Registry](#generic-registry) is implemented as the first task in [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). Its first concrete provider, specified by [Dialogs](../dialogs/), remains planned and unimplemented.
+[Generic Registry](#generic-registry) and its first concrete provider are implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). The provider remains outside core under `plugins/dialogs/`, registers the opaque `dialogs` capability, and follows the separately owned [Dialogs](../dialogs/) contract.
 
 ## Requirements
 
@@ -545,3 +545,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-07 | Gave the marketplace plugin the update participant and version labels, and extended non-interactive execution from cloning to every operation against a remote | [0013-update-installed-marketplaces](../../changes/0013-update-installed-marketplaces.md) |
 | 2026-08-07 | Gave the marketplace plugin marketplace version pins, including the source suffix and the commands that change one | [0014-pin-marketplace-versions](../../changes/0014-pin-marketplace-versions.md) |
 | 2026-08-22 | Specified the minimal opaque plugin registry used by the bundled dialogs provider | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
+| 2026-08-22 | Implemented the registry's namespace-free bundled dialogs provider without adding dialog vocabulary to core | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
