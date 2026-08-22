@@ -223,6 +223,7 @@ const definition: PluginDefinition = {
 
           let renderer: ReturnType<typeof ink.render> | undefined;
           let exited: Promise<unknown> | undefined;
+          let rendererBeforeExitListeners: NodeJS.BeforeExitListener[] = [];
           let outcome: Selection<T> | undefined;
           try {
             renderer = ink.render(react.createElement(ink.Text, null, ""), {
@@ -233,7 +234,13 @@ const definition: PluginDefinition = {
               interactive: true,
               patchConsole: false,
             });
+            const previousBeforeExitListeners = new Set(
+              process.listeners("beforeExit"),
+            );
             exited = renderer.waitUntilExit();
+            rendererBeforeExitListeners = process
+              .listeners("beforeExit")
+              .filter((listener) => !previousBeforeExitListeners.has(listener));
             renderer.rerender(react.createElement(Select));
             const result = await Promise.race([
               selected.promise,
@@ -251,18 +258,24 @@ const definition: PluginDefinition = {
           } catch (reason) {
             failure = { present: true, reason };
           } finally {
+            let unmounted = false;
             if (renderer) {
               try {
                 renderer.unmount();
+                unmounted = true;
               } catch (reason) {
                 failure = recordFailure(failure, { present: true, reason });
               }
             }
-            if (exited) {
+            if (unmounted && exited) {
               try {
                 await exited;
               } catch (reason) {
                 failure = recordFailure(failure, { present: true, reason });
+              }
+            } else {
+              for (const listener of rendererBeforeExitListeners) {
+                process.removeListener("beforeExit", listener);
               }
             }
             input.cleanup();

@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
 import { main } from "../src/cli.ts";
-import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
+import type {
+  CommandContext,
+  CoreDependencies,
+  PluginDefinition,
+} from "../src/plugin.ts";
+import { coreDependencies } from "../src/plugins.ts";
 
 type SelectOption<T> = {
   readonly label: string;
@@ -624,6 +629,76 @@ describe("bundled dialogs provider", () => {
     expect(process.listeners("beforeExit")).toContain(unrelatedBeforeExit);
     stdin.removeListener("readable", unrelatedReadable);
     process.removeListener("beforeExit", unrelatedBeforeExit);
+    expect(stdin.listenerCount("readable")).toBe(0);
+    expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
+  });
+
+  test("rejects without waiting for renderer exit when unmount throws", async () => {
+    const beforeExitListeners = process.listenerCount("beforeExit");
+    const unrelatedBeforeExit = () => {};
+    process.on("beforeExit", unrelatedBeforeExit);
+    const stdin = new TerminalInput();
+    const unrelatedReadable = () => {};
+    stdin.on("readable", unrelatedReadable);
+    const stderr = new CapturedOutput();
+    let failure: unknown;
+    const unsettled = new Promise<never>(() => {});
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        const rendererBeforeExit = () => {};
+        return {
+          ...renderer,
+          unmount() {
+            renderer.unmount();
+            throw new Error("renderer unmount failed");
+          },
+          waitUntilExit() {
+            process.on("beforeExit", rendererBeforeExit);
+            return unsettled;
+          },
+        };
+      },
+    };
+    const dependencies: CoreDependencies = { ...coreDependencies, ink };
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          try {
+            await dialogs.select({
+              message: "Unmount failure",
+              options: [{ label: "One", value: 1 }],
+            });
+          } catch (error) {
+            failure = error;
+          }
+        }),
+      ],
+      context(stdin, stderr),
+      dependencies,
+    );
+    await until(() => stderr.text().includes("One"));
+    stdin.emit("error", new Error("dialog failed"));
+
+    const timeout = Symbol("timeout");
+    const result = await Promise.race([
+      running,
+      new Promise<typeof timeout>((resolve) =>
+        setTimeout(() => resolve(timeout), 100),
+      ),
+    ]);
+    expect(result).toBe(0);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe("dialog failed");
+    expect(stdin.rawModes).toEqual([true, false]);
+    expect(stdin.activeReferences).toBe(0);
+    expect(stdin.listeners("readable")).toEqual([unrelatedReadable]);
+    expect(process.listeners("beforeExit")).toContain(unrelatedBeforeExit);
+    process.removeListener("beforeExit", unrelatedBeforeExit);
+    stdin.removeListener("readable", unrelatedReadable);
     expect(stdin.listenerCount("readable")).toBe(0);
     expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
   });
