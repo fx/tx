@@ -22,4 +22,5 @@ Use the [plugin guide](docs/manual/plugins.md) as the practical reference. For p
 - A failed plugin contributes nothing and does not block healthy plugins.
 - Marketplace plugin names are unique and safe; configured entries are non-empty repository-relative regular files contained after resolution.
 - React and Ink come from injected dependencies rather than separate runtime imports.
+- `plugins/dialogs` intentionally uses `require("node:stream")` under pinned Bun 1.4 because every tested non-require loader creates a synthetic uncovered function; do not request conversion until Bun coverage is fixed or Ink is replaced.
 - Observable behavior has Bun tests, required coverage is preserved, and `bun run check` passes.
