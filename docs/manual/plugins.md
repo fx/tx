@@ -161,9 +161,74 @@ const plugin: Plugin = ({ command, context }) => {
 export default plugin;
 ```
 
-The initialization API provides an immutable `identity`, read-only `env`, the generic command `context`, shared `dependencies`, `command(build)`, `plugin(childDefinition)`, `update(participant)`, and `updaters()`. The `context` carries process streams, environment, working directory, and the owning plugin identity, so your actions keep whatever signature you give them. Loading, initialization, and command actions may be asynchronous.
+The initialization API provides an immutable `identity`, read-only `env`, the generic command `context`, shared `dependencies`, `command(build)`, `plugin(childDefinition)`, `register(key, value)`, `registrations(key)`, `update(participant)`, and `updaters()`. The `context` carries process streams, environment, working directory, and the owning plugin identity, so your actions keep whatever signature you give them. Loading, initialization, and command actions may be asynchronous.
 
 Use the initialization API's `dependencies.react` and `dependencies.ink` instead of importing separate runtime copies; the injected values share the host's React and Ink instances and include tx and dependency version metadata.
+
+## Share generic capabilities
+
+Plugins can share plugin-owned runtime capabilities through an opaque keyed registry. The public contract is generic and types-only:
+
+```ts
+register<T>(key: string, value: T): void
+registrations<T>(key: string): readonly T[]
+```
+
+A provider declares its own structural type and registers a value during initialization. Registering a value alone claims no command namespace:
+
+```ts
+import type { Plugin } from "@fx/tx/plugin";
+
+interface Formatter {
+  format(value: string): string;
+}
+
+const formatter: Formatter = {
+  format: (value) => value.toUpperCase(),
+};
+
+const plugin: Plugin = ({ register }) => {
+  register<Formatter>("formatter", formatter);
+};
+
+export default plugin;
+```
+
+A consumer declares a compatible local type. Read inside a command action when the consumer needs every provider, because initialization is still in progress while plugins are loading:
+
+```ts
+import type { Plugin } from "@fx/tx/plugin";
+
+interface Formatter {
+  format(value: string): string;
+}
+
+const plugin: Plugin = ({ command, context, registrations }) => {
+  command((namespace) => {
+    namespace.action(() => {
+      const formatters: readonly Formatter[] =
+        registrations<Formatter>("formatter");
+      for (const formatter of formatters) {
+        context.stdout.write(`${formatter.format("hello")}\n`);
+      }
+    });
+  });
+};
+
+export default plugin;
+```
+
+The registry contract is deliberately small:
+
+- Keys are opaque strings compared by exact equality. tx does not reserve, trim, normalize, parse, namespace, or version them.
+- Values are stored and returned unchanged. tx does not inspect, validate, invoke, clone, or freeze them; the generic type supplied to `registrations<T>` is only the caller's TypeScript assertion.
+- Every registration remains present, including repeated keys and repeated values. Reads return matching values in FIFO commit order, preserving each plugin's call order and root/child initialization order; there is no selected winner.
+- Each read returns a fresh frozen array containing entries committed at that moment. An absent key returns a fresh frozen empty array. The array is immutable, but the opaque values inside it are untouched.
+- A plugin's registrations are staged with its commands, children, and update participants. They commit only after successful initialization and namespace validation; any loading, initialization, export, namespace, or collision failure discards the complete stage.
+- A read during initialization sees earlier committed plugins only, not the reader's own stage or later plugins. A command-time read sees every provider that initialized successfully.
+- Registration closes when initialization finishes. Calling `register` later is rejected; committed entries are append-only.
+
+This is not a dependency-injection or lifecycle container. There are no schemas, runtime type checks, key factories, symbol tokens, ownership metadata, collision or duplicate policy, provider selection, priorities, versions, scopes, unregistering, replacement, subscriptions, events, factories, dependency ordering, disposal, health checks, retries, or caching. Failures while a consumer uses an opaque value belong to that consumer.
 
 ## One namespace per plugin
 
@@ -222,7 +287,7 @@ Every byte the host writes — root help, generated usage, version, and parser d
 
 Usage that a user did not ask for — the help printed because your namespace needed a subcommand and got none — prints on standard error and counts as a failure, exactly as `tx` with no arguments prints root help on standard error and exits non-zero.
 
-Commands, child definitions, and update participants contributed during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, namespace validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed on standard error and do not change the exit code of the command you ran, so a dispatched command keeps its own exit code — an action that succeeds still exits `0` — while a broken plugin is reported alongside it. Because a failed plugin claims nothing, invoking the namespace it would have owned is reported as an unknown command.
+Commands, child definitions, generic registry entries, and update participants contributed during initialization form one atomic contribution; registration ends when initialization does. If loading, initialization, export validation, namespace validation, or collision detection fails, the plugin contributes nothing while healthy plugins can still dispatch. Failures are diagnosed on standard error and do not change the exit code of the command you ran, so a dispatched command keeps its own exit code — an action that succeeds still exits `0` — while a broken plugin is reported alongside it. Because a failed plugin claims nothing, invoking the namespace it would have owned is reported as an unknown command.
 
 ## Bundled plugins
 

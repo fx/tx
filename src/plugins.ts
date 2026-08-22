@@ -99,7 +99,14 @@ export async function initializePlugins(
   >;
   const dependencies = options.dependencies ?? coreDependencies;
   const namespaces: PluginNamespace[] = [];
+  const entries: Array<readonly [string, unknown]> = [];
   const participants: UpdateParticipation[] = [];
+  const registrations = <T>(key: string): readonly T[] =>
+    Object.freeze(
+      entries
+        .filter(([registeredKey]) => registeredKey === key)
+        .map(([, value]) => value as T),
+    );
   // Read at call time rather than delivered at initialization: a plugin that
   // reads during its own initialization sees only what was committed before
   // it, which is why a driver reads them when its command runs.
@@ -128,6 +135,7 @@ export async function initializePlugins(
     let namespace: Command | undefined;
     let violation: Error | undefined;
     const children: PluginDefinition[] = [];
+    const stagedEntries: Array<readonly [string, unknown]> = [];
     const staged: UpdateParticipation[] = [];
     /**
      * Remember a registration violation as well as raising it. A plugin that
@@ -171,6 +179,11 @@ export async function initializePlugins(
         if (!staging) throw closed("contribute plugins");
         children.push(child);
       },
+      register<T>(key: string, value: T) {
+        if (!staging) throw closed("register values");
+        stagedEntries.push([key, value]);
+      },
+      registrations,
       update(participant: UpdateParticipant) {
         if (!staging) throw closed("contribute update participants");
         staged.push(Object.freeze({ identity, participant }));
@@ -200,6 +213,7 @@ export async function initializePlugins(
         namespaces.push(contribution);
       }
 
+      entries.push(...stagedEntries);
       participants.push(...staged);
       queue.push(...children);
     } catch (error) {

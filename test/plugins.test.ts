@@ -457,7 +457,7 @@ describe("initializePlugins", () => {
     expect(namespaceNames(namespaces)).toEqual(["first", "last"]);
   });
 
-  test("closes command, child, and participant contribution after initialization", async () => {
+  test("closes command, child, registry, and participant contribution after initialization", async () => {
     let retainedAPI: PluginAPI | undefined;
 
     const { failures } = await initializePlugins([
@@ -474,6 +474,9 @@ describe("initializePlugins", () => {
     expect(() => retainedAPI?.plugin(definition("late", () => {}))).toThrow(
       "Plugin retained cannot contribute plugins after initialization",
     );
+    expect(() => retainedAPI?.register("late", {})).toThrow(
+      "Plugin retained cannot register values after initialization",
+    );
     expect(() => retainedAPI?.update(stubParticipant())).toThrow(
       "Plugin retained cannot contribute update participants after initialization",
     );
@@ -485,6 +488,150 @@ describe("initializePlugins", () => {
       namespaces: [],
       failures: [],
     });
+  });
+});
+
+describe("generic registry", () => {
+  test("commits opaque repeated values in root, call, and child FIFO order", async () => {
+    let calls = 0;
+    const opaque = () => {
+      calls += 1;
+    };
+    const repeated = { kind: "repeated" };
+    const beta = { kind: "beta" };
+    const child = { kind: "child" };
+    let reader: PluginAPI | undefined;
+
+    const { namespaces, failures } = await initializePlugins([
+      definition("alpha", (api) => {
+        api.register("capability", opaque);
+        api.register("capability", repeated);
+        api.register("capability", repeated);
+        api.register(" Capability ", "spaced");
+        api.register("Capability", "capitalized");
+        api.register("", "empty");
+        api.plugin(
+          definition(
+            "alpha-child",
+            ({ register }) => register("capability", child),
+            api.identity,
+          ),
+        );
+      }),
+      definition("beta", (api) => {
+        api.register("capability", beta);
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(namespaces).toEqual([]);
+    const first = reader?.registrations("capability") ?? [];
+    const second = reader?.registrations("capability") ?? [];
+    expect(first).toEqual([opaque, repeated, repeated, beta, child]);
+    expect(first[0]).toBe(opaque);
+    expect(first[1]).toBe(repeated);
+    expect(first[2]).toBe(repeated);
+    expect(calls).toBe(0);
+    expect(Object.isFrozen(opaque)).toBe(false);
+    expect(Object.isFrozen(repeated)).toBe(false);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first);
+    expect(reader?.registrations(" Capability ")).toEqual(["spaced"]);
+    expect(reader?.registrations("Capability")).toEqual(["capitalized"]);
+    expect(reader?.registrations("")).toEqual(["empty"]);
+    expect(reader?.registrations("capability ")).toEqual([]);
+    const absent = reader?.registrations("absent") ?? [];
+    expect(absent).toEqual([]);
+    expect(Object.isFrozen(absent)).toBe(true);
+    expect(reader?.registrations("absent")).not.toBe(absent);
+  });
+
+  test("reads committed snapshots at initialization and command call time", async () => {
+    const early = { provider: "early" };
+    const own = { provider: "consumer" };
+    const late = { provider: "late" };
+    let duringInitialization: readonly unknown[] = [];
+    let duringCommand: readonly unknown[] = [];
+
+    const { namespaces, failures } = await initializePlugins([
+      definition("early", ({ register }) => register("timing", early)),
+      definition("consumer", ({ command, register, registrations }) => {
+        register("timing", own);
+        duringInitialization = registrations("timing");
+        command((namespace) =>
+          namespace.action(() => {
+            duringCommand = registrations("timing");
+          }),
+        );
+      }),
+      definition("late", ({ register }) => register("timing", late)),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(duringInitialization).toEqual([early]);
+    expect(Object.isFrozen(duringInitialization)).toBe(true);
+    expect(
+      await dispatch(
+        createRootProgram(coreDependencies, namespaces),
+        ["consumer"],
+        captureContext(),
+      ),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(duringInitialization).toEqual([early]);
+    expect(duringCommand).toEqual([early, own, late]);
+    expect(Object.isFrozen(duringCommand)).toBe(true);
+  });
+
+  test("discards entries with every other staged contribution on all failures", async () => {
+    let childLoaded = false;
+    let reader: PluginAPI | undefined;
+    const accepted = { accepted: true };
+
+    const { namespaces, failures } = await initializePlugins([
+      definition(
+        "broken",
+        ({ command, plugin, register, update, identity }) => {
+          command(() => {});
+          plugin({
+            identity: { name: "ghost", parent: identity },
+            load: () => {
+              childLoaded = true;
+              return () => {};
+            },
+          });
+          register("atomic", { broken: true });
+          update(stubParticipant());
+          throw new Error("initialization failed");
+        },
+      ),
+      definition("notes", ({ command, register }) => {
+        command(() => {});
+        register("atomic", accepted);
+      }),
+      definition("notes", ({ command, register }) => {
+        command(() => {});
+        register("atomic", { collision: true });
+      }),
+      definition("renamed", ({ command, register }) => {
+        register("atomic", { renamed: true });
+        command((namespace) => namespace.name("other"));
+      }),
+      definition("reader", (api) => {
+        reader = api;
+      }),
+    ]);
+
+    expect(failures.map(({ identity }) => identity.name)).toEqual([
+      "broken",
+      "notes",
+      "renamed",
+    ]);
+    expect(namespaceNames(namespaces)).toEqual(["notes"]);
+    expect(childLoaded).toBe(false);
+    expect(reader?.registrations("atomic")).toEqual([accepted]);
+    expect(reader?.updaters()).toEqual([]);
   });
 });
 
