@@ -43,7 +43,7 @@ class TerminalInput extends PassThrough {
   }
 }
 
-class TerminalOutput extends PassThrough {
+class CapturedOutput extends PassThrough {
   readonly columns = 80;
   readonly rows = 24;
   private output = "";
@@ -60,21 +60,12 @@ class TerminalOutput extends PassThrough {
   }
 }
 
-function streamText(stream: PassThrough): () => string {
-  let output = "";
-  stream.on("data", (chunk) => {
-    output += chunk.toString();
-  });
-  return () => output;
-}
-
 type TestContext = CommandContext & {
   stdoutText(): string;
 };
 
-function context(stdin: TerminalInput, stderr: TerminalOutput): TestContext {
-  const stdout = new PassThrough();
-  const stdoutText = streamText(stdout);
+function context(stdin: TerminalInput, stderr: CapturedOutput): TestContext {
+  const stdout = new CapturedOutput();
   return {
     cwd: "/work",
     env: {},
@@ -82,7 +73,7 @@ function context(stdin: TerminalInput, stderr: TerminalOutput): TestContext {
     stdout: stdout as unknown as NodeJS.WriteStream,
     stderr: stderr as unknown as NodeJS.WriteStream,
     plugin: { name: "test" },
-    stdoutText,
+    stdoutText: () => stdout.text(),
   };
 }
 
@@ -119,12 +110,12 @@ async function runSelection<T>(
 ): Promise<{
   readonly value: T | undefined;
   readonly stdin: TerminalInput;
-  readonly stderr: TerminalOutput;
+  readonly stderr: CapturedOutput;
   readonly stdout: string;
   readonly exitCode: number;
 }> {
   const stdin = new TerminalInput();
-  const stderr = new TerminalOutput();
+  const stderr = new CapturedOutput();
   const commandContext = context(stdin, stderr);
   const stdoutText = commandContext.stdoutText;
   let value: T | undefined;
@@ -147,10 +138,38 @@ async function runSelection<T>(
   return { value, stdin, stderr, stdout: stdoutText(), exitCode };
 }
 
+async function runRejected<T>(
+  options: readonly SelectOption<T>[],
+  stdin = new TerminalInput(),
+  stderr = new CapturedOutput(),
+): Promise<{
+  readonly exitCode: number;
+  readonly failure: unknown;
+  readonly stdin: TerminalInput;
+  readonly stderr: CapturedOutput;
+}> {
+  let failure: unknown;
+  const exitCode = await main(
+    ["choose"],
+    [
+      dialogsPlugin,
+      consumer(async (dialogs) => {
+        try {
+          await dialogs.select({ message: "Failure", options });
+        } catch (error) {
+          failure = error;
+        }
+      }),
+    ],
+    context(stdin, stderr),
+  );
+  return { exitCode, failure, stdin, stderr };
+}
+
 describe("bundled dialogs provider", () => {
   test("registers one namespace-free capability without changing root help", async () => {
     const stdin = new TerminalInput();
-    const stderr = new TerminalOutput();
+    const stderr = new CapturedOutput();
     const commandContext = context(stdin, stderr);
     let registrations: readonly Dialogs[] = [];
     const inspector: PluginDefinition = {
@@ -172,7 +191,7 @@ describe("bundled dialogs provider", () => {
     expect(registrations).toHaveLength(1);
     expect(Object.keys(registrations[0] ?? {})).toEqual(["select"]);
 
-    const helpContext = context(new TerminalInput(), new TerminalOutput());
+    const helpContext = context(new TerminalInput(), new CapturedOutput());
     const helpText = helpContext.stdoutText;
     expect(await main(["--help"], [dialogsPlugin], helpContext)).toBe(0);
     expect(helpText()).not.toContain("dialogs");
@@ -234,7 +253,7 @@ describe("bundled dialogs provider", () => {
     ["Ctrl-C", ""],
   ])("cancels with %s and lets the command continue", async (_label, input) => {
     const stdin = new TerminalInput();
-    const stderr = new TerminalOutput();
+    const stderr = new CapturedOutput();
     const commandContext = context(stdin, stderr);
     const stdoutText = commandContext.stdoutText;
     const running = main(
@@ -263,46 +282,30 @@ describe("bundled dialogs provider", () => {
 
   test("rejects empty and non-TTY requests before rendering or terminal changes", async () => {
     for (const [options, stdin, stderr] of [
-      [[], new TerminalInput(), new TerminalOutput()],
+      [[], new TerminalInput(), new CapturedOutput()],
       [
         [{ label: "One", value: 1 }],
         new TerminalInput(false),
-        new TerminalOutput(),
+        new CapturedOutput(),
       ],
       [
         [{ label: "One", value: 1 }],
         new TerminalInput(),
-        new TerminalOutput(false),
+        new CapturedOutput(false),
       ],
     ] as const) {
-      let failure: unknown;
-      const commandContext = context(stdin, stderr);
-      expect(
-        await main(
-          ["choose"],
-          [
-            dialogsPlugin,
-            consumer(async (dialogs) => {
-              try {
-                await dialogs.select({ message: "Invalid", options });
-              } catch (error) {
-                failure = error;
-              }
-            }),
-          ],
-          commandContext,
-        ),
-      ).toBe(0);
-      expect(failure).toBeInstanceOf(Error);
-      expect(stderr.text()).toBe("");
-      expect(stdin.rawModes).toEqual([]);
+      const result = await runRejected(options, stdin, stderr);
+      expect(result.exitCode).toBe(0);
+      expect(result.failure).toBeInstanceOf(Error);
+      expect(result.stderr.text()).toBe("");
+      expect(result.stdin.rawModes).toEqual([]);
     }
   });
 
   test("rejects render and interaction failures without exiting", async () => {
     for (const kind of ["render", "interaction"] as const) {
       const stdin = new TerminalInput();
-      const stderr = new TerminalOutput();
+      const stderr = new CapturedOutput();
       if (kind === "interaction") stdin.failRawMode = true;
       const option: SelectOption<number> =
         kind === "render"
@@ -312,26 +315,10 @@ describe("bundled dialogs provider", () => {
               },
             }) as SelectOption<number>)
           : { label: "One", value: 1 };
-      let failure: unknown;
-      const commandContext = context(stdin, stderr);
-      expect(
-        await main(
-          ["choose"],
-          [
-            dialogsPlugin,
-            consumer(async (dialogs) => {
-              try {
-                await dialogs.select({ message: "Failure", options: [option] });
-              } catch (error) {
-                failure = error;
-              }
-            }),
-          ],
-          commandContext,
-        ),
-      ).toBe(0);
-      expect(failure).toBeInstanceOf(Error);
-      expect((failure as Error).message).toContain(
+      const result = await runRejected([option], stdin, stderr);
+      expect(result.exitCode).toBe(0);
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).toContain(
         kind === "render" ? "render failed" : "raw mode failed",
       );
       expect(process.exitCode).not.toBe(1);
@@ -355,9 +342,10 @@ describe("bundled dialogs provider", () => {
     expect(result.stderr.text()).toContain("> Two");
   });
 
-  test("supports sequential reuse of the same injected terminal", async () => {
+  test("supports sequential reuse without retaining process or input listeners", async () => {
+    const beforeExitListeners = process.listenerCount("beforeExit");
     const stdin = new TerminalInput();
-    const stderr = new TerminalOutput();
+    const stderr = new CapturedOutput();
     const commandContext = context(stdin, stderr);
     const values: (number | undefined)[] = [];
     const running = main(
@@ -390,5 +378,6 @@ describe("bundled dialogs provider", () => {
     expect(values).toEqual([1, 2]);
     expect(stdin.rawModes).toEqual([true, false, true, false]);
     expect(stdin.listenerCount("readable")).toBe(0);
+    expect(process.listenerCount("beforeExit")).toBe(beforeExitListeners);
   });
 });

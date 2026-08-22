@@ -36,19 +36,18 @@ const definition: PluginDefinition = {
             );
           }
 
-          let complete!: (selection: Selection<T>) => void;
-          const selected = new Promise<Selection<T>>((resolve) => {
-            complete = resolve;
-          });
-
           const Select = () => {
             const [active, setActive] = react.useState(0);
+            const { exit } = ink.useApp();
             ink.useInput((input, key) => {
               if (key.escape || (key.ctrl && input === "c")) {
-                complete({ type: "cancelled" });
+                exit({ type: "cancelled" } satisfies Selection<T>);
               } else if (key.return) {
-                const option = options[active];
-                if (option) complete({ type: "selected", value: option.value });
+                const option = options[active] as SelectOption<T>;
+                exit({
+                  type: "selected",
+                  value: option.value,
+                } satisfies Selection<T>);
               } else if (key.upArrow) {
                 setActive((index) => Math.max(0, index - 1));
               } else if (key.downArrow) {
@@ -70,48 +69,16 @@ const definition: PluginDefinition = {
             );
           };
 
-          let renderer: ReturnType<typeof ink.render> | undefined;
-          let primaryFailure: unknown;
-          try {
-            renderer = ink.render(react.createElement(Select), {
-              stdout: context.stderr,
-              stdin: context.stdin,
-              stderr: context.stderr,
-              exitOnCtrlC: false,
-              interactive: true,
-              patchConsole: false,
-            });
-
-            const outcome = await Promise.race([
-              selected,
-              renderer.waitUntilExit().then(
-                () => {
-                  throw new Error(
-                    "Select renderer exited before the dialog completed",
-                  );
-                },
-                (error: unknown) => {
-                  throw error;
-                },
-              ),
-            ]);
-            renderer.unmount();
-            await renderer.waitUntilExit();
-            renderer = undefined;
-            return outcome.type === "selected" ? outcome.value : undefined;
-          } catch (error) {
-            primaryFailure = error;
-          } finally {
-            if (renderer) {
-              try {
-                renderer.unmount();
-                await renderer.waitUntilExit();
-              } catch (cleanupFailure) {
-                primaryFailure ??= cleanupFailure;
-              }
-            }
-          }
-          throw primaryFailure;
+          const renderer = ink.render(react.createElement(Select), {
+            stdout: context.stderr,
+            stdin: context.stdin,
+            stderr: context.stderr,
+            exitOnCtrlC: false,
+            interactive: true,
+            patchConsole: false,
+          });
+          const outcome = (await renderer.waitUntilExit()) as Selection<T>;
+          return outcome.type === "selected" ? outcome.value : undefined;
         },
       };
 
