@@ -556,8 +556,43 @@ describe("generic registry", () => {
     expect(reader?.registrations("async-timing")).toEqual([pending]);
   });
 
+  test("closes registration against a settled Promise subclass result", async () => {
+    class PluginPromise extends Promise<void> {}
+
+    let lateError: unknown;
+    let reader: PluginAPI | undefined;
+    const { failures } = await initializePlugins([
+      definition("subclass", (api) => {
+        queueMicrotask(() => {
+          try {
+            api.register("subclass-timing", {});
+          } catch (error) {
+            lateError = error;
+          }
+        });
+        return PluginPromise.resolve();
+      }),
+      definition("reader", (api) => {
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(lateError).toEqual(
+      new Error("Plugin subclass cannot register values after initialization"),
+    );
+    expect(reader?.registrations("subclass-timing")).toEqual([]);
+  });
+
   test("commits a large registry without spread argument limits", async () => {
-    const registrationCount = 1_000_000;
+    const registrationCount = 700_000;
+    const spreadProbe = new Array(registrationCount);
+    expect(() => {
+      const target: unknown[] = [];
+      target.push(...spreadProbe);
+    }).toThrow(RangeError);
+    spreadProbe.length = 0;
+
     const value = {};
     let reader: PluginAPI | undefined;
 
@@ -580,28 +615,35 @@ describe("generic registry", () => {
     expect(committed.at(-1)).toBe(value);
   });
 
-  test("discards a failed stage while keeping its retained API closed", async () => {
+  test("releases a value held only by a failed retained API stage", async () => {
     let retainedAPI: PluginAPI | undefined;
-    let reader: PluginAPI | undefined;
+    let finalized = false;
+    const registry = new FinalizationRegistry(() => {
+      finalized = true;
+    });
 
     const { failures } = await initializePlugins([
-      definition("broken", (api) => {
+      definition("failed", (api) => {
         retainedAPI = api;
-        api.register("discarded", {});
+        const value = {};
+        registry.register(value, undefined);
+        api.register("released", value);
         throw new Error("initialization failed");
-      }),
-      definition("reader", (api) => {
-        reader = api;
       }),
     ]);
 
     expect(failures).toEqual([
-      { identity: { name: "broken" }, message: "initialization failed" },
+      { identity: { name: "failed" }, message: "initialization failed" },
     ]);
-    expect(reader?.registrations("discarded")).toEqual([]);
     expect(() => retainedAPI?.register("late", {})).toThrow(
-      "Plugin broken cannot register values after initialization",
+      "Plugin failed cannot register values after initialization",
     );
+
+    for (let attempt = 0; attempt < 20 && !finalized; attempt += 1) {
+      Bun.gc(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    expect(finalized).toBe(true);
   });
 
   test("commits opaque repeated values in root, call, and child FIFO order", async () => {

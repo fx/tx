@@ -1,3 +1,4 @@
+import { types as utilTypes } from "node:util";
 import type { Command } from "commander";
 import * as commander from "commander";
 import * as ink from "ink";
@@ -207,8 +208,9 @@ export async function initializePlugins(
       }
       const result = plugin(api);
       if (isThenable(result)) {
-        initialization = Promise.resolve(result);
-        await initialization;
+        const awaited = Promise.resolve(result);
+        initialization = utilTypes.isPromise(result) ? result : awaited;
+        await awaited;
       }
       staging = false;
       if (violation) throw violation;
