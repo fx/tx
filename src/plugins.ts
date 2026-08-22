@@ -196,7 +196,8 @@ export async function initializePlugins(
       if (typeof plugin !== "function") {
         throw new Error("Plugin definition must load a function");
       }
-      await plugin(api);
+      const initialization = plugin(api);
+      if (isThenable(initialization)) await initialization;
       staging = false;
       if (violation) throw violation;
 
@@ -213,12 +214,18 @@ export async function initializePlugins(
         namespaces.push(contribution);
       }
 
-      entries.push(...stagedEntries);
-      participants.push(...staged);
-      queue.push(...children);
+      for (const entry of stagedEntries) entries.push(entry);
+      for (const participation of staged) participants.push(participation);
+      for (const child of children) queue.push(child);
     } catch (error) {
-      staging = false;
       failures.push(Object.freeze({ identity, message: errorMessage(error) }));
+    } finally {
+      staging = false;
+      namespace = undefined;
+      violation = undefined;
+      children.length = 0;
+      stagedEntries.length = 0;
+      staged.length = 0;
     }
   }
 

@@ -492,6 +492,91 @@ describe("initializePlugins", () => {
 });
 
 describe("generic registry", () => {
+  test("closes synchronous registration before queued microtasks while awaiting asynchronous plugins", async () => {
+    const asynchronous = { provider: "asynchronous" };
+    let syncLateError: unknown;
+    let reader: PluginAPI | undefined;
+
+    const { failures } = await initializePlugins([
+      definition("synchronous", (api) => {
+        queueMicrotask(() => {
+          try {
+            api.register("timing", { provider: "too late" });
+          } catch (error) {
+            syncLateError = error;
+          }
+        });
+      }),
+      definition("asynchronous", async ({ register }) => {
+        await Promise.resolve();
+        register("timing", asynchronous);
+      }),
+      definition("reader", (api) => {
+        reader = api;
+      }),
+    ]);
+
+    expect(failures).toEqual([]);
+    expect(syncLateError).toEqual(
+      new Error(
+        "Plugin synchronous cannot register values after initialization",
+      ),
+    );
+    expect(reader?.registrations("timing")).toEqual([asynchronous]);
+  });
+
+  test("commits registry entries without spread argument limits", async () => {
+    const values = [{ order: 1 }, { order: 2 }, { order: 3 }];
+    let reader: PluginAPI | undefined;
+    let result: Awaited<ReturnType<typeof initializePlugins>> | undefined;
+    const originalPush = Array.prototype.push;
+    Array.prototype.push = function (this: unknown[], ...items: unknown[]) {
+      if (items.length > 1) throw new RangeError("too many arguments");
+      return Reflect.apply(originalPush, this, items);
+    } as typeof Array.prototype.push;
+
+    try {
+      result = await initializePlugins([
+        definition("provider", ({ register }) => {
+          for (const value of values) register("limited", value);
+        }),
+        definition("reader", (api) => {
+          reader = api;
+        }),
+      ]);
+    } finally {
+      Array.prototype.push = originalPush;
+    }
+
+    expect(result?.failures).toEqual([]);
+    expect(result?.namespaces).toEqual([]);
+    expect(reader?.registrations("limited")).toEqual(values);
+  });
+
+  test("releases values discarded with a failed retained API stage", async () => {
+    let retainedAPI: PluginAPI | undefined;
+    let discarded: WeakRef<object> | undefined;
+
+    const { failures } = await initializePlugins([
+      definition("broken", (api) => {
+        retainedAPI = api;
+        const value = {};
+        discarded = new WeakRef(value);
+        api.register("discarded", value);
+        throw new Error("initialization failed");
+      }),
+    ]);
+
+    expect(failures).toEqual([
+      { identity: { name: "broken" }, message: "initialization failed" },
+    ]);
+    expect(() => retainedAPI?.register("late", {})).toThrow(
+      "Plugin broken cannot register values after initialization",
+    );
+    Bun.gc(true);
+    expect(discarded?.deref()).toBeUndefined();
+  });
+
   test("commits opaque repeated values in root, call, and child FIFO order", async () => {
     let calls = 0;
     const opaque = () => {

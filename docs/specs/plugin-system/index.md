@@ -8,7 +8,7 @@ The approved target architecture is implemented: the core is generic, the market
 
 [Update Participation](#update-participation) is implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md): the contribution, its staging, and its public types are in the shipped `@fx/tx/plugin` contract, and no bundled plugin contributes a participant yet. The marketplace version and pin behavior that section points at is not implemented, and is planned by [Change 0013](../../changes/0013-update-installed-marketplaces.md) and [Change 0014](../../changes/0014-pin-marketplace-versions.md).
 
-[Generic Registry](#generic-registry) is desired but not implemented. [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) plans the minimal registry and its first concrete provider, specified by [Dialogs](../dialogs/).
+[Generic Registry](#generic-registry) is implemented as the first task in [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). Its first concrete provider, specified by [Dialogs](../dialogs/), remains planned and unimplemented.
 
 ## Requirements
 

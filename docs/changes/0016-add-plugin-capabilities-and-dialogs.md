@@ -103,13 +103,13 @@ The dialogs provider registers one local structural service under `dialogs`. Its
 
 ## Tasks
 
-- [ ] Add the minimal generic plugin registry
-  - [ ] Extend `PluginAPI` in `src/plugin.ts` with generic registration and plural lookup methods while keeping the module types-only
-  - [ ] Stage, commit, discard, and snapshot opaque keyed values in `src/plugins.ts` alongside existing contributions
-  - [ ] Preserve exact key matching, value identity, registration order, repeated entries, frozen snapshots, and empty results without runtime value validation
-  - [ ] Cover root and child ordering, snapshot timing, atomic failure drop, late registration, repeated entries, namespace-free providers, and packed external type consumption in tests
-  - [ ] Update `docs/manual/plugins.md` with the implemented registry contract
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Add the minimal generic plugin registry
+  - [x] Extend `PluginAPI` in `src/plugin.ts` with generic registration and plural lookup methods while keeping the module types-only
+  - [x] Stage, commit, discard, and snapshot opaque keyed values in `src/plugins.ts` alongside existing contributions
+  - [x] Preserve exact key matching, value identity, registration order, repeated entries, frozen snapshots, and empty results without runtime value validation
+  - [x] Cover root and child ordering, snapshot timing, atomic failure drop, late registration, repeated entries, namespace-free providers, and packed external type consumption in tests
+  - [x] Update `docs/manual/plugins.md` with the implemented registry contract
+  - [x] Verify 100% coverage and `bun run check`
 
 - [ ] Add the bundled dialogs provider after the registry lands
   - [ ] Add a namespace-free provider under `plugins/dialogs/` and compose it in `cli.ts`
