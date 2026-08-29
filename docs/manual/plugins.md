@@ -235,6 +235,13 @@ This is not a dependency-injection or lifecycle container. There are no schemas,
 The namespace-free bundled dialogs provider registers one internal capability under the exact opaque key `dialogs`. Its current local structural shape is:
 
 ```ts
+type TextField = {
+  readonly type: "text"
+  readonly name: string
+  readonly message: string
+  readonly initialValue?: string
+}
+
 type Dialogs = {
   input(request: {
     readonly message: string
@@ -245,8 +252,15 @@ type Dialogs = {
     readonly options: readonly {
       readonly label: string
       readonly value: T
+      readonly fields?: readonly TextField[]
     }[]
-  }): Promise<T | undefined>
+  }): Promise<
+    | {
+        readonly value: T
+        readonly values: Readonly<Record<string, string>>
+      }
+    | undefined
+  >
 }
 ```
 
@@ -256,11 +270,15 @@ Every dialog requires both the provider's injected standard input and standard e
 
 `select` additionally rejects an empty options list before rendering, and renders the message plus every label in supplied order. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
 
-Up and Down move one position and clamp at the list boundaries. Enter returns the active option's exact value. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored.
+Up and Down move one position and clamp at the list boundaries. Enter resolves `{ value, values }`, where `value` is the active option's exact value. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored.
+
+An option that declares `fields` is user-provided: choosing it collects those values instead of resolving immediately, so one dialog can offer known choices alongside "let me type it". An option declaring no fields is plain and resolves with an empty `values` record, which is how a caller tells the two apart. `select` rejects an option whose field list is empty, or that repeats a field name within itself, before rendering — alongside the empty-options and non-interactive rejections. Field names need only be unique within their own option, and only the chosen option is ever collected.
+
+Fields are collected one at a time in declared order, each using the `input` behavior below, including its own `initialValue`. The next field appears only after the previous one is submitted, and the option list stops accepting navigation and selection the moment collection begins. After the last field, `select` resolves with the chosen option's exact value and one collected value per declared field, keyed by the field's name rather than by its displayed message. Escape or Ctrl-C at any stage cancels the whole dialog, resolves `undefined`, and discards everything already collected: there is no return to the option list, no back-navigation key, and no partial result. A field's `type` is the extension point for a later field kind; `text` is the only one that exists, and there is no form presenting several fields at once, no focus movement, and no validation — a caller validates what it receives.
 
 `input` collects a single line of text. It renders the message and the current value, starting from `initialValue` when one is supplied and from an empty value otherwise. Printable characters append in typed order; input arriving as one multi-character chunk, as a paste does, appends whole, minus any control characters it carries. Backspace drops the last character, counted by code point so a non-BMP character leaves whole, and does nothing when the value is empty. Any other input leaves the value unchanged: arrow keys, Tab, and Ctrl and Alt combinations append nothing. A control sequence Ink does not resolve to a key appends nothing when it arrives in the usual `CSI` form — Ink strips the leading escape before a handler sees it, so that case is recognized by shape, which is also why pasting exactly such a string, `[25~` on its own say, enters nothing. A modifier does not change what Enter, Escape, and Backspace themselves do, matching `select` — Alt-Enter still submits, and a double Escape still cancels. Enter returns the value exactly as entered, including the empty string, so an intentionally empty value stays distinguishable from the `undefined` that Escape and Ctrl-C return. The provider never trims, validates, or transforms the value and never writes it to standard output; whether an empty value is acceptable is the consuming command's decision. There is no caret movement, entry history, completion, or masking.
 
-Both dialogs are built on the same render session and obey the same cleanup contract. Completion, cancellation, rendering failure, and interaction failure all finish renderer unmounting, restoration of the prior terminal/input state, listener teardown, and pending output before the promise fulfills or rejects. If an injected raw-mode disable, unref, or renderer unmount method persistently throws, the provider retries finitely and rejects with the first applicable cleanup failure; restoration or renderer teardown is necessarily best-effort only on that exceptional path. There is no non-interactive fallback, concurrency policy, nested-dialog support, or multi-provider selection policy.
+Both dialogs are built on the same render session and obey the same cleanup contract, and a `select` that collects fields is one such session for the whole interaction: it does not unmount, restore terminal state, or settle between its selection and field stages. Completion, cancellation, rendering failure, and interaction failure all finish renderer unmounting, restoration of the prior terminal/input state, listener teardown, and pending output before the promise fulfills or rejects. If an injected raw-mode disable, unref, or renderer unmount method persistently throws, the provider retries finitely and rejects with the first applicable cleanup failure; restoration or renderer teardown is necessarily best-effort only on that exceptional path. There is no non-interactive fallback, concurrency policy, nested-dialog support, or multi-provider selection policy.
 
 ## One namespace per plugin
 

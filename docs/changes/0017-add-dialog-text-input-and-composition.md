@@ -5,7 +5,7 @@
 Add a text `input` dialog to the bundled dialogs capability and let a `select` option be marked as user-provided, so choosing it collects the values it declares and submits them with the selection. [Dialogs](../specs/dialogs/) owns the observable behavior of both.
 
 **Specs:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** [0016](./0016-add-plugin-capabilities-and-dialogs.md)
 
 ## Motivation
@@ -112,15 +112,15 @@ Because the stages share one render session, cancellation, rendering failure, an
   - [x] Document the standalone `input` dialog in `docs/manual/plugins.md`
   - [x] Verify 100% coverage and `bun run check`
 
-- [ ] Compose select with input through user-provided options
-  - [ ] Add the field declaration to `SelectOption` and change `select` to resolve a result carrying the chosen value and the collected values, updating existing callers and test consumers
-  - [ ] Reject an empty field list or a repeated field name within one option before rendering, alongside the existing empty-options and non-interactive rejections
-  - [ ] Collect a chosen option's fields sequentially in declared order within the same render session, reusing the entry component, threading each field's optional initial value into it, and refusing option navigation once collection has begun
-  - [ ] Resolve after the last field with the option's exact value and one collected value per field name, and resolve `undefined` discarding collected values when the user cancels at any stage
-  - [ ] Add controlled Bun tests for plain versus user-provided results, field ordering, multi-field collection, invalid field declarations, cancellation at each stage, and single-session cleanup
-  - [ ] Document composition and the new select result in `docs/manual/plugins.md`
-  - [ ] Keep the bundled plugin boundary and coverage gates passing
-  - [ ] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
+- [x] Compose select with input through user-provided options
+  - [x] Add the field declaration to `SelectOption` and change `select` to resolve a result carrying the chosen value and the collected values, updating existing callers and test consumers
+  - [x] Reject an empty field list or a repeated field name within one option before rendering, alongside the existing empty-options and non-interactive rejections
+  - [x] Collect a chosen option's fields sequentially in declared order within the same render session, reusing the entry component, threading each field's optional initial value into it, and refusing option navigation once collection has begun
+  - [x] Resolve after the last field with the option's exact value and one collected value per field name, and resolve `undefined` discarding collected values when the user cancels at any stage
+  - [x] Add controlled Bun tests for plain versus user-provided results, field ordering, multi-field collection, invalid field declarations, cancellation at each stage, and single-session cleanup
+  - [x] Document composition and the new select result in `docs/manual/plugins.md`
+  - [x] Keep the bundled plugin boundary and coverage gates passing
+  - [x] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
 
 ## Open Questions
 

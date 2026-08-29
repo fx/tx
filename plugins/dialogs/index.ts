@@ -8,14 +8,27 @@ import type {
   PluginIdentity,
 } from "@fx/tx/plugin";
 
+type TextField = {
+  readonly type: "text";
+  readonly name: string;
+  readonly message: string;
+  readonly initialValue?: string;
+};
+
 type SelectOption<T> = {
   readonly label: string;
   readonly value: T;
+  readonly fields?: readonly TextField[];
 };
 
 type SelectRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
+};
+
+type SelectResult<T> = {
+  readonly value: T;
+  readonly values: Readonly<Record<string, string>>;
 };
 
 type InputRequest = {
@@ -25,7 +38,7 @@ type InputRequest = {
 
 type Dialogs = {
   input(request: InputRequest): Promise<string | undefined>;
-  select<T>(request: SelectRequest<T>): Promise<T | undefined>;
+  select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
 };
 
 type Outcome<T> =
@@ -236,6 +249,31 @@ function requireInteractiveStreams(
   }
 }
 
+/** Rejects a declaration that could never be collected, before any terminal
+ * state changes: an option marked user-provided by an empty field list asks for
+ * nothing, and a repeated name would let one field overwrite another's value.
+ * Names only have to be unique within the option declaring them, because only
+ * one option is ever collected. */
+function requireCollectableFields<T>(
+  options: readonly SelectOption<T>[],
+): void {
+  for (const { fields } of options) {
+    if (!fields) continue;
+    if (fields.length === 0) {
+      throw new Error(
+        "A user-provided select option requires at least one field",
+      );
+    }
+    const names = new Set<string>();
+    for (const { name } of fields) {
+      if (names.has(name)) {
+        throw new Error(`A select option repeats the field name "${name}"`);
+      }
+      names.add(name);
+    }
+  }
+}
+
 /** A control sequence Ink did not resolve to a key, as it reaches a handler:
  * Ink strips the leading escape, leaving the introducer, any parameter and
  * intermediate bytes, and the final byte. Ink reports the sequences it knows
@@ -260,7 +298,9 @@ function printableText(entry: string): string {
   return printable;
 }
 
-type DialogView = () => ReturnType<CoreDependencies["react"]["createElement"]>;
+type DialogElement = ReturnType<CoreDependencies["react"]["createElement"]>;
+
+type DialogView = () => DialogElement;
 
 type DialogSession = {
   readonly context: CommandContext;
@@ -343,6 +383,64 @@ async function runDialog<T>(
   return outcome?.type === "completed" ? outcome.value : undefined;
 }
 
+type EntryProps = {
+  readonly message: string;
+  readonly initialValue: string | undefined;
+  readonly onSubmit: (value: string) => void;
+  readonly onCancel: () => void;
+};
+
+/**
+ * The one text entry implementation, used both by a standalone `input` and by
+ * each field of a chosen user-provided option, so entry, editing, submission,
+ * and cancellation behave identically in either place. Remounting it under a
+ * fresh key starts the next field from that field's own initial value.
+ */
+function createEntry(
+  react: CoreDependencies["react"],
+  ink: CoreDependencies["ink"],
+) {
+  return function Entry({
+    message,
+    initialValue,
+    onSubmit,
+    onCancel,
+  }: EntryProps) {
+    const entered = react.useRef(initialValue ?? "");
+    const [value, setValue] = react.useState(entered.current);
+    ink.useInput((entry, key) => {
+      if (key.escape || (key.ctrl && entry === "c")) {
+        onCancel();
+      } else if (key.return) {
+        onSubmit(entered.current);
+      } else if (key.backspace) {
+        entered.current = Array.from(entered.current).slice(0, -1).join("");
+        setValue(entered.current);
+      } else if (!key.ctrl && !key.meta) {
+        const appended = printableText(entry);
+        if (appended.length > 0) {
+          entered.current += appended;
+          setValue(entered.current);
+        }
+      }
+    });
+
+    return react.createElement(
+      ink.Box,
+      { flexDirection: "column" },
+      react.createElement(ink.Text, null, message),
+      react.createElement(ink.Text, null, value),
+    );
+  };
+}
+
+/** The option a user-provided choice committed to, held while its fields are
+ * collected so a later navigation attempt cannot change what is submitted. */
+type Collection<T> = {
+  readonly value: T;
+  readonly fields: readonly TextField[];
+};
+
 const identity: PluginIdentity = Object.freeze({ name: "dialogs" });
 
 const definition: PluginDefinition = Object.freeze({
@@ -351,41 +449,21 @@ const definition: PluginDefinition = Object.freeze({
     return ({ context, dependencies, register }) => {
       const { react, ink } = dependencies;
       const session: DialogSession = { context, dependencies };
+      const Entry = createEntry(react, ink);
 
       const dialogs: Dialogs = {
         async input({ message, initialValue }: InputRequest) {
           requireInteractiveStreams(context, "An input dialog");
 
           return runDialog<string>(session, "Input", (settle) => {
-            const Input = () => {
-              const entered = react.useRef(initialValue ?? "");
-              const [value, setValue] = react.useState(entered.current);
-              ink.useInput((entry, key) => {
-                if (key.escape || (key.ctrl && entry === "c")) {
-                  settle({ type: "cancelled" });
-                } else if (key.return) {
-                  settle({ type: "completed", value: entered.current });
-                } else if (key.backspace) {
-                  entered.current = Array.from(entered.current)
-                    .slice(0, -1)
-                    .join("");
-                  setValue(entered.current);
-                } else if (!key.ctrl && !key.meta) {
-                  const appended = printableText(entry);
-                  if (appended.length > 0) {
-                    entered.current += appended;
-                    setValue(entered.current);
-                  }
-                }
+            const Input = () =>
+              react.createElement(Entry, {
+                message,
+                initialValue,
+                onSubmit: (value: string) =>
+                  settle({ type: "completed", value }),
+                onCancel: () => settle({ type: "cancelled" }),
               });
-
-              return react.createElement(
-                ink.Box,
-                { flexDirection: "column" },
-                react.createElement(ink.Text, null, message),
-                react.createElement(ink.Text, null, value),
-              );
-            };
             return Input;
           });
         },
@@ -394,18 +472,45 @@ const definition: PluginDefinition = Object.freeze({
           if (options.length === 0) {
             throw new Error("A select dialog requires at least one option");
           }
+          requireCollectableFields(options);
           requireInteractiveStreams(context, "A select dialog");
 
-          return runDialog<T>(session, "Select", (settle) => {
+          return runDialog<SelectResult<T>>(session, "Select", (settle) => {
+            const cancel = () => settle({ type: "cancelled" });
+
             const Select = () => {
               const active = react.useRef(0);
               const [activeIndex, setActiveIndex] = react.useState(0);
+              /** Set the moment a user-provided option is chosen; its presence
+               * is what makes the option list stop accepting input. */
+              const collecting = react.useRef<Collection<T> | undefined>(
+                undefined,
+              );
+              const collected = react.useRef<Record<string, string>>({});
+              const field = react.useRef(0);
+              const [fieldIndex, setFieldIndex] = react.useState(-1);
+
               ink.useInput((value, key) => {
+                // Ink delivers every key parsed out of one chunk in a single
+                // synchronous pass, so this list keeps handling input after the
+                // Enter that began collection. It must decline all of it.
+                if (collecting.current) return;
                 if (key.escape || (key.ctrl && value === "c")) {
-                  settle({ type: "cancelled" });
+                  cancel();
                 } else if (key.return) {
                   const option = options[active.current] as SelectOption<T>;
-                  settle({ type: "completed", value: option.value });
+                  if (option.fields) {
+                    collecting.current = {
+                      value: option.value,
+                      fields: option.fields,
+                    };
+                    setFieldIndex(0);
+                  } else {
+                    settle({
+                      type: "completed",
+                      value: { value: option.value, values: {} },
+                    });
+                  }
                 } else if (key.upArrow) {
                   active.current = Math.max(0, active.current - 1);
                   setActiveIndex(active.current);
@@ -418,17 +523,53 @@ const definition: PluginDefinition = Object.freeze({
                 }
               });
 
-              return react.createElement(
-                ink.Box,
-                { flexDirection: "column" },
-                react.createElement(ink.Text, null, message),
+              const submitField = (entered: string) => {
+                const collection = collecting.current as Collection<T>;
+                const current = collection.fields[field.current] as TextField;
+                collected.current[current.name] = entered;
+                const next = field.current + 1;
+                if (next < collection.fields.length) {
+                  field.current = next;
+                  setFieldIndex(next);
+                } else {
+                  settle({
+                    type: "completed",
+                    value: {
+                      value: collection.value,
+                      values: { ...collected.current },
+                    },
+                  });
+                }
+              };
+
+              const children: DialogElement[] = [
+                react.createElement(ink.Text, { key: "message" }, message),
                 ...options.map((option, index) =>
                   react.createElement(
                     ink.Text,
-                    { key: index },
+                    { key: `option-${index}` },
                     `${index === activeIndex ? ">" : " "} ${option.label}`,
                   ),
                 ),
+              ];
+              if (fieldIndex >= 0) {
+                const collection = collecting.current as Collection<T>;
+                const pending = collection.fields[fieldIndex] as TextField;
+                children.push(
+                  react.createElement(Entry, {
+                    key: `field-${fieldIndex}`,
+                    message: pending.message,
+                    initialValue: pending.initialValue,
+                    onSubmit: submitField,
+                    onCancel: cancel,
+                  }),
+                );
+              }
+
+              return react.createElement(
+                ink.Box,
+                { flexDirection: "column" },
+                ...children,
               );
             };
             return Select;

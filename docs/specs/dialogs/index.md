@@ -4,7 +4,7 @@
 
 `tx` provides a bundled dialogs plugin for terminal interactions shared by its own plugins. The plugin MUST expose dialogs through the generic registry rather than through core vocabulary, and its contract MUST contain only a single-choice `select` dialog and a single-field text `input` dialog, which compose when a select option is marked as user-provided.
 
-[Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) implements the generic registry that carries the internal capability and the namespace-free bundled provider that supplies `select`. [Change 0017](../../changes/0017-add-dialog-text-input-and-composition.md) specifies the text `input` dialog and the user-provided option that composes the two; its first pull request implements the standalone `input` dialog, and the requirements below covering fields and user-provided options describe desired behavior that is not implemented yet.
+[Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) implements the generic registry that carries the internal capability and the namespace-free bundled provider that supplies `select`. [Change 0017](../../changes/0017-add-dialog-text-input-and-composition.md) implements the text `input` dialog and the user-provided option that composes the two. Every requirement below is implemented.
 
 ## Background
 
@@ -284,3 +284,4 @@ The provider registers during initialization. Consumers read committed values in
 | 2026-08-22 | Implemented the namespace-free bundled provider and single-choice `select` | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
 | 2026-08-29 | Desired text `input` dialog, the field model, user-provided select options, and the select result carrying collected values | [0017-add-dialog-text-input-and-composition](../../changes/0017-add-dialog-text-input-and-composition.md) |
 | 2026-08-29 | Implemented the standalone text `input` dialog | [0017-add-dialog-text-input-and-composition](../../changes/0017-add-dialog-text-input-and-composition.md) |
+| 2026-08-29 | Implemented user-provided select options, sequential field collection in one render session, and the `select` result carrying collected values | [0017-add-dialog-text-input-and-composition](../../changes/0017-add-dialog-text-input-and-composition.md) |
