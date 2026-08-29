@@ -12,7 +12,7 @@ specs:
     status: active
   - name: dialogs
     path: specs/dialogs/
-    description: Shared terminal dialogs supplied by a bundled plugin, beginning with single-choice selection.
+    description: Shared terminal dialogs supplied by a bundled plugin: single-choice selection and text input, composed through user-provided options.
     status: active
   - name: updates
     path: specs/updates/
@@ -145,3 +145,11 @@ changes:
     spec: dialogs
     status: complete
     depends_on: []
+  - id: "0017"
+    name: add-dialog-text-input-and-composition
+    path: changes/0017-add-dialog-text-input-and-composition.md
+    description: Add a text input dialog and let a select option be marked as user-provided so choosing it collects and submits the values it declares.
+    spec: dialogs
+    status: draft
+    depends_on:
+      - "0016"

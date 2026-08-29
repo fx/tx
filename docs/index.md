@@ -6,7 +6,7 @@
 |------|-------------|--------|
 | [Architecture](specs/architecture/) | Generic core runtime, neutral composition, packaging, and development conventions for tx. | active |
 | [Plugin System](specs/plugin-system/) | Generic plugin hosting, opaque capability registration, and externalized marketplace-plugin ownership contracts. | active |
-| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, beginning with single-choice selection. | active |
+| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin: single-choice selection and text input, composed through user-provided options. | active |
 | [Updates](specs/updates/) | User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited. | active |
 
 ## Changes
@@ -29,3 +29,4 @@
 | 0014 | [Pin Marketplace Versions](changes/0014-pin-marketplace-versions.md) | [Updates](specs/updates/) | draft | 0013 |
 | 0015 | [Update the tx Executable](changes/0015-update-the-tx-executable.md) | [Updates](specs/updates/) | complete | 0012 |
 | 0016 | [Add Plugin Capabilities and Dialogs](changes/0016-add-plugin-capabilities-and-dialogs.md) | [Dialogs](specs/dialogs/) | complete | — |
+| 0017 | [Add Dialog Text Input and Composition](changes/0017-add-dialog-text-input-and-composition.md) | [Dialogs](specs/dialogs/) | draft | 0016 |
