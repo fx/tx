@@ -236,14 +236,24 @@ function requireInteractiveStreams(
   }
 }
 
+/** A control sequence Ink did not resolve to a key, as it reaches a handler:
+ * Ink strips the leading escape, leaving the introducer, any parameter and
+ * intermediate bytes, and the final byte. Ink reports the sequences it knows
+ * as an empty entry, so anything still shaped like one is an unrecognized key
+ * rather than typed text. */
+const unresolvedControlSequence = /^\[\[?[\x20-\x3f]*[\x40-\x7e]$/;
+
 /** Everything a chunk carries that a terminal would display, in order. Control
  * characters drop out, so a pasted line survives while the newline ending it
- * does not. */
+ * does not, and an unrecognized control sequence contributes nothing at all
+ * rather than leaking its payload. */
 function printableText(entry: string): string {
+  if (unresolvedControlSequence.test(entry)) return "";
   let printable = "";
   for (const character of entry) {
     const code = character.codePointAt(0) as number;
-    if (code >= 0x20 && code !== 0x7f) printable += character;
+    const control = code < 0x20 || (code >= 0x7f && code <= 0x9f);
+    if (!control) printable += character;
   }
   return printable;
 }
@@ -263,6 +273,7 @@ type DialogSession = {
  */
 async function runDialog<T>(
   { context, dependencies }: DialogSession,
+  label: string,
   build: (settle: (outcome: Outcome<T>) => void) => DialogView,
 ): Promise<T | undefined> {
   const { react, ink } = dependencies;
@@ -295,7 +306,7 @@ async function runDialog<T>(
       }),
     ]);
     if (result === undefined) {
-      throw new Error("The renderer exited before the dialog completed");
+      throw new Error(`${label} renderer exited before the dialog completed`);
     }
     outcome = result as Outcome<T>;
   } catch (reason) {
@@ -343,7 +354,7 @@ const definition: PluginDefinition = Object.freeze({
         async input({ message, initialValue }: InputRequest) {
           requireInteractiveStreams(context, "An input dialog");
 
-          return runDialog<string>(session, (settle) => {
+          return runDialog<string>(session, "Input", (settle) => {
             const Input = () => {
               const entered = react.useRef(initialValue ?? "");
               const [value, setValue] = react.useState(entered.current);
@@ -353,7 +364,9 @@ const definition: PluginDefinition = Object.freeze({
                 } else if (key.return) {
                   settle({ type: "completed", value: entered.current });
                 } else if (key.backspace) {
-                  entered.current = entered.current.slice(0, -1);
+                  entered.current = Array.from(entered.current)
+                    .slice(0, -1)
+                    .join("");
                   setValue(entered.current);
                 } else if (!key.ctrl && !key.meta) {
                   const appended = printableText(entry);
@@ -381,7 +394,7 @@ const definition: PluginDefinition = Object.freeze({
           }
           requireInteractiveStreams(context, "A select dialog");
 
-          return runDialog<T>(session, (settle) => {
+          return runDialog<T>(session, "Select", (settle) => {
             const Select = () => {
               const active = react.useRef(0);
               const [activeIndex, setActiveIndex] = react.useState(0);

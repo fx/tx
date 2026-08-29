@@ -32,6 +32,8 @@ const BACKSPACE = String.fromCharCode(127);
 const CTRL_A = String.fromCharCode(1);
 const CTRL_C = String.fromCharCode(3);
 const CARRIAGE_RETURN = "\r";
+const NEXT_LINE = String.fromCharCode(0x85);
+const GRINNING_FACE = String.fromCodePoint(0x1f600);
 
 class TerminalInput extends PassThrough {
   readonly rawModes: boolean[] = [];
@@ -1151,10 +1153,11 @@ describe("bundled text input dialog", () => {
     const result = await runEntry({ message: "Paste" }, [
       "hello world!",
       `ab${CARRIAGE_RETURN}cd`,
+      `ef${NEXT_LINE}gh`,
       CARRIAGE_RETURN,
     ]);
 
-    expect(result.value).toBe("hello world!abcd");
+    expect(result.value).toBe("hello world!abcdefgh");
   });
 
   test("removes the last character on Backspace and does nothing when the value is empty", async () => {
@@ -1170,6 +1173,22 @@ describe("bundled text input dialog", () => {
 
     expect(result.value).toBe("dev");
     expect(result.stderr.text()).toContain("dev");
+
+    const empty = await runEntry({ message: "Branch" }, [
+      BACKSPACE,
+      CARRIAGE_RETURN,
+    ]);
+    expect(empty.value).toBe("");
+  });
+
+  test("removes a whole non-BMP character on Backspace", async () => {
+    const result = await runEntry({ message: "Emoji" }, [
+      `a${GRINNING_FACE}`,
+      BACKSPACE,
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("a");
   });
 
   test("leaves the value unchanged for navigation, tab, control, and meta input", async () => {
@@ -1184,6 +1203,39 @@ describe("bundled text input dialog", () => {
     ]);
 
     expect(result.value).toBe("ok");
+  });
+
+  test("leaves the value unchanged for an escape sequence Ink does not resolve to a key", async () => {
+    const result = await runEntry({ message: "Unresolved" }, [
+      "ok",
+      `${ESCAPE}[25~`,
+      `${ESCAPE}[I`,
+      `${ESCAPE}[12;3H`,
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("ok");
+  });
+
+  test("keeps Enter, Escape, and Backspace meaning the same under a modifier", async () => {
+    const submitted = await runEntry({ message: "Alt" }, [
+      "ok",
+      `${ESCAPE}${CARRIAGE_RETURN}`,
+    ]);
+    expect(submitted.value).toBe("ok");
+
+    const cancelled = await runEntry({ message: "Twice" }, [
+      "ok",
+      `${ESCAPE}${ESCAPE}`,
+    ]);
+    expect(cancelled.value).toBeUndefined();
+
+    const deleted = await runEntry({ message: "Alt backspace" }, [
+      "ok",
+      `${ESCAPE}${BACKSPACE}`,
+      CARRIAGE_RETURN,
+    ]);
+    expect(deleted.value).toBe("o");
   });
 
   test.each([
