@@ -1583,6 +1583,23 @@ describe("user-provided select options", () => {
     },
   );
 
+  test("declines input aimed at a field that was already submitted", async () => {
+    const result = await runSelection(
+      [{ label: "Custom", value: "custom", fields: [owner, repository] }],
+      [
+        CARRIAGE_RETURN,
+        "a",
+        `${CARRIAGE_RETURN}${BACKSPACE}${CARRIAGE_RETURN}`,
+        "b",
+        CARRIAGE_RETURN,
+      ],
+    );
+
+    expect(result.value).toBe("custom");
+    expect(result.values).toEqual({ owner: "a", repository: "b" });
+    expect(result.stderr.text()).toContain(repository.message);
+  });
+
   test("rejects an invalid field declaration before rendering or terminal changes", async () => {
     for (const [fields, message] of [
       [[], "A user-provided select option requires at least one field"],

@@ -532,7 +532,12 @@ const definition: PluginDefinition = Object.freeze({
                 }
               });
 
-              const submitField = (entered: string) => {
+              /** `index` is the field the submitting entry was rendered for.
+               * The entry stays mounted for the rest of the synchronous pass
+               * that submitted it, so a later Enter in the same chunk would
+               * otherwise answer the next field before it is presented. */
+              const submitField = (index: number, entered: string) => {
+                if (index !== field.current) return;
                 const collection = collecting.current as Collection<T>;
                 const current = collection.fields[field.current] as TextField;
                 collected.current[current.name] = entered;
@@ -569,7 +574,8 @@ const definition: PluginDefinition = Object.freeze({
                     key: `field-${fieldIndex}`,
                     message: pending.message,
                     initialValue: pending.initialValue,
-                    onSubmit: submitField,
+                    onSubmit: (entered: string) =>
+                      submitField(fieldIndex, entered),
                     onCancel: cancel,
                   }),
                 );
