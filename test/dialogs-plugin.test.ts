@@ -14,12 +14,26 @@ type SelectOption<T> = {
   readonly value: T;
 };
 
+type InputRequest = {
+  readonly message: string;
+  readonly initialValue?: string;
+};
+
 type Dialogs = {
+  input(request: InputRequest): Promise<string | undefined>;
   select<T>(request: {
     readonly message: string;
     readonly options: readonly SelectOption<T>[];
   }): Promise<T | undefined>;
 };
+
+const ESCAPE = String.fromCharCode(27);
+const BACKSPACE = String.fromCharCode(127);
+const CTRL_A = String.fromCharCode(1);
+const CTRL_C = String.fromCharCode(3);
+const CARRIAGE_RETURN = "\r";
+const NEXT_LINE = String.fromCharCode(0x85);
+const GRINNING_FACE = String.fromCodePoint(0x1f600);
 
 class TerminalInput extends PassThrough {
   readonly rawModes: boolean[] = [];
@@ -253,6 +267,48 @@ async function runSelection<T>(
   return { value, stdin, stderr, stdout: stdoutText(), exitCode };
 }
 
+async function runEntry(
+  request: InputRequest,
+  input: readonly string[],
+  stdin = new TerminalInput(),
+  stderr = new CapturedOutput(),
+): Promise<{
+  readonly value: string | undefined;
+  readonly failure: unknown;
+  readonly stdin: TerminalInput;
+  readonly stderr: CapturedOutput;
+  readonly stdout: string;
+  readonly exitCode: number;
+}> {
+  const commandContext = context(stdin, stderr);
+  const stdoutText = commandContext.stdoutText;
+  let value: string | undefined;
+  let failure: unknown;
+  const running = main(
+    ["choose"],
+    [
+      dialogsPlugin,
+      consumer(async (dialogs) => {
+        try {
+          value = await dialogs.input(request);
+        } catch (error) {
+          failure = error;
+        }
+      }),
+    ],
+    commandContext,
+  );
+  if (input.length > 0) {
+    await until(() => stdin.rawModes.includes(true));
+    for (const chunk of input) {
+      stdin.write(chunk);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    }
+  }
+  const exitCode = await running;
+  return { value, failure, stdin, stderr, stdout: stdoutText(), exitCode };
+}
+
 async function runRejected<T>(
   options: readonly SelectOption<T>[],
   stdin = new TerminalInput(),
@@ -306,7 +362,7 @@ describe("bundled dialogs provider", () => {
       await main(["inspector"], [dialogsPlugin, inspector], commandContext),
     ).toBe(0);
     expect(registrations).toHaveLength(1);
-    expect(Object.keys(registrations[0] ?? {})).toEqual(["select"]);
+    expect(Object.keys(registrations[0] ?? {})).toEqual(["input", "select"]);
 
     const helpContext = context(new TerminalInput(), new CapturedOutput());
     const helpText = helpContext.stdoutText;
@@ -1062,5 +1118,212 @@ describe("bundled dialogs provider", () => {
     expect(await running).toBe(0);
     expect(unmountCalls).toBe(2);
     expect((failure as Error).message).toBe("raw mode cleanup failed");
+  });
+});
+
+describe("bundled text input dialog", () => {
+  test("renders the message and initial value on stderr and keeps stdout clean", async () => {
+    const result = await runEntry({ message: "Branch", initialValue: "main" }, [
+      "-next",
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.value).toBe("main-next");
+    expect(result.stdout).toBe("");
+    const output = result.stderr.text();
+    expect(output).toContain("Branch");
+    expect(output).toContain("main");
+    expect(output).toContain("main-next");
+  });
+
+  test("starts empty and appends typed characters in order", async () => {
+    const result = await runEntry({ message: "Name" }, [
+      "r",
+      "e",
+      "l",
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("rel");
+    expect(result.stderr.text()).toContain("rel");
+  });
+
+  test("appends a multi-character chunk whole and drops the control characters it carries", async () => {
+    const result = await runEntry({ message: "Paste" }, [
+      "hello world!",
+      `ab${CARRIAGE_RETURN}cd`,
+      `ef${NEXT_LINE}gh`,
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("hello world!abcdefgh");
+  });
+
+  test("removes the last character on Backspace and does nothing when the value is empty", async () => {
+    const result = await runEntry({ message: "Branch", initialValue: "main" }, [
+      BACKSPACE,
+      BACKSPACE,
+      BACKSPACE,
+      BACKSPACE,
+      BACKSPACE,
+      "dev",
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("dev");
+    expect(result.stderr.text()).toContain("dev");
+
+    const empty = await runEntry({ message: "Branch" }, [
+      BACKSPACE,
+      CARRIAGE_RETURN,
+    ]);
+    expect(empty.value).toBe("");
+  });
+
+  test("removes a whole non-BMP character on Backspace", async () => {
+    const result = await runEntry({ message: "Emoji" }, [
+      `a${GRINNING_FACE}`,
+      BACKSPACE,
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("a");
+  });
+
+  test("leaves the value unchanged for navigation, tab, control, and meta input", async () => {
+    const result = await runEntry({ message: "Ignore" }, [
+      "ok",
+      `${ESCAPE}[A`,
+      `${ESCAPE}[B`,
+      "\t",
+      CTRL_A,
+      `${ESCAPE}x`,
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("ok");
+  });
+
+  test("leaves the value unchanged for an escape sequence Ink does not resolve to a key", async () => {
+    const result = await runEntry({ message: "Unresolved" }, [
+      "ok",
+      `${ESCAPE}[25~`,
+      `${ESCAPE}[I`,
+      `${ESCAPE}[12;3H`,
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("ok");
+  });
+
+  test("keeps Enter, Escape, and Backspace meaning the same under a modifier", async () => {
+    const submitted = await runEntry({ message: "Alt" }, [
+      "ok",
+      `${ESCAPE}${CARRIAGE_RETURN}`,
+    ]);
+    expect(submitted.value).toBe("ok");
+
+    const cancelled = await runEntry({ message: "Twice" }, [
+      "ok",
+      `${ESCAPE}${ESCAPE}`,
+    ]);
+    expect(cancelled.value).toBeUndefined();
+
+    const deleted = await runEntry({ message: "Alt backspace" }, [
+      "ok",
+      `${ESCAPE}${BACKSPACE}`,
+      CARRIAGE_RETURN,
+    ]);
+    expect(deleted.value).toBe("o");
+  });
+
+  test.each([
+    ["Enter", CARRIAGE_RETURN, ""],
+    ["Escape", ESCAPE, undefined],
+    ["Ctrl-C", CTRL_C, undefined],
+  ])(
+    "distinguishes an empty submission from cancellation with %s",
+    async (_label, chunk, expected) => {
+      const result = await runEntry({ message: "Empty" }, [chunk]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.value).toBe(expected);
+      expect(result.failure).toBeUndefined();
+      expect(process.exitCode).not.toBe(1);
+    },
+  );
+
+  test("rejects a non-interactive request before rendering or terminal changes", async () => {
+    for (const [stdin, stderr] of [
+      [new TerminalInput(false), new CapturedOutput()],
+      [new TerminalInput(), new CapturedOutput(false)],
+    ] as const) {
+      const result = await runEntry(
+        { message: "Redirected" },
+        [],
+        stdin,
+        stderr,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.value).toBeUndefined();
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).toBe(
+        "An input dialog requires interactive input and error streams",
+      );
+      expect(result.stderr.text()).toBe("");
+      expect(result.stdin.rawModes).toEqual([]);
+    }
+  });
+
+  test("rejects a rendering failure without exiting", async () => {
+    const message = { unrenderable: true } as unknown as string;
+    const result = await runEntry({ message }, []);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.value).toBeUndefined();
+    expect(result.failure).toBeInstanceOf(Error);
+    expect((result.failure as Error).message).toContain("React child");
+    expect(result.stdin.listenerCount("data")).toBe(0);
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  test("rejects an interaction failure without exiting", async () => {
+    const stdin = new TerminalInput();
+    stdin.failRawMode = true;
+    const result = await runEntry({ message: "Raw mode" }, [], stdin);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.value).toBeUndefined();
+    expect((result.failure as Error).message).toContain("raw mode failed");
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  test("restores raw mode, references, and listeners before settling", async () => {
+    const result = await runEntry({ message: "Cleanup" }, [
+      "value",
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("value");
+    expect(result.stdin.rawModes).toEqual([true, false]);
+    expect(result.stdin.refs).toBe(result.stdin.unrefs);
+    expect(result.stdin.activeReferences).toBe(0);
+    expect(result.stdin.listenerCount("data")).toBe(0);
+    expect(result.stdin.listenerCount("error")).toBe(0);
+  });
+
+  test("rejects a terminal teardown failure after cleanup", async () => {
+    const stdin = new TerminalInput();
+    stdin.failRawModeDisable = true;
+    const result = await runEntry(
+      { message: "Teardown" },
+      ["x", CARRIAGE_RETURN],
+      stdin,
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect((result.failure as Error).message).toBe("raw mode cleanup failed");
+    expect(result.stdin.listenerCount("data")).toBe(0);
   });
 });

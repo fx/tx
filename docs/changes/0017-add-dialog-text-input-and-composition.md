@@ -104,13 +104,13 @@ Because the stages share one render session, cancellation, rendering failure, an
 
 ## Tasks
 
-- [ ] Add the text input dialog to the bundled dialogs provider
-  - [ ] Add `input` to the local `Dialogs` shape in `plugins/dialogs/index.ts`, reusing the existing stream adapters, failure tracking, and render session
-  - [ ] Implement the entry component: initial or empty starting value, printable append including a multi-character chunk appended whole, Backspace removal with an empty-value no-op, an unchanged value for any other input, Enter submission including the empty string, and Escape or Ctrl-C cancellation
-  - [ ] Reject a non-interactive request before rendering, render only on injected standard error, and complete cleanup before settlement on submission, cancellation, and failure
-  - [ ] Add controlled Bun tests for rendering, initial values, entry and editing, empty submission versus cancellation, stream routing, failures, and cleanup
-  - [ ] Document the standalone `input` dialog in `docs/manual/plugins.md`
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Add the text input dialog to the bundled dialogs provider
+  - [x] Add `input` to the local `Dialogs` shape in `plugins/dialogs/index.ts`, reusing the existing stream adapters, failure tracking, and render session
+  - [x] Implement the entry component: initial or empty starting value, printable append including a multi-character chunk appended whole, Backspace removal with an empty-value no-op, an unchanged value for any other input, Enter submission including the empty string, and Escape or Ctrl-C cancellation
+  - [x] Reject a non-interactive request before rendering, render only on injected standard error, and complete cleanup before settlement on submission, cancellation, and failure
+  - [x] Add controlled Bun tests for rendering, initial values, entry and editing, empty submission versus cancellation, stream routing, failures, and cleanup
+  - [x] Document the standalone `input` dialog in `docs/manual/plugins.md`
+  - [x] Verify 100% coverage and `bun run check`
 
 - [ ] Compose select with input through user-provided options
   - [ ] Add the field declaration to `SelectOption` and change `select` to resolve a result carrying the chosen value and the collected values, updating existing callers and test consumers
