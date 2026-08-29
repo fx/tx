@@ -1,6 +1,12 @@
 const streams: typeof import("node:stream") = require("node:stream");
 
-import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
+import type {
+  CommandContext,
+  CoreDependencies,
+  Plugin,
+  PluginDefinition,
+  PluginIdentity,
+} from "@fx/tx/plugin";
 
 type SelectOption<T> = {
   readonly label: string;
@@ -12,12 +18,18 @@ type SelectRequest<T> = {
   readonly options: readonly SelectOption<T>[];
 };
 
+type InputRequest = {
+  readonly message: string;
+  readonly initialValue?: string;
+};
+
 type Dialogs = {
+  input(request: InputRequest): Promise<string | undefined>;
   select<T>(request: SelectRequest<T>): Promise<T | undefined>;
 };
 
-type Selection<T> =
-  | { readonly type: "selected"; readonly value: T }
+type Outcome<T> =
+  | { readonly type: "completed"; readonly value: T }
   | { readonly type: "cancelled" };
 
 type Failure =
@@ -211,6 +223,113 @@ function recordFailure(current: Failure, candidate: Failure): Failure {
   return current.present ? current : candidate;
 }
 
+/** Rejects before any terminal state changes, so a redirected invocation never
+ * has to be restored. */
+function requireInteractiveStreams(
+  context: CommandContext,
+  description: string,
+): void {
+  if (!context.stdin.isTTY || !context.stderr.isTTY) {
+    throw new Error(
+      `${description} requires interactive input and error streams`,
+    );
+  }
+}
+
+/** Everything a chunk carries that a terminal would display, in order. Control
+ * characters drop out, so a pasted line survives while the newline ending it
+ * does not. */
+function printableText(entry: string): string {
+  let printable = "";
+  for (const character of entry) {
+    const code = character.codePointAt(0) as number;
+    if (code >= 0x20 && code !== 0x7f) printable += character;
+  }
+  return printable;
+}
+
+type DialogView = () => ReturnType<CoreDependencies["react"]["createElement"]>;
+
+type DialogSession = {
+  readonly context: CommandContext;
+  readonly dependencies: CoreDependencies;
+};
+
+/**
+ * Renders one dialog on the injected streams and settles only after the
+ * terminal is restored and the renderer is unmounted, on completion,
+ * cancellation, and failure alike. `build` receives the settle callback and
+ * returns the view driving it.
+ */
+async function runDialog<T>(
+  { context, dependencies }: DialogSession,
+  build: (settle: (outcome: Outcome<T>) => void) => DialogView,
+): Promise<T | undefined> {
+  const { react, ink } = dependencies;
+  const settled = Promise.withResolvers<Outcome<T>>();
+  const terminalFailures = new FailureTracker();
+  const input = new InputAdapter(context.stdin, terminalFailures);
+  const output = new OutputAdapter(context.stderr, terminalFailures);
+  let failure: Failure = { present: false };
+  const View = build(settled.resolve);
+
+  let renderer: ReturnType<typeof ink.render> | undefined;
+  let exited: Promise<unknown> | undefined;
+  let outcome: Outcome<T> | undefined;
+  try {
+    renderer = ink.render(react.createElement(ink.Text, null, ""), {
+      stdout: output as unknown as NodeJS.WriteStream,
+      stdin: input as unknown as NodeJS.ReadStream,
+      stderr: output as unknown as NodeJS.WriteStream,
+      exitOnCtrlC: false,
+      interactive: true,
+      patchConsole: false,
+    });
+    exited = renderer.waitUntilExit();
+    renderer.rerender(react.createElement(View));
+    const result = await Promise.race([
+      settled.promise,
+      exited,
+      terminalFailures.promise.then((error) => {
+        throw error;
+      }),
+    ]);
+    if (result === undefined) {
+      throw new Error("The renderer exited before the dialog completed");
+    }
+    outcome = result as Outcome<T>;
+  } catch (reason) {
+    failure = { present: true, reason };
+  } finally {
+    let unmounted = false;
+    for (let attempt = 0; renderer && !unmounted && attempt < 2; attempt++) {
+      try {
+        renderer.unmount();
+        unmounted = true;
+      } catch (reason) {
+        failure = recordFailure(failure, terminalFailures.failure);
+        failure = recordFailure(failure, { present: true, reason });
+      }
+    }
+    input.stopForwarding();
+    if (unmounted && exited) {
+      try {
+        await exited;
+      } catch (reason) {
+        failure = recordFailure(failure, terminalFailures.failure);
+        failure = recordFailure(failure, { present: true, reason });
+      }
+    }
+    input.cleanup();
+    await output.flush();
+    output.cleanup();
+    failure = recordFailure(failure, terminalFailures.failure);
+  }
+
+  if (failure.present) throw failure.reason;
+  return outcome?.type === "completed" ? outcome.value : undefined;
+}
+
 const identity: PluginIdentity = Object.freeze({ name: "dialogs" });
 
 const definition: PluginDefinition = Object.freeze({
@@ -218,120 +337,87 @@ const definition: PluginDefinition = Object.freeze({
   load(): Plugin {
     return ({ context, dependencies, register }) => {
       const { react, ink } = dependencies;
+      const session: DialogSession = { context, dependencies };
 
       const dialogs: Dialogs = {
+        async input({ message, initialValue }: InputRequest) {
+          requireInteractiveStreams(context, "An input dialog");
+
+          return runDialog<string>(session, (settle) => {
+            const Input = () => {
+              const entered = react.useRef(initialValue ?? "");
+              const [value, setValue] = react.useState(entered.current);
+              ink.useInput((entry, key) => {
+                if (key.escape || (key.ctrl && entry === "c")) {
+                  settle({ type: "cancelled" });
+                } else if (key.return) {
+                  settle({ type: "completed", value: entered.current });
+                } else if (key.backspace) {
+                  entered.current = entered.current.slice(0, -1);
+                  setValue(entered.current);
+                } else if (!key.ctrl && !key.meta) {
+                  const appended = printableText(entry);
+                  if (appended.length > 0) {
+                    entered.current += appended;
+                    setValue(entered.current);
+                  }
+                }
+              });
+
+              return react.createElement(
+                ink.Box,
+                { flexDirection: "column" },
+                react.createElement(ink.Text, null, message),
+                react.createElement(ink.Text, null, value),
+              );
+            };
+            return Input;
+          });
+        },
+
         async select<T>({ message, options }: SelectRequest<T>) {
           if (options.length === 0) {
             throw new Error("A select dialog requires at least one option");
           }
-          if (!context.stdin.isTTY || !context.stderr.isTTY) {
-            throw new Error(
-              "A select dialog requires interactive input and error streams",
-            );
-          }
+          requireInteractiveStreams(context, "A select dialog");
 
-          const selected = Promise.withResolvers<Selection<T>>();
-          const terminalFailures = new FailureTracker();
-          const input = new InputAdapter(context.stdin, terminalFailures);
-          const output = new OutputAdapter(context.stderr, terminalFailures);
-          let failure: Failure = { present: false };
+          return runDialog<T>(session, (settle) => {
+            const Select = () => {
+              const active = react.useRef(0);
+              const [activeIndex, setActiveIndex] = react.useState(0);
+              ink.useInput((value, key) => {
+                if (key.escape || (key.ctrl && value === "c")) {
+                  settle({ type: "cancelled" });
+                } else if (key.return) {
+                  const option = options[active.current] as SelectOption<T>;
+                  settle({ type: "completed", value: option.value });
+                } else if (key.upArrow) {
+                  active.current = Math.max(0, active.current - 1);
+                  setActiveIndex(active.current);
+                } else if (key.downArrow) {
+                  active.current = Math.min(
+                    options.length - 1,
+                    active.current + 1,
+                  );
+                  setActiveIndex(active.current);
+                }
+              });
 
-          const Select = () => {
-            const active = react.useRef(0);
-            const [activeIndex, setActiveIndex] = react.useState(0);
-            ink.useInput((value, key) => {
-              if (key.escape || (key.ctrl && value === "c")) {
-                selected.resolve({ type: "cancelled" });
-              } else if (key.return) {
-                const option = options[active.current] as SelectOption<T>;
-                selected.resolve({ type: "selected", value: option.value });
-              } else if (key.upArrow) {
-                active.current = Math.max(0, active.current - 1);
-                setActiveIndex(active.current);
-              } else if (key.downArrow) {
-                active.current = Math.min(
-                  options.length - 1,
-                  active.current + 1,
-                );
-                setActiveIndex(active.current);
-              }
-            });
-
-            return react.createElement(
-              ink.Box,
-              { flexDirection: "column" },
-              react.createElement(ink.Text, null, message),
-              ...options.map((option, index) =>
-                react.createElement(
-                  ink.Text,
-                  { key: index },
-                  `${index === activeIndex ? ">" : " "} ${option.label}`,
+              return react.createElement(
+                ink.Box,
+                { flexDirection: "column" },
+                react.createElement(ink.Text, null, message),
+                ...options.map((option, index) =>
+                  react.createElement(
+                    ink.Text,
+                    { key: index },
+                    `${index === activeIndex ? ">" : " "} ${option.label}`,
+                  ),
                 ),
-              ),
-            );
-          };
-
-          let renderer: ReturnType<typeof ink.render> | undefined;
-          let exited: Promise<unknown> | undefined;
-          let outcome: Selection<T> | undefined;
-          try {
-            renderer = ink.render(react.createElement(ink.Text, null, ""), {
-              stdout: output as unknown as NodeJS.WriteStream,
-              stdin: input as unknown as NodeJS.ReadStream,
-              stderr: output as unknown as NodeJS.WriteStream,
-              exitOnCtrlC: false,
-              interactive: true,
-              patchConsole: false,
-            });
-            exited = renderer.waitUntilExit();
-            renderer.rerender(react.createElement(Select));
-            const result = await Promise.race([
-              selected.promise,
-              exited,
-              terminalFailures.promise.then((error) => {
-                throw error;
-              }),
-            ]);
-            if (result === undefined) {
-              throw new Error(
-                "Select renderer exited before the dialog completed",
               );
-            }
-            outcome = result as Selection<T>;
-          } catch (reason) {
-            failure = { present: true, reason };
-          } finally {
-            let unmounted = false;
-            for (
-              let attempt = 0;
-              renderer && !unmounted && attempt < 2;
-              attempt++
-            ) {
-              try {
-                renderer.unmount();
-                unmounted = true;
-              } catch (reason) {
-                failure = recordFailure(failure, terminalFailures.failure);
-                failure = recordFailure(failure, { present: true, reason });
-              }
-            }
-            input.stopForwarding();
-            if (unmounted && exited) {
-              try {
-                await exited;
-              } catch (reason) {
-                failure = recordFailure(failure, terminalFailures.failure);
-                failure = recordFailure(failure, { present: true, reason });
-              }
-            }
-            input.cleanup();
-            await output.flush();
-            output.cleanup();
-            failure = recordFailure(failure, terminalFailures.failure);
-          }
-
-          if (failure.present) throw failure.reason;
-          return outcome?.type === "selected" ? outcome.value : undefined;
+            };
+            return Select;
+          });
         },
       };
 

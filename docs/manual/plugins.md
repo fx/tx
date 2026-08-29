@@ -236,6 +236,10 @@ The namespace-free bundled dialogs provider registers one internal capability un
 
 ```ts
 type Dialogs = {
+  input(request: {
+    readonly message: string
+    readonly initialValue?: string
+  }): Promise<string | undefined>
   select<T>(request: {
     readonly message: string
     readonly options: readonly {
@@ -248,9 +252,15 @@ type Dialogs = {
 
 A bundled consumer declares that compatible type locally and reads `registrations<Dialogs>("dialogs")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`; an absent capability and multiple registered providers remain the consumer's responsibility, and tx defines no winner semantics.
 
-`select` requires both the provider's injected standard input and standard error to be TTYs and rejects an empty options list or non-interactive stream before rendering or changing terminal state. It uses the injected React and Ink instances, reads only injected standard input, and renders the message plus every label in supplied order on injected standard error. Standard output stays untouched for the consuming command. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
+Every dialog requires both the provider's injected standard input and standard error to be TTYs and rejects a non-interactive stream before rendering or changing terminal state; there is no fallback. Dialogs use the injected React and Ink instances, read only injected standard input, and render only on injected standard error, so standard output stays untouched for the consuming command.
 
-Up and Down move one position and clamp at the list boundaries. Enter returns the active option's exact value. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored. Selection, cancellation, rendering failure, and interaction failure all finish renderer unmounting, restoration of the prior terminal/input state, listener teardown, and pending output before the promise fulfills or rejects. If an injected raw-mode disable, unref, or renderer unmount method persistently throws, the provider retries finitely and rejects with the first applicable cleanup failure; restoration or renderer teardown is necessarily best-effort only on that exceptional path. There is no non-interactive fallback, concurrency policy, nested-dialog support, or multi-provider selection policy.
+`select` additionally rejects an empty options list before rendering, and renders the message plus every label in supplied order. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
+
+Up and Down move one position and clamp at the list boundaries. Enter returns the active option's exact value. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored.
+
+`input` collects a single line of text. It renders the message and the current value, starting from `initialValue` when one is supplied and from an empty value otherwise. Printable characters append in typed order; input arriving as one multi-character chunk, as a paste does, appends whole, minus any control characters it carries. Backspace drops the last character and does nothing when the value is empty. Any other input — arrow keys, Tab, Ctrl or Alt combinations, and unrecognized escape sequences — leaves the value unchanged. Enter returns the value exactly as entered, including the empty string, so an intentionally empty value stays distinguishable from the `undefined` that Escape and Ctrl-C return. The provider never trims, validates, or transforms the value and never writes it to standard output; whether an empty value is acceptable is the consuming command's decision. There is no caret movement, entry history, completion, or masking.
+
+Both dialogs share one render session and one cleanup contract. Completion, cancellation, rendering failure, and interaction failure all finish renderer unmounting, restoration of the prior terminal/input state, listener teardown, and pending output before the promise fulfills or rejects. If an injected raw-mode disable, unref, or renderer unmount method persistently throws, the provider retries finitely and rejects with the first applicable cleanup failure; restoration or renderer teardown is necessarily best-effort only on that exceptional path. There is no non-interactive fallback, concurrency policy, nested-dialog support, or multi-provider selection policy.
 
 ## One namespace per plugin
 
