@@ -9,9 +9,22 @@ import type {
 } from "../src/plugin.ts";
 import { coreDependencies } from "../src/plugins.ts";
 
+type TextField = {
+  readonly type: "text";
+  readonly name: string;
+  readonly message: string;
+  readonly initialValue?: string;
+};
+
 type SelectOption<T> = {
   readonly label: string;
   readonly value: T;
+  readonly fields?: readonly TextField[];
+};
+
+type SelectResult<T> = {
+  readonly value: T;
+  readonly values: Readonly<Record<string, string>>;
 };
 
 type InputRequest = {
@@ -24,7 +37,7 @@ type Dialogs = {
   select<T>(request: {
     readonly message: string;
     readonly options: readonly SelectOption<T>[];
-  }): Promise<T | undefined>;
+  }): Promise<SelectResult<T> | undefined>;
 };
 
 const ESCAPE = String.fromCharCode(27);
@@ -238,6 +251,7 @@ async function runSelection<T>(
   input: string | readonly string[],
 ): Promise<{
   readonly value: T | undefined;
+  readonly values: Readonly<Record<string, string>> | undefined;
   readonly stdin: TerminalInput;
   readonly stderr: CapturedOutput;
   readonly stdout: string;
@@ -247,13 +261,13 @@ async function runSelection<T>(
   const stderr = new CapturedOutput();
   const commandContext = context(stdin, stderr);
   const stdoutText = commandContext.stdoutText;
-  let value: T | undefined;
+  let result: SelectResult<T> | undefined;
   const running = main(
     ["choose"],
     [
       dialogsPlugin,
       consumer(async (dialogs) => {
-        value = await dialogs.select({ message: "Pick one", options });
+        result = await dialogs.select({ message: "Pick one", options });
       }),
     ],
     commandContext,
@@ -264,7 +278,14 @@ async function runSelection<T>(
     await new Promise<void>((resolve) => setTimeout(resolve, 1));
   }
   const exitCode = await running;
-  return { value, stdin, stderr, stdout: stdoutText(), exitCode };
+  return {
+    value: result?.value,
+    values: result?.values,
+    stdin,
+    stderr,
+    stdout: stdoutText(),
+    exitCode,
+  };
 }
 
 async function runEntry(
@@ -383,6 +404,7 @@ describe("bundled dialogs provider", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.value).toBe(value);
+    expect(result.values).toEqual({});
     expect(result.stdout).toBe("");
     const output = result.stderr.text();
     expect(output).toContain("Pick one");
@@ -681,16 +703,20 @@ describe("bundled dialogs provider", () => {
         dialogsPlugin,
         consumer(async (dialogs) => {
           values.push(
-            await dialogs.select({
-              message: "First",
-              options: [{ label: "One", value: 1 }],
-            }),
+            (
+              await dialogs.select({
+                message: "First",
+                options: [{ label: "One", value: 1 }],
+              })
+            )?.value,
           );
           values.push(
-            await dialogs.select({
-              message: "Second",
-              options: [{ label: "Two", value: 2 }],
-            }),
+            (
+              await dialogs.select({
+                message: "Second",
+                options: [{ label: "Two", value: 2 }],
+              })
+            )?.value,
           );
         }),
       ],
@@ -720,10 +746,12 @@ describe("bundled dialogs provider", () => {
       [
         dialogsPlugin,
         consumer(async (dialogs) => {
-          value = await dialogs.select({
-            message: "Preserve source",
-            options: [{ label: "One", value: 1 }],
-          });
+          value = (
+            await dialogs.select({
+              message: "Preserve source",
+              options: [{ label: "One", value: 1 }],
+            })
+          )?.value;
         }),
       ],
       context(stdin, stderr),
@@ -1325,5 +1353,360 @@ describe("bundled text input dialog", () => {
     expect(result.exitCode).toBe(0);
     expect((result.failure as Error).message).toBe("raw mode cleanup failed");
     expect(result.stdin.listenerCount("data")).toBe(0);
+  });
+});
+
+describe("user-provided select options", () => {
+  const branch: TextField = {
+    type: "text",
+    name: "branch",
+    message: "Branch name",
+  };
+  // Messages deliberately share no text with their names, so a result keyed by
+  // the displayed message instead of the field name cannot pass.
+  const owner: TextField = {
+    type: "text",
+    name: "owner",
+    message: "Which account?",
+  };
+  const repository: TextField = {
+    type: "text",
+    name: "repository",
+    message: "Which project?",
+  };
+
+  function mixed(): readonly SelectOption<string>[] {
+    return [
+      { label: "Known", value: "known" },
+      { label: "Custom", value: "custom", fields: [branch] },
+    ];
+  }
+
+  test("tells a plain option apart from a user-provided one by its collected values", async () => {
+    const plain = await runSelection(mixed(), [CARRIAGE_RETURN]);
+    expect(plain.value).toBe("known");
+    expect(plain.values).toEqual({});
+
+    const provided = await runSelection(mixed(), [
+      `${ESCAPE}[B`,
+      CARRIAGE_RETURN,
+      "release",
+      CARRIAGE_RETURN,
+    ]);
+    expect(provided.value).toBe("custom");
+    expect(provided.values).toEqual({ branch: "release" });
+    const output = provided.stderr.text();
+    expect(output).toContain("Branch name");
+    expect(output).toContain("release");
+    expect(provided.stdout).toBe("");
+  });
+
+  test("prompts each field only after the previous one is submitted", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [
+              {
+                label: "Custom",
+                value: "custom",
+                fields: [owner, repository],
+              },
+            ],
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stderr.text().includes("Custom"));
+    expect(stderr.text()).not.toContain(owner.message);
+    stdin.write(CARRIAGE_RETURN);
+    await until(() => stderr.text().includes(owner.message));
+    expect(stderr.text()).not.toContain(repository.message);
+    stdin.write("fx");
+    await until(() => stderr.text().includes("fx"));
+    stdin.write(CARRIAGE_RETURN);
+    await until(() => stderr.text().includes(repository.message));
+    stdin.write("tx");
+    await until(() => stderr.text().includes("tx"));
+    stdin.write(CARRIAGE_RETURN);
+
+    expect(await running).toBe(0);
+    expect(result).toEqual({
+      value: "custom",
+      values: { owner: "fx", repository: "tx" },
+    });
+  });
+
+  test("starts every collected field from its own initial value", async () => {
+    const accepted = await runSelection(
+      [
+        {
+          label: "Custom",
+          value: "custom",
+          fields: [
+            { ...owner, initialValue: "fx" },
+            { ...repository, initialValue: "tx" },
+          ],
+        },
+      ],
+      [CARRIAGE_RETURN, CARRIAGE_RETURN, CARRIAGE_RETURN],
+    );
+    expect(accepted.values).toEqual({ owner: "fx", repository: "tx" });
+
+    const edited = await runSelection(
+      [
+        {
+          label: "Custom",
+          value: "custom",
+          fields: [{ ...branch, initialValue: "origin" }],
+        },
+      ],
+      [CARRIAGE_RETURN, BACKSPACE, "-2", CARRIAGE_RETURN],
+    );
+    expect(edited.values).toEqual({ branch: "origi-2" });
+    expect(edited.stderr.text()).toContain("origi-2");
+  });
+
+  test("refuses option navigation once field collection has begun", async () => {
+    const result = await runSelection(
+      [
+        { label: "Custom", value: "custom", fields: [branch] },
+        { label: "Known", value: "known" },
+      ],
+      [CARRIAGE_RETURN, `${ESCAPE}[B`, CARRIAGE_RETURN],
+    );
+
+    expect(result.value).toBe("custom");
+    expect(result.values).toEqual({ branch: "" });
+    expect(result.stderr.text()).not.toContain("> Known");
+  });
+
+  test.each([
+    ["Escape", ESCAPE],
+    ["Ctrl-C", CTRL_C],
+  ])(
+    "cancels the whole dialog with %s at the option stage and mid-collection",
+    async (_label, chunk) => {
+      const options: readonly SelectOption<string>[] = [
+        {
+          label: "Custom",
+          value: "custom",
+          fields: [owner, repository],
+        },
+      ];
+
+      const atOptions = await runSelection(options, [chunk]);
+      expect(atOptions.value).toBeUndefined();
+      expect(atOptions.values).toBeUndefined();
+      expect(atOptions.exitCode).toBe(0);
+
+      const atFirstField = await runSelection(options, [
+        CARRIAGE_RETURN,
+        chunk,
+      ]);
+      expect(atFirstField.value).toBeUndefined();
+      expect(atFirstField.values).toBeUndefined();
+
+      const midCollection = await runSelection(options, [
+        CARRIAGE_RETURN,
+        "fx",
+        CARRIAGE_RETURN,
+        chunk,
+      ]);
+      expect(midCollection.value).toBeUndefined();
+      expect(midCollection.values).toBeUndefined();
+      expect(midCollection.exitCode).toBe(0);
+      expect(midCollection.stdin.rawModes).toEqual([true, false]);
+      expect(process.exitCode).not.toBe(1);
+    },
+  );
+
+  test("collects a field whose name shadows an inherited property", async () => {
+    const result = await runSelection(
+      [
+        {
+          label: "Custom",
+          value: "custom",
+          fields: [
+            { type: "text", name: "__proto__", message: "Which prototype?" },
+            { type: "text", name: "constructor", message: "Which builder?" },
+            { type: "text", name: "toString", message: "Which printer?" },
+          ],
+        },
+      ],
+      [
+        CARRIAGE_RETURN,
+        "a",
+        CARRIAGE_RETURN,
+        "b",
+        CARRIAGE_RETURN,
+        "c",
+        CARRIAGE_RETURN,
+      ],
+    );
+
+    const values = result.values as Readonly<Record<string, string>>;
+    const own = (name: string) =>
+      Object.getOwnPropertyDescriptor(values, name)?.value;
+    expect(Object.keys(values)).toEqual([
+      "__proto__",
+      "constructor",
+      "toString",
+    ]);
+    expect(own("__proto__")).toBe("a");
+    expect(own("constructor")).toBe("b");
+    expect(own("toString")).toBe("c");
+  });
+
+  test.each([
+    ["Escape", ESCAPE],
+    ["Ctrl-C", CTRL_C],
+  ])(
+    "cancels with %s delivered in the same chunk as the Enter that began collection",
+    async (_label, chunk) => {
+      const result = await runSelection(
+        [{ label: "Custom", value: "custom", fields: [owner] }],
+        [`${CARRIAGE_RETURN}${BACKSPACE}${chunk}`],
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.value).toBeUndefined();
+      expect(result.values).toBeUndefined();
+      expect(result.stdin.rawModes).toEqual([true, false]);
+    },
+  );
+
+  test("declines input aimed at a field that was already submitted", async () => {
+    const result = await runSelection(
+      [{ label: "Custom", value: "custom", fields: [owner, repository] }],
+      [
+        CARRIAGE_RETURN,
+        "a",
+        `${CARRIAGE_RETURN}${BACKSPACE}${CARRIAGE_RETURN}`,
+        "b",
+        CARRIAGE_RETURN,
+      ],
+    );
+
+    expect(result.value).toBe("custom");
+    expect(result.values).toEqual({ owner: "a", repository: "b" });
+    expect(result.stderr.text()).toContain(repository.message);
+  });
+
+  test("keeps the first settlement when one chunk carries input past it", async () => {
+    const past = `${CARRIAGE_RETURN}${BACKSPACE}${CARRIAGE_RETURN}`;
+
+    const afterLastField = await runSelection(
+      [{ label: "Custom", value: "custom", fields: [owner] }],
+      [CARRIAGE_RETURN, "a", past],
+    );
+    expect(afterLastField.value).toBe("custom");
+    expect(afterLastField.values).toEqual({ owner: "a" });
+
+    const afterPlainOption = await runSelection(
+      [
+        { label: "Known", value: "known" },
+        { label: "Other", value: "other" },
+      ],
+      [past],
+    );
+    expect(afterPlainOption.value).toBe("known");
+    expect(afterPlainOption.values).toEqual({});
+  });
+
+  test("rejects an invalid field declaration before rendering or terminal changes", async () => {
+    for (const [fields, message] of [
+      [[], "A user-provided select option requires at least one field"],
+      [
+        [owner, { ...owner, message: "Owner again" }],
+        'A select option repeats the field name "owner"',
+      ],
+    ] as const) {
+      const result = await runRejected([
+        { label: "Known", value: 1 },
+        { label: "Custom", value: 2, fields },
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).toBe(message);
+      expect(result.stderr.text()).toBe("");
+      expect(result.stdin.rawModes).toEqual([]);
+    }
+  });
+
+  test("collects every stage in one render session without tearing down between them", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let renders = 0;
+    let unmounts = 0;
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        renders++;
+        const renderer = coreDependencies.ink.render(...args);
+        return {
+          ...renderer,
+          unmount() {
+            unmounts++;
+            renderer.unmount();
+          },
+        };
+      },
+    };
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [
+              {
+                label: "Custom",
+                value: "custom",
+                fields: [owner, repository],
+              },
+            ],
+          });
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    await until(() => stdin.rawModes.includes(true));
+    for (const chunk of [
+      CARRIAGE_RETURN,
+      "fx",
+      CARRIAGE_RETURN,
+      "tx",
+      CARRIAGE_RETURN,
+    ]) {
+      expect(unmounts).toBe(0);
+      expect(stdin.rawModes).toEqual([true]);
+      stdin.write(chunk);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    }
+
+    expect(await running).toBe(0);
+    expect(result).toEqual({
+      value: "custom",
+      values: { owner: "fx", repository: "tx" },
+    });
+    expect(renders).toBe(1);
+    expect(unmounts).toBe(1);
+    expect(stdin.rawModes).toEqual([true, false]);
+    expect(stdin.refs).toBe(1);
+    expect(stdin.unrefs).toBe(1);
+    expect(stdin.activeReferences).toBe(0);
+    expect(stdin.listenerCount("data")).toBe(0);
   });
 });

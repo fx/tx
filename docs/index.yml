@@ -150,6 +150,6 @@ changes:
     path: changes/0017-add-dialog-text-input-and-composition.md
     description: Add a text input dialog and let a select option be marked as user-provided so choosing it collects and submits the values it declares.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0016"
