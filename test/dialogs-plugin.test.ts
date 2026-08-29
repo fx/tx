@@ -1362,11 +1362,17 @@ describe("user-provided select options", () => {
     name: "branch",
     message: "Branch name",
   };
-  const owner: TextField = { type: "text", name: "owner", message: "Owner" };
+  // Messages deliberately share no text with their names, so a result keyed by
+  // the displayed message instead of the field name cannot pass.
+  const owner: TextField = {
+    type: "text",
+    name: "owner",
+    message: "Which account?",
+  };
   const repository: TextField = {
     type: "text",
     name: "repository",
-    message: "Repository",
+    message: "Which project?",
   };
 
   function mixed(): readonly SelectOption<string>[] {
@@ -1419,14 +1425,14 @@ describe("user-provided select options", () => {
       context(stdin, stderr),
     );
     await until(() => stderr.text().includes("Custom"));
-    expect(stderr.text()).not.toContain("Owner");
+    expect(stderr.text()).not.toContain(owner.message);
     stdin.write(CARRIAGE_RETURN);
-    await until(() => stderr.text().includes("Owner"));
-    expect(stderr.text()).not.toContain("Repository");
+    await until(() => stderr.text().includes(owner.message));
+    expect(stderr.text()).not.toContain(repository.message);
     stdin.write("fx");
     await until(() => stderr.text().includes("fx"));
     stdin.write(CARRIAGE_RETURN);
-    await until(() => stderr.text().includes("Repository"));
+    await until(() => stderr.text().includes(repository.message));
     stdin.write("tx");
     await until(() => stderr.text().includes("tx"));
     stdin.write(CARRIAGE_RETURN);
@@ -1459,12 +1465,13 @@ describe("user-provided select options", () => {
         {
           label: "Custom",
           value: "custom",
-          fields: [{ ...branch, initialValue: "main" }],
+          fields: [{ ...branch, initialValue: "origin" }],
         },
       ],
-      [CARRIAGE_RETURN, BACKSPACE, "n", CARRIAGE_RETURN],
+      [CARRIAGE_RETURN, BACKSPACE, "-2", CARRIAGE_RETURN],
     );
-    expect(edited.values).toEqual({ branch: "main" });
+    expect(edited.values).toEqual({ branch: "origi-2" });
+    expect(edited.stderr.text()).toContain("origi-2");
   });
 
   test("refuses option navigation once field collection has begun", async () => {
