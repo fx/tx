@@ -12,7 +12,7 @@ specs:
     status: active
   - name: dialogs
     path: specs/dialogs/
-    description: Shared terminal dialogs supplied by a bundled plugin: single-choice selection and text input, composed through user-provided options.
+    description: Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection and text input composed through user-provided options.
     status: active
   - name: updates
     path: specs/updates/

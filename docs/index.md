@@ -6,7 +6,7 @@
 |------|-------------|--------|
 | [Architecture](specs/architecture/) | Generic core runtime, neutral composition, packaging, and development conventions for tx. | active |
 | [Plugin System](specs/plugin-system/) | Generic plugin hosting, opaque capability registration, and externalized marketplace-plugin ownership contracts. | active |
-| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin: single-choice selection and text input, composed through user-provided options. | active |
+| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection and text input composed through user-provided options. | active |
 | [Updates](specs/updates/) | User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited. | active |
 
 ## Changes
