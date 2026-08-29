@@ -270,7 +270,7 @@ Every dialog requires both the provider's injected standard input and standard e
 
 `select` additionally rejects an empty options list before rendering, and renders the message plus every label in supplied order. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
 
-Up and Down move one position and clamp at the list boundaries. Enter resolves `{ value, values }`, where `value` is the active option's exact value. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored.
+Up and Down move one position and clamp at the list boundaries. Enter on a plain option resolves `{ value, values }`, where `value` is that option's exact value and `values` is empty. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored.
 
 An option that declares `fields` is user-provided: choosing it collects those values instead of resolving immediately, so one dialog can offer known choices alongside "let me type it". An option declaring no fields is plain and resolves with an empty `values` record, which is how a caller tells the two apart. `select` rejects an option whose field list is empty, or that repeats a field name within itself, before rendering — alongside the empty-options and non-interactive rejections. Field names need only be unique within their own option, and only the chosen option is ever collected.
 
