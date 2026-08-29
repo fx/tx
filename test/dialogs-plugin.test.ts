@@ -1528,6 +1528,61 @@ describe("user-provided select options", () => {
     },
   );
 
+  test("collects a field whose name shadows an inherited property", async () => {
+    const result = await runSelection(
+      [
+        {
+          label: "Custom",
+          value: "custom",
+          fields: [
+            { type: "text", name: "__proto__", message: "Which prototype?" },
+            { type: "text", name: "constructor", message: "Which builder?" },
+            { type: "text", name: "toString", message: "Which printer?" },
+          ],
+        },
+      ],
+      [
+        CARRIAGE_RETURN,
+        "a",
+        CARRIAGE_RETURN,
+        "b",
+        CARRIAGE_RETURN,
+        "c",
+        CARRIAGE_RETURN,
+      ],
+    );
+
+    const values = result.values as Readonly<Record<string, string>>;
+    const own = (name: string) =>
+      Object.getOwnPropertyDescriptor(values, name)?.value;
+    expect(Object.keys(values)).toEqual([
+      "__proto__",
+      "constructor",
+      "toString",
+    ]);
+    expect(own("__proto__")).toBe("a");
+    expect(own("constructor")).toBe("b");
+    expect(own("toString")).toBe("c");
+  });
+
+  test.each([
+    ["Escape", ESCAPE],
+    ["Ctrl-C", CTRL_C],
+  ])(
+    "cancels with %s delivered in the same chunk as the Enter that began collection",
+    async (_label, chunk) => {
+      const result = await runSelection(
+        [{ label: "Custom", value: "custom", fields: [owner] }],
+        [`${CARRIAGE_RETURN}${BACKSPACE}${chunk}`],
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.value).toBeUndefined();
+      expect(result.values).toBeUndefined();
+      expect(result.stdin.rawModes).toEqual([true, false]);
+    },
+  );
+
   test("rejects an invalid field declaration before rendering or terminal changes", async () => {
     for (const [fields, message] of [
       [[], "A user-provided select option requires at least one field"],

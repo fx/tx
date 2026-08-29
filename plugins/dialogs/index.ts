@@ -486,18 +486,27 @@ const definition: PluginDefinition = Object.freeze({
               const collecting = react.useRef<Collection<T> | undefined>(
                 undefined,
               );
-              const collected = react.useRef<Record<string, string>>({});
+              /** Prototype-free, because a field name is an opaque caller key:
+               * `__proto__` would otherwise reach the inherited setter and the
+               * value would vanish instead of being collected. */
+              const collected = react.useRef<Record<string, string>>(
+                Object.create(null) as Record<string, string>,
+              );
               const field = react.useRef(0);
               const [fieldIndex, setFieldIndex] = react.useState(-1);
 
               ink.useInput((value, key) => {
-                // Ink delivers every key parsed out of one chunk in a single
-                // synchronous pass, so this list keeps handling input after the
-                // Enter that began collection. It must decline all of it.
-                if (collecting.current) return;
                 if (key.escape || (key.ctrl && value === "c")) {
                   cancel();
-                } else if (key.return) {
+                  return;
+                }
+                // Ink delivers every key parsed out of one chunk in a single
+                // synchronous pass, so this list keeps receiving input after
+                // the Enter that began collection, before the field entry has
+                // mounted. Everything but cancellation is declined from then
+                // on; cancellation is answered above, at every stage.
+                if (collecting.current) return;
+                if (key.return) {
                   const option = options[active.current] as SelectOption<T>;
                   if (option.fields) {
                     collecting.current = {
