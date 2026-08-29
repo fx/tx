@@ -129,9 +129,9 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 ### Field Model
 
 - A field MUST describe exactly one value the user supplies and MUST carry a type that discriminates it, a name that is unique within the option declaring it, and a message to display while it is collected.
-- `text` MUST be the only field type this contract defines; a field type is the extension point for later field kinds, so no other type is available to callers.
-- A field name MUST be treated as an opaque key that identifies the collected value to the caller and MUST NOT be rendered in place of the field's message.
-- Fields MUST be collected in declared order.
+- `text` MUST be the only field type available to callers.
+- A field name MUST be an opaque key that identifies the collected value to the caller and MUST NOT be rendered in place of the field's message.
+- The fields of an option MUST form an ordered list whose order is the order they are collected in.
 
 #### Scenario: Field names key the result
 
@@ -141,10 +141,11 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 ### Text Input
 
-- `input` MUST render the request message and the current value on the injected standard-error stream.
+- `input` MUST render the request message and the current value.
 - `input` MUST begin with the request's initial value when one is supplied and MUST begin with an empty value otherwise.
 - Printable character input MUST append to the current value in typed order.
 - Backspace MUST remove the last character of the current value and MUST do nothing when the value is empty.
+- Input that is none of a printable character, Backspace, Enter, Escape, or Ctrl-C MUST leave the value unchanged.
 - Enter MUST resolve with the current value exactly as entered, including the empty string; whether an empty value is acceptable belongs to the consuming command.
 - Escape or Ctrl-C MUST cancel the dialog and resolve with `undefined` without terminating the process, so a caller can distinguish cancellation from an empty submission.
 - `input` MUST NOT trim, validate, or transform the value, and MUST NOT write it to standard output.
@@ -169,10 +170,10 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 ### User-Provided Options
 
-- Choosing a user-provided option MUST collect its fields instead of resolving immediately, and MUST collect them one at a time in declared order using the text input behavior above.
+- Choosing a user-provided option MUST collect its fields instead of resolving immediately, one at a time rather than together, using the text input behavior above.
 - The dialog MUST NOT present a field before the preceding field is submitted, and MUST NOT accept option navigation once field collection has begun.
 - After the last field is submitted, `select` MUST resolve with a result carrying the chosen option's exact value and one collected value per declared field, keyed by that field's name.
-- A plain option MUST resolve with no collected values while a user-provided option MUST resolve with one value per field it declared, so a caller distinguishes the two by the field names it declared for the resolved option.
+- The result MUST let a caller tell the two kinds of option apart: a plain option carries no collected values, and a user-provided option carries exactly the field names it declared.
 - Escape or Ctrl-C at any stage MUST cancel the entire dialog, resolve with `undefined`, and discard every value already collected; the dialog MUST NOT return to a previous stage or expose a partial result.
 
 #### Scenario: Provide a value directly
