@@ -1600,6 +1600,27 @@ describe("user-provided select options", () => {
     expect(result.stderr.text()).toContain(repository.message);
   });
 
+  test("keeps the first settlement when one chunk carries input past it", async () => {
+    const past = `${CARRIAGE_RETURN}${BACKSPACE}${CARRIAGE_RETURN}`;
+
+    const afterLastField = await runSelection(
+      [{ label: "Custom", value: "custom", fields: [owner] }],
+      [CARRIAGE_RETURN, "a", past],
+    );
+    expect(afterLastField.value).toBe("custom");
+    expect(afterLastField.values).toEqual({ owner: "a" });
+
+    const afterPlainOption = await runSelection(
+      [
+        { label: "Known", value: "known" },
+        { label: "Other", value: "other" },
+      ],
+      [past],
+    );
+    expect(afterPlainOption.value).toBe("known");
+    expect(afterPlainOption.values).toEqual({});
+  });
+
   test("rejects an invalid field declaration before rendering or terminal changes", async () => {
     for (const [fields, message] of [
       [[], "A user-provided select option requires at least one field"],
