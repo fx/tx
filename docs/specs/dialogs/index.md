@@ -132,6 +132,7 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - `text` MUST be the only field type available to callers.
 - A field name MUST be an opaque key that identifies the collected value to the caller and MUST NOT be rendered in place of the field's message.
 - The fields of an option MUST form an ordered list whose order is the order they are collected in.
+- A field's optional initial value MUST be the starting value when that field is collected, meaning exactly what it means for a standalone `input` request.
 
 #### Scenario: Field names key the result
 
@@ -139,13 +140,20 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - **WHEN** the user supplies both values
 - **THEN** the collected values are keyed by those names rather than by the messages displayed for them
 
+#### Scenario: Field collected with an initial value
+
+- **GIVEN** a chosen option declares a text field whose initial value is `origin`
+- **WHEN** that field is collected
+- **THEN** it starts with `origin` entered and editable, exactly as a standalone `input` request carrying that initial value would
+
 ### Text Input
 
 - `input` MUST render the request message and the current value.
 - `input` MUST begin with the request's initial value when one is supplied and MUST begin with an empty value otherwise.
 - Printable character input MUST append to the current value in typed order.
+- Input MAY arrive as more than one character at once, as a paste does; every printable character it carries MUST append in order, so a pasted chunk is appended whole. Control characters and escape sequences are not printable input.
 - Backspace MUST remove the last character of the current value and MUST do nothing when the value is empty.
-- Input that is none of a printable character, Backspace, Enter, Escape, or Ctrl-C MUST leave the value unchanged.
+- Any other input MUST leave the value unchanged.
 - Enter MUST resolve with the current value exactly as entered, including the empty string; whether an empty value is acceptable belongs to the consuming command.
 - Escape or Ctrl-C MUST cancel the dialog and resolve with `undefined` without terminating the process, so a caller can distinguish cancellation from an empty submission.
 - `input` MUST NOT trim, validate, or transform the value, and MUST NOT write it to standard output.
@@ -248,7 +256,7 @@ The provider registers during initialization. Consumers read committed values in
 - The dialogs capability is internal to bundled plugins; a stable external dialogs package or public export is out of scope.
 - `text` is the only field type. Dropdown, checkbox, numeric, masked, and multi-line fields are out of scope, as is a form that presents several fields at once with focus movement between them.
 - Field validation, required-field policy, defaults beyond an initial value, error messages, and re-prompting after a rejected value are out of scope; a caller validates what it receives.
-- Caret movement, word or line deletion, clipboard input, entry history, completion, and character masking are out of scope for text entry.
+- Caret movement, word or line deletion, clipboard integration, paste-specific handling, entry history, completion, and character masking are out of scope for text entry; a terminal paste arrives as ordinary input and is appended as such.
 - Returning to an earlier stage, partial results, and any back-navigation key are out of scope.
 - Search, filtering, multi-select, disabled or grouped options, custom option rendering, paging, mouse input, themes, and layout APIs are out of scope.
 - Non-interactive fallback, concurrent or nested dialogs, global serialization, persistence, and terminal accessibility policy are out of scope.

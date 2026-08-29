@@ -95,7 +95,7 @@ Because the stages share one render session, cancellation, rendering failure, an
 - A form presenting several fields at once, focus movement between fields, or Tab and Shift-Tab navigation.
 - Field types other than `text`, including dropdown, checkbox, numeric, masked, and multi-line fields.
 - Validation, required-field policy, error messaging, re-prompting after a rejected value, or conditional field visibility.
-- Caret movement, word or line deletion, clipboard input, entry history, completion, or character masking.
+- Caret movement, word or line deletion, clipboard integration, paste-specific handling, entry history, completion, or character masking.
 - Returning to an earlier stage, partial results, or a back-navigation key.
 - A confirm dialog or any dialog beyond `select` and `input`.
 - A public or externally stable dialogs package, type export, or runtime export.
@@ -106,7 +106,7 @@ Because the stages share one render session, cancellation, rendering failure, an
 
 - [ ] Add the text input dialog to the bundled dialogs provider
   - [ ] Add `input` to the local `Dialogs` shape in `plugins/dialogs/index.ts`, reusing the existing stream adapters, failure tracking, and render session
-  - [ ] Implement the entry component: initial or empty starting value, printable append, Backspace removal with an empty-value no-op, Enter submission including the empty string, and Escape or Ctrl-C cancellation
+  - [ ] Implement the entry component: initial or empty starting value, printable append including a multi-character chunk appended whole, Backspace removal with an empty-value no-op, an unchanged value for any other input, Enter submission including the empty string, and Escape or Ctrl-C cancellation
   - [ ] Reject a non-interactive request before rendering, render only on injected standard error, and complete cleanup before settlement on submission, cancellation, and failure
   - [ ] Add controlled Bun tests for rendering, initial values, entry and editing, empty submission versus cancellation, stream routing, failures, and cleanup
   - [ ] Document the standalone `input` dialog in `docs/manual/plugins.md`
@@ -115,7 +115,7 @@ Because the stages share one render session, cancellation, rendering failure, an
 - [ ] Compose select with input through user-provided options
   - [ ] Add the field declaration to `SelectOption` and change `select` to resolve a result carrying the chosen value and the collected values, updating existing callers and test consumers
   - [ ] Reject an empty field list or a repeated field name within one option before rendering, alongside the existing empty-options and non-interactive rejections
-  - [ ] Collect a chosen option's fields sequentially in declared order within the same render session, reusing the entry component and refusing option navigation once collection has begun
+  - [ ] Collect a chosen option's fields sequentially in declared order within the same render session, reusing the entry component, threading each field's optional initial value into it, and refusing option navigation once collection has begun
   - [ ] Resolve after the last field with the option's exact value and one collected value per field name, and resolve `undefined` discarding collected values when the user cancels at any stage
   - [ ] Add controlled Bun tests for plain versus user-provided results, field ordering, multi-field collection, invalid field declarations, cancellation at each stage, and single-session cleanup
   - [ ] Document composition and the new select result in `docs/manual/plugins.md`
