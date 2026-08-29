@@ -240,7 +240,9 @@ function requireInteractiveStreams(
  * Ink strips the leading escape, leaving the introducer, any parameter and
  * intermediate bytes, and the final byte. Ink reports the sequences it knows
  * as an empty entry, so anything still shaped like one is an unrecognized key
- * rather than typed text. */
+ * rather than typed text. Shape is all there is to go on — see REVIEW.md — so
+ * this covers the CSI form only, and a paste that is exactly a CSI body enters
+ * nothing. */
 const unresolvedControlSequence = /^\[\[?[\x20-\x3f]*[\x40-\x7e]$/;
 
 /** Everything a chunk carries that a terminal would display, in order. Control
