@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/fx/tx/compare/v1.3.0...v1.4.0) (2026-08-29)
+
+
+### Features
+
+* **dialogs:** add a text input dialog ([#41](https://github.com/fx/tx/issues/41)) ([cd2110d](https://github.com/fx/tx/commit/cd2110dcd66af7de2b26d04f76413bb00f35fe30))
+* **dialogs:** compose select with text input ([#43](https://github.com/fx/tx/issues/43)) ([5cb7be3](https://github.com/fx/tx/commit/5cb7be3cdc0fc5ae7ebca98b5565f032963b71c8))
+
 ## [1.3.0](https://github.com/fx/tx/compare/v1.2.0...v1.3.0) (2026-08-22)
 
 
