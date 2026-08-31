@@ -230,6 +230,34 @@ The registry contract is deliberately small:
 
 This is not a dependency-injection or lifecycle container. There are no schemas, runtime type checks, key factories, symbol tokens, ownership metadata, collision or duplicate policy, provider selection, priorities, versions, scopes, unregistering, replacement, subscriptions, events, factories, dependency ordering, disposal, health checks, retries, or caching. Failures while a consumer uses an opaque value belong to that consumer.
 
+## Use the bundled config capability
+
+The namespace-free bundled config provider registers one internal capability under the exact opaque key `config`. It persists small JSON values across invocations in one per-user document. Its local structural shape is:
+
+```ts
+type ConfigValidator<T> = (value: unknown) => value is T
+
+type Config = {
+  define<T>(key: string, isValid: ConfigValidator<T>): void
+  read<T>(key: string): Promise<T | undefined>
+  write<T>(key: string, value: T): Promise<void>
+}
+```
+
+A bundled consumer declares that compatible type locally and reads `registrations<Config>("config")` inside its command action, after initialization has committed every provider. The shape stays an implementation detail for bundled plugins; it is not a public export from `@fx/tx/plugin`.
+
+Call `define` once for each key before reading or writing it in the current process. Keys are opaque and compared exactly: tx does not trim, normalize, parse, namespace, or reserve them. A second definition of the same key is rejected and leaves the first guard in force. An absent property reads as `undefined`; a present value and every value being written must pass that key's guard. A rejected read affects no other key, and a rejected write changes nothing on disk. Values use JSON encoding, so a guard should accept only values that survive a JSON round trip in the form the consumer expects.
+
+The document is named `config.json` in the platform's `tx` user-data directory:
+
+- `$XDG_DATA_HOME/tx/config.json` when `XDG_DATA_HOME` is an absolute path, otherwise `~/.local/share/tx/config.json`, on Linux and other non-Windows, non-macOS platforms.
+- `~/Library/Application Support/tx/config.json` on macOS.
+- `%LOCALAPPDATA%\tx\config.json` on Windows, falling back to `%APPDATA%\tx\config.json`, then `~/AppData/Local/tx/config.json`.
+
+The file may be absent and is safe to hand-edit or pre-seed. Its top level must be a JSON object whose properties are config keys. Invalid JSON and every non-object root are reported rather than replaced. A write preserves every unrelated property, creates missing parent directories, and atomically replaces the document through a uniquely named temporary file beside it. Concurrent processes therefore leave a complete valid document, but they are not locked: both may read the same old object, and the later whole-document replacement may silently lose the earlier writer's change. Consumers needing merged concurrent writes need a different store.
+
+There is no `tx config` command, key listing or deletion API, schema language, migration mechanism, encryption, or cross-process transaction.
+
 ## Use the bundled dialogs capability
 
 The namespace-free bundled dialogs provider registers one internal capability under the exact opaque key `dialogs`. Its current local structural shape is:

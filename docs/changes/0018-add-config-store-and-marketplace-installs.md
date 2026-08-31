@@ -120,16 +120,16 @@ The marketplace plugin's `add`, `remove`, and new `install` command actions each
 
 ## Tasks
 
-- [ ] Add the config capability (PR #1)
-  - [ ] Add `plugins/config/storage.ts` resolving a platform-appropriate per-user data directory and its `config.json` path, documented as a fixed, hand-editable location
-  - [ ] Add `plugins/config/index.ts` implementing `define`/`read`/`write` over an atomically-replaced JSON document, registered under `config` with no command namespace
-  - [ ] Preserve exact key matching, per-process single-definition enforcement, guard-checked reads and writes, absence returning `undefined`, and document-corruption and non-object-root rejection
-  - [ ] Cover define-before-use, duplicate definition, read/write round trips, guard rejection on read and on write, first-write document creation, corrupt-document rejection, non-object document root rejection, and concurrent-write non-corruption in tests
-  - [ ] Compose the config plugin in `cli.ts`
-  - [ ] Update `docs/manual/plugins.md` with the implemented config contract
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Add the config capability
+  - [x] Add `plugins/config/storage.ts` resolving a platform-appropriate per-user data directory and its `config.json` path, documented as a fixed, hand-editable location
+  - [x] Add `plugins/config/index.ts` implementing `define`/`read`/`write` over an atomically-replaced JSON document, registered under `config` with no command namespace
+  - [x] Preserve exact key matching, per-process single-definition enforcement, guard-checked reads and writes, absence returning `undefined`, and document-corruption and non-object-root rejection
+  - [x] Cover define-before-use, duplicate definition, read/write round trips, guard rejection on read and on write, first-write document creation, corrupt-document rejection, non-object document root rejection, and concurrent-write non-corruption in tests
+  - [x] Compose the config plugin in `cli.ts`
+  - [x] Update `docs/manual/plugins.md` with the implemented config contract
+  - [x] Verify 100% coverage and `bun run check`
 
-- [ ] Consume the config capability in the marketplace plugin (PR #2)
+- [ ] Consume the config capability in the marketplace plugin
   - [ ] Define the `marketplace` config key with a type guard for an ordered list of `{ source, name }` entries that rejects a list containing two entries with the same explicit name
   - [ ] Write back the resolved name from `marketplace add`, with a credential-free source for a Git source (preserving a version-pin suffix once Change 0014 adds one) or the fully resolved real path for a local source, replacing any existing entry whose name — explicit or derived — matches; delete the same way in `marketplace remove`, deriving a name-less entry's name rather than comparing only the literal property
   - [ ] Report a write-back failure separately from, and without undoing, the install or removal that already succeeded

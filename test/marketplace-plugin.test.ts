@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -44,13 +44,28 @@ class RecordingManager implements MarketplaceOperations {
   }
 }
 
+let emptyDataHome = "";
+
+beforeAll(async () => {
+  emptyDataHome = await temporaryDirectory("tx-marketplace-plugin-empty-");
+});
+
+afterAll(async () => {
+  await rm(emptyDataHome, { recursive: true, force: true });
+});
+
 async function setup(
   context: CommandProcessContext,
   manager = new RecordingManager(),
 ) {
   const { namespaces, failures } = await initializePlugins(
     [createMarketplacePlugin({ manager })],
-    { context },
+    {
+      context: {
+        ...context,
+        env: { ...context.env, XDG_DATA_HOME: emptyDataHome },
+      },
+    },
   );
   expect(failures).toEqual([]);
   return {
