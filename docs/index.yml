@@ -18,6 +18,10 @@ specs:
     path: specs/updates/
     description: User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited.
     status: active
+  - name: config
+    path: specs/config/
+    description: Shared per-user JSON config persistence supplied by a bundled plugin, covering validated key definition, reads, writes, and atomic storage.
+    status: active
 
 changes:
   - id: "0001"
@@ -153,3 +157,10 @@ changes:
     status: complete
     depends_on:
       - "0016"
+  - id: "0018"
+    name: add-config-store-and-marketplace-installs
+    path: changes/0018-add-config-store-and-marketplace-installs.md
+    description: Add a bundled config plugin for validated per-user JSON persistence, and let the marketplace plugin seed and explicitly install a configured marketplace list.
+    spec: config
+    status: draft
+    depends_on: []

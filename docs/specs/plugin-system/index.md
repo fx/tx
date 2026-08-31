@@ -10,6 +10,8 @@ The approved target architecture is implemented: the core is generic, the market
 
 [Generic Registry](#generic-registry) and its first concrete provider are implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). The provider remains outside core under `plugins/dialogs/`, registers the opaque `dialogs` capability, and follows the separately owned [Dialogs](../dialogs/) contract.
 
+A second registry provider, the config plugin, and the marketplace plugin's use of it for [Configured Marketplaces](#configured-marketplaces) are not implemented, and are planned by [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md). The provider is intended to remain outside core under `plugins/config/`, registering the opaque `config` capability and following the separately owned [Config](../config/) contract.
+
 ## Requirements
 
 ### Generic Plugin Host
@@ -459,6 +461,42 @@ A plugin author needs to run their uncommitted work through the real `tx` execut
 - **WHEN** addition aborts
 - **THEN** no marketplace is published and `tx` leaves the referenced directory where it is, neither deleting nor rolling it back
 
+### Configured Marketplaces
+
+A user can seed the list of marketplaces they want installed before ever running `marketplace add`, and install every one of them in a single explicit step rather than adding each individually. Installing configured marketplaces MUST remain a user-invoked action; it MUST NOT run automatically as a side effect of an unrelated command, for the same reason [Updates: Never Automatic](../updates/index.md#never-automatic) prohibits automatic update checking.
+
+- The marketplace plugin MUST define a [Config](../config/) key holding an ordered list of configured marketplaces, each carrying at least the source string `marketplace add` accepts and the resolved local name it was, or would be, installed under.
+- `marketplace add` MUST record its resolved name and source in that persisted list, replacing any existing entry recorded under the same name, after the marketplace is successfully installed.
+- `marketplace remove` MUST delete the entry recorded under the removed marketplace's name from that persisted list, if one is present, after the marketplace is successfully removed.
+- `marketplace install` MUST install every marketplace in the persisted list that is not currently installed, using the same source and name it was recorded with, and MUST leave a marketplace already installed under that name unchanged.
+- A marketplace installed by `marketplace install` MUST become subject to every other marketplace requirement in this document exactly as one added directly through `marketplace add`, including validation, staging, dependency installation, and diagnostics.
+- Failure to install one configured marketplace MUST NOT prevent `marketplace install` from attempting the rest of the persisted list.
+- The persisted list is a record of desired marketplaces, not a manifest read automatically; `.tx/config.json` and the persisted list remain distinct, and neither substitutes for the other. Marketplace version and manifest information continue to be read directly from each marketplace's own checkout, per [Marketplace Plugin Ownership](#marketplace-plugin-ownership); the persisted list carries only what is needed to install a marketplace, never its version or manifest contents.
+
+#### Scenario: Seeded list installs on request
+
+- **GIVEN** a persisted list names a marketplace that is not currently installed
+- **WHEN** a user runs `marketplace install`
+- **THEN** that marketplace is installed exactly as `marketplace add` would install it, and installation does not happen on any earlier or unrelated command
+
+#### Scenario: Already-installed entries are left alone
+
+- **GIVEN** a persisted list names a marketplace that is already installed under its recorded name
+- **WHEN** a user runs `marketplace install`
+- **THEN** that marketplace is left unchanged and installation proceeds for any other configured marketplace not yet installed
+
+#### Scenario: Add and remove keep the list current
+
+- **GIVEN** an empty persisted list
+- **WHEN** a user runs `marketplace add` for a new marketplace and later `marketplace remove` for it
+- **THEN** the list gains an entry for it after the add and loses that entry after the remove
+
+#### Scenario: One failure does not block the rest
+
+- **GIVEN** a persisted list naming two marketplaces not yet installed, one of which fails to install
+- **WHEN** a user runs `marketplace install`
+- **THEN** the other configured marketplace is still installed and the failure is reported against the one that failed
+
 ### Composition and Boundaries
 
 - The repository composition root outside `src/` MUST provide the ordered default plugin definitions to the generic host.
@@ -521,7 +559,9 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0013: Update Installed Marketplaces](../../changes/0013-update-installed-marketplaces.md)
 - [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
 - [Change 0016: Add Plugin Capabilities and Dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md)
+- [Change 0018: Add Config Store and Marketplace Installs](../../changes/0018-add-config-store-and-marketplace-installs.md)
 - [Dialogs](../dialogs/)
+- [Config](../config/)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -546,3 +586,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-07 | Gave the marketplace plugin marketplace version pins, including the source suffix and the commands that change one | [0014-pin-marketplace-versions](../../changes/0014-pin-marketplace-versions.md) |
 | 2026-08-22 | Specified the minimal opaque plugin registry used by the bundled dialogs provider | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
 | 2026-08-22 | Implemented the registry's namespace-free bundled dialogs provider without adding dialog vocabulary to core | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
+| 2026-08-31 | Specified the persisted list of configured marketplaces, its `marketplace install` command, and its write-back from `marketplace add` and `marketplace remove` | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
