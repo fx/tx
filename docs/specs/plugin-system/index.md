@@ -423,7 +423,7 @@ Some marketplace repositories carry substantially more tree content — file con
 - `marketplace add` MUST accept an explicit request to skip a reduced retrieval and always retrieve the complete tree, for a marketplace whose author knows it needs content a reduced retrieval would not make available.
 - [Local Marketplace Sources](#local-marketplace-sources) is unaffected: a local source is never cloned, so nothing in this section changes its contract.
 
-A plugin's nonliteral dynamic import, permitted under [Composition and Boundaries](#composition-and-boundaries), MAY reach a repository path outside the directories a reduced retrieval materialized. Such an import is not guaranteed to find that path, exactly as it would not from any other intentionally partial checkout; this is a known limitation of reduced retrieval rather than a defect in it, tracked in [Open Questions](#open-questions).
+A plugin's module graph MAY reach a repository path outside the directories a reduced retrieval materialized — a static relative import as well as the nonliteral dynamic import permitted under [Composition and Boundaries](#composition-and-boundaries). Neither case is checked by the validation this section governs, which resolves only the manifest's `entry` and `package` fields and does not load a plugin's module graph; a plugin is loaded, and its imports resolved, only later, when a command from it is actually dispatched. Such an import is therefore not guaranteed to find that path, exactly as it would not from any other intentionally partial checkout; this is a known limitation of reduced retrieval rather than a defect in it, tracked in [Open Questions](#open-questions).
 
 #### Scenario: Reduced retrieval matches full validation
 
@@ -636,7 +636,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - Dependency environment isolation between plugins is not required.
 - Registry key factories, symbol tokens, schemas, runtime type validation, ownership metadata, provider selection, priorities, version negotiation, scopes, unregistering, replacement, subscriptions, events, lazy factories, dependency resolution, lifecycle, disposal, health checks, retries, caching, and persistence are out of scope.
 - Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
-- A reduced clone footprint materializes only the directories entry and package resolution require; it does not guarantee a plugin's nonliteral dynamic import can reach a repository path outside them.
+- A reduced clone footprint materializes only the directories entry and package resolution require; it does not guarantee a plugin's module graph — a static relative import or a nonliteral dynamic import alike — can reach a repository path outside them. [Marketplace Plugin Ownership](#marketplace-plugin-ownership)'s requirement that a plugin's dependency graph resolve by Node's rules to any depth is unaffected for files a reduced retrieval materialized; a plugin whose graph reaches further needs the explicit full-retrieval request this section requires `marketplace add` to accept.
 - A reduced clone footprint reduces file content transferred and materialized; it does not reduce the amount of commit history retrieved. Limiting history depth is out of scope, because the ancestry check [Updates](../updates/index.md) relies on to detect a rewritten upstream needs the marketplace's full commit history to be present.
 
 ## Open Questions
@@ -644,7 +644,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - A future plugin API MAY add generic lifecycle hooks beyond initialization and dispatch after concrete plugins require them.
 - Core dependency additions SHOULD be demand-driven and backward-compatible.
 - A convention for plugins that expose a single action at their namespace root, rather than subcommands, could be specified if plugins repeatedly hand-roll one.
-- Whether a marketplace author has any way, short of the explicit full-retrieval request, to declare that their plugins' nonliteral dynamic imports reach outside the manifest-derived directories, so a reduced retrieval is never attempted against a marketplace that cannot tolerate it, is unresolved.
+- Whether a marketplace author has any way, short of the explicit full-retrieval request, to declare that their plugins' module graphs — static relative imports or nonliteral dynamic imports alike — reach outside the manifest-derived directories, so a reduced retrieval is never attempted against a marketplace that cannot tolerate it, is unresolved.
 
 ## References
 

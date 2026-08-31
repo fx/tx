@@ -85,7 +85,7 @@ The update path mirrors this: `fetchCheckoutRemote`'s `git fetch` already keeps 
   - **Alternatives considered:** Retrying unconditionally on any validation failure was rejected for the wasted-retrieval cost above. Never retrying, and requiring the explicit full-retrieval option instead, was rejected as breaking installation for any marketplace whose layout the initial manifest-location pass under-scopes for a reason other than a genuine error — for example a symbolic link resolving through a directory the manifest-derived set did not anticipate. Treating "manifest fails to resolve" as always content-only was rejected once the symbolic-link case above was found: it silently breaks a marketplace a complete clone would install successfully.
 
 - **Decision:** Add an explicit `marketplace add` option to force a complete retrieval, rather than relying solely on the automatic fallback.
-  - **Why:** A plugin's nonliteral dynamic import can reach outside the manifest-derived directories in a way no validation pass at install time can detect (it only fails later, when `tx` actually loads and runs the plugin). An author who knows their marketplace does this needs a way to opt out up front rather than discovering the failure downstream.
+  - **Why:** A plugin's module graph can reach outside the manifest-derived directories in a way no validation pass at install time can detect — a static relative import to a file outside the entry's own directory (e.g., `plugins/a/index.ts` importing `../shared.ts`) exactly as much as a nonliteral dynamic import. `resolveMarketplaceManifest`/`prepareMarketplace` validate only that the manifest's `entry` and `package` fields resolve; they never load the entry file or resolve its imports, which happens only later, when `tx` actually dispatches a command from that plugin. An author who knows their marketplace's plugins reach outside their own directories needs a way to opt out up front rather than discovering the failure downstream, on a `tx` invocation that has nothing to do with installing or updating.
   - **Alternatives considered:** Relying only on the presence-dependent-failure fallback was rejected because it cannot catch a dynamic-import failure, which surfaces at plugin-load time, not at the validation this change's fallback covers.
 
 - **Decision:** Detect whether the reduced-retrieval mechanism is available by attempting it and treating failure as unavailability, rather than parsing `git --version`.
@@ -98,7 +98,7 @@ The update path mirrors this: `fetchCheckoutRemote`'s `git fetch` already keeps 
 - A manifest field for a marketplace to declare its own footprint.
 - Any change to what `.tx/config.json` or the legacy manifest may contain, or to entry/package validation rules themselves.
 - Reducing the footprint of a local (referenced, non-cloned) marketplace source, which has none to reduce.
-- Detecting or mitigating a nonliteral dynamic import that reaches outside the reduced footprint at plugin-load time; the explicit full-retrieval option and the tracked [Open Question](../specs/plugin-system/index.md#open-questions) are the only mitigations this change provides.
+- Detecting or mitigating a plugin module-graph dependency — a static relative import or a nonliteral dynamic import alike — that reaches outside the reduced footprint at plugin-load time; the explicit full-retrieval option and the tracked [Open Question](../specs/plugin-system/index.md#open-questions) are the only mitigations this change provides. Neither install-time validation nor this change adds any static analysis of an entry file's imports.
 - Reducing the amount of commit history retrieved. `--filter=blob:none` omits file content (blobs) but still transfers every commit and tree object reachable from what is fetched; a marketplace with a large or deep history retrieves that history in full under this change, exactly as it does today. Limiting history depth (`git clone --depth`) is deliberately excluded — see Decisions — because a shallow clone would break `isCommitAncestor` (`manager.ts`), which [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) already relies on to refuse applying an update whose target is not a descendant of the currently installed commit.
 
 ## Tasks
@@ -123,7 +123,7 @@ The update path mirrors this: `fetchCheckoutRemote`'s `git fetch` already keeps 
 
 ## Open Questions
 
-- [ ] Whether a marketplace author should have a way to declare, inside `.tx/config.json`, that their plugins' nonliteral dynamic imports reach outside the manifest-derived directories, so a reduced retrieval is never attempted for that marketplace at all — tracked in [Plugin System: Open Questions](../specs/plugin-system/index.md#open-questions), not resolved by this change.
+- [ ] Whether a marketplace author should have a way to declare, inside `.tx/config.json`, that their plugins' module graphs — static relative imports or nonliteral dynamic imports alike — reach outside the manifest-derived directories, so a reduced retrieval is never attempted for that marketplace at all — tracked in [Plugin System: Open Questions](../specs/plugin-system/index.md#open-questions), not resolved by this change.
 
 ## References
 
