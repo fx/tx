@@ -8,6 +8,7 @@
 | [Plugin System](specs/plugin-system/) | Generic plugin hosting, opaque capability registration, and externalized marketplace-plugin ownership contracts. | active |
 | [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection and text input composed through user-provided options. | active |
 | [Updates](specs/updates/) | User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited. | active |
+| [Config](specs/config/) | Shared per-user JSON config persistence supplied by a bundled plugin, covering validated key definition, reads, writes, and atomic storage. | active |
 
 ## Changes
 
@@ -30,3 +31,4 @@
 | 0015 | [Update the tx Executable](changes/0015-update-the-tx-executable.md) | [Updates](specs/updates/) | complete | 0012 |
 | 0016 | [Add Plugin Capabilities and Dialogs](changes/0016-add-plugin-capabilities-and-dialogs.md) | [Dialogs](specs/dialogs/) | complete | — |
 | 0017 | [Add Dialog Text Input and Composition](changes/0017-add-dialog-text-input-and-composition.md) | [Dialogs](specs/dialogs/) | complete | 0016 |
+| 0018 | [Add Config Store and Marketplace Installs](changes/0018-add-config-store-and-marketplace-installs.md) | [Config](specs/config/) | draft | 0016 |

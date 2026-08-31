@@ -10,6 +10,8 @@ The approved target architecture is implemented: the core is generic, the market
 
 [Generic Registry](#generic-registry) and its first concrete provider are implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). The provider remains outside core under `plugins/dialogs/`, registers the opaque `dialogs` capability, and follows the separately owned [Dialogs](../dialogs/) contract.
 
+A second registry provider, the config plugin, and the marketplace plugin's use of it for [Configured Marketplaces](#configured-marketplaces) are not implemented, and are planned by [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md). The provider is intended to remain outside core under `plugins/config/`, registering the opaque `config` capability and following the separately owned [Config](../config/) contract.
+
 ## Requirements
 
 ### Generic Plugin Host
@@ -459,6 +461,94 @@ A plugin author needs to run their uncommitted work through the real `tx` execut
 - **WHEN** addition aborts
 - **THEN** no marketplace is published and `tx` leaves the referenced directory where it is, neither deleting nor rolling it back
 
+### Configured Marketplaces
+
+A user can seed the list of marketplaces they want installed before ever running `marketplace add`, and install every one of them in a single explicit step rather than adding each individually. Installing configured marketplaces MUST remain a user-invoked action; it MUST NOT run automatically as a side effect of an unrelated command, for the same reason [Updates: Never Automatic](../updates/index.md#never-automatic) prohibits automatic update checking.
+
+- The marketplace plugin MUST define a [Config](../config/) key holding an ordered list of configured marketplaces. Each entry MUST be a JSON object carrying a `source` string and MAY carry a `name` string naming the resolved local name it was, or would be, installed under; a list is otherwise empty or absent exactly as [Config: Reading and Writing](../config/index.md#reading-and-writing) defines absence.
+- Wherever this section matches, replaces, deletes, or checks a persisted entry by name, "an entry's name" MUST mean its explicit `name` when it carries one, and otherwise the name `marketplace add` would derive from its `source`; a name-less entry is not exempt from being matched, replaced, deleted, or checked, and comparing only the literal `name` property MUST NOT be treated as satisfying any of the requirements below.
+- Because the persisted document lives at a fixed, documented location per [Config: Storage and Persistence](../config/index.md#storage-and-persistence), a user MAY hand-seed this key directly, before ever installing the config or marketplace plugins' code or running any command, and `marketplace install` MUST accept a list seeded this way exactly as one written by `marketplace add`.
+- `marketplace add` MUST record its resolved name in that persisted list, replacing any existing entry with the same name, after the marketplace is successfully installed. For a Git source, the recorded source MUST be a credential-free form of it, MUST NOT contain a userinfo credential, exactly as `marketplace list` already never reports one; installing a recorded entry later relies on Git's own configured credential helpers or SSH keys, not a persisted credential. For a local source, the recorded source MUST be the same fully resolved real path the reference itself is recorded against, per [Local Marketplace Sources](#local-marketplace-sources), and MUST NOT be the path as the user typed it; a relative path recorded as given would resolve against whatever directory `marketplace install` is later run from, which could be a different directory holding different, untrusted code.
+- `marketplace remove` MUST delete the entry with the removed marketplace's name from that persisted list, if one is present, after the marketplace is successfully removed. A name-less entry whose derived name matches MUST be deleted exactly as a same-named entry with an explicit `name` would be; leaving it behind would let a later `marketplace install` reinstall a marketplace the user just removed.
+- If updating the persisted list after a successful install or removal fails, `marketplace add` or `marketplace remove` MUST still report the install or removal it already performed as successful, and MUST separately report the write-back failure so the user knows the persisted list may not reflect it. Neither command MUST undo the install or removal it already performed because the write-back failed.
+- Before installing anything, `marketplace install` MUST resolve the name of every entry in the persisted list and MUST reject the whole list, naming the collision, without installing any entry from it, if two entries resolve to the same name. Write-back from `marketplace add` cannot itself produce two persisted entries with the same name, since it replaces the existing same-named entry, but it cannot prevent two hand-seeded or externally edited entries from resolving to the same name without one, so this check MUST cover both an explicit and a derived collision alike.
+- `marketplace install` MUST install every marketplace in the persisted list that is not currently installed, using the same source and name it was recorded with, and MUST leave a marketplace already installed under that name unchanged.
+- A marketplace installed by `marketplace install` MUST become subject to every other marketplace requirement in this document exactly as one added directly through `marketplace add`, including validation, staging, dependency installation, diagnostics, and, once [Updates: Marketplace Versions and Pins](../updates/index.md#marketplace-versions-and-pins) is implemented, honoring a version pin. A recorded source that carries that section's `<source>@<ref>` pin suffix MUST retain it, so `marketplace install` reproduces the same pinned version `marketplace add` would; this section does not define pin parsing, storage, or resolution, which that section owns.
+- Failure to install one configured marketplace MUST NOT prevent `marketplace install` from attempting the rest of the persisted list.
+- The persisted list is a record of desired marketplaces, not a manifest read automatically; `.tx/config.json` and the persisted list remain distinct, and neither substitutes for the other. Marketplace manifest information and an installed marketplace's current version label continue to be read directly from each marketplace's own checkout, per [Marketplace Plugin Ownership](#marketplace-plugin-ownership); the persisted list carries only what is needed to install a marketplace at the version it was configured for, never manifest contents or a version label read back from a checkout.
+
+#### Scenario: Seeded list installs on request
+
+- **GIVEN** a persisted list names a marketplace that is not currently installed
+- **WHEN** a user runs `marketplace install`
+- **THEN** that marketplace is installed exactly as `marketplace add` would install it, and installation does not happen on any earlier or unrelated command
+
+#### Scenario: Hand-seeded list installs without ever running `marketplace add`
+
+- **GIVEN** a user hand-edits the persisted document to add a `marketplace` entry before ever running `marketplace add`
+- **WHEN** the user runs `marketplace install`
+- **THEN** the marketplace named by that entry is installed exactly as if `marketplace add` had been run for it
+
+#### Scenario: Already-installed entries are left alone
+
+- **GIVEN** a persisted list names a marketplace that is already installed under its recorded name
+- **WHEN** a user runs `marketplace install`
+- **THEN** that marketplace is left unchanged and installation proceeds for any other configured marketplace not yet installed
+
+#### Scenario: Write-back never records a credential
+
+- **GIVEN** a marketplace is added from an HTTP(S) source carrying a credential in its userinfo
+- **WHEN** the addition succeeds and the persisted list is written back
+- **THEN** the recorded source contains no part of that credential
+
+#### Scenario: Local write-back records the resolved real path
+
+- **GIVEN** a marketplace is added from a local source given as a relative path
+- **WHEN** the addition succeeds and the persisted list is written back
+- **THEN** the recorded source is the same fully resolved real path the reference itself was recorded against, not the relative path as typed
+
+#### Scenario: Write-back failure does not undo a successful operation
+
+- **GIVEN** `marketplace add` successfully installs a marketplace but the subsequent write-back to the persisted list fails
+- **WHEN** the command finishes
+- **THEN** the marketplace remains installed, the command reports it as installed, and the write-back failure is reported separately
+
+#### Scenario: Add and remove keep the list current
+
+- **GIVEN** an empty persisted list
+- **WHEN** a user runs `marketplace add` for a new marketplace and later `marketplace remove` for it
+- **THEN** the list gains an entry for it after the add and loses that entry after the remove
+
+#### Scenario: Removing a name-less entry deletes it
+
+- **GIVEN** a hand-seeded persisted list has a name-less entry whose derived name matches an installed marketplace
+- **WHEN** a user removes that marketplace with `marketplace remove`
+- **THEN** the entry is deleted from the persisted list, so a later `marketplace install` does not reinstall it
+
+#### Scenario: One failure does not block the rest
+
+- **GIVEN** a persisted list naming two marketplaces not yet installed, one of which fails to install
+- **WHEN** a user runs `marketplace install`
+- **THEN** the other configured marketplace is still installed and the failure is reported against the one that failed
+
+#### Scenario: Duplicate name rejected
+
+- **GIVEN** a hand-seeded persisted list names two entries with the same explicit name
+- **WHEN** a user runs `marketplace install`
+- **THEN** the command rejects the list, names the duplicate, and installs nothing from it
+
+#### Scenario: Derived name collision rejected
+
+- **GIVEN** a hand-seeded persisted list has two entries with no explicit name whose sources would derive the same name
+- **WHEN** a user runs `marketplace install`
+- **THEN** the command rejects the list, names the collision, and installs nothing from it
+
+#### Scenario: Configured install reproduces a pin
+
+- **GIVEN** version pins are implemented and a persisted entry's recorded source carries a pin suffix
+- **WHEN** `marketplace install` installs that entry
+- **THEN** it installs the same pinned version `marketplace add` would install from that same source
+
 ### Composition and Boundaries
 
 - The repository composition root outside `src/` MUST provide the ordered default plugin definitions to the generic host.
@@ -521,7 +611,9 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0013: Update Installed Marketplaces](../../changes/0013-update-installed-marketplaces.md)
 - [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
 - [Change 0016: Add Plugin Capabilities and Dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md)
+- [Change 0018: Add Config Store and Marketplace Installs](../../changes/0018-add-config-store-and-marketplace-installs.md)
 - [Dialogs](../dialogs/)
+- [Config](../config/)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
 
@@ -546,3 +638,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-07 | Gave the marketplace plugin marketplace version pins, including the source suffix and the commands that change one | [0014-pin-marketplace-versions](../../changes/0014-pin-marketplace-versions.md) |
 | 2026-08-22 | Specified the minimal opaque plugin registry used by the bundled dialogs provider | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
 | 2026-08-22 | Implemented the registry's namespace-free bundled dialogs provider without adding dialog vocabulary to core | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
+| 2026-08-31 | Specified the persisted list of configured marketplaces, its `marketplace install` command, and its write-back from `marketplace add` and `marketplace remove` | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
