@@ -50,11 +50,11 @@ What implementing them requires of this change:
 
 ### Approach
 
-`plugins/config/` gets its own `storage.ts` resolving a per-user data directory the same way `plugins/marketplace/storage.ts` already does (platform-specific: XDG data home or `~/.local/share` on Linux, `~/Library/Application Support` on macOS, `%LOCALAPPDATA%`/`%APPDATA%` on Windows), pointed at its own `config.json` rather than the marketplace directory. A `read`/`write` pair loads and parses that document, and a write serializes the whole document and replaces it atomically by writing to a temporary file in the same directory and renaming it into place, mirroring the stage-then-`rename` pattern `MarketplaceManager` already uses for a cloned checkout.
+`plugins/config/` gets its own `storage.ts` resolving a per-user data directory the same way `plugins/marketplace/storage.ts` already does (platform-specific: XDG data home or `~/.local/share` on Linux, `~/Library/Application Support` on macOS, `%LOCALAPPDATA%`/`%APPDATA%` on Windows), pointed at its own `config.json` rather than the marketplace directory. This path is documented, not merely internal, so a user can find and hand-edit the file directly. A `read`/`write` pair loads and parses that document, rejecting it unless its top level is a JSON object, and a write serializes the whole document and replaces it atomically by writing to a temporary file in the same directory and renaming it into place, mirroring the stage-then-`rename` pattern `MarketplaceManager` already uses for a cloned checkout.
 
 The registered `Config` value keeps an in-memory `Map` from key to type guard, populated by `define` and consulted by `read` and `write`. `define` throws when a key is already present in that map; `read`/`write` throw when a key is absent from it. `read` parses the persisted document, looks up the requested key, and either returns `undefined` (key absent from the document), the value (guard accepts it), or throws (guard rejects it). `write` validates the incoming value against the key's guard before touching the document, then merges the new value for that key into a freshly-read copy of the whole document before the atomic replace, so a `write` for one key does not require every other consumer to have written first. That merge only narrows the race, it does not close it: two processes writing different keys at nearly the same moment can each read the same prior document, merge their own key into their own copy, and atomically replace the file in turn, so the later replace's document is exactly what [Config: Storage and Persistence](../specs/config/index.md#storage-and-persistence) already says to expect — the earlier writer's key is silently gone, not merely stale. Nothing in this change closes that window; a consumer that cannot tolerate losing a concurrent write needs a mechanism this store does not provide.
 
-The marketplace plugin's `add`, `remove`, and new `install` command actions each obtain the `config` capability, `define("marketplace", isMarketplaceEntryList)`, and then read or write that key. `install` reads the persisted list, and for each entry not returned by `discoverInstalledMarketplaces`, calls the same internal path `add` uses, tolerating an "already installed" outcome as a no-op so a race between the check and the install is harmless; a failure for one entry is caught, reported, and does not stop the remaining entries.
+The marketplace plugin's `add`, `remove`, and new `install` command actions each obtain the `config` capability, `define("marketplace", isMarketplaceEntryList)`, and then read or write that key, where `isMarketplaceEntryList` also rejects a list containing two entries with the same `name`. `add` writes back the resolved name paired with `credentialFreeSource(repository)` — the same function `manager.ts` already uses to build a failure's label — rather than the raw source, so a source carrying HTTP(S) userinfo never reaches the persisted document. `install` reads the persisted list, rejecting outright (naming the duplicate, installing nothing) if the guard's duplicate-name check fails, and otherwise, for each entry not returned by `discoverInstalledMarketplaces`, calls the same internal path `add` uses, tolerating an "already installed" outcome as a no-op so a race between the check and the install is harmless; a failure for one entry is caught, reported, and does not stop the remaining entries.
 
 ### Decisions
 
@@ -82,9 +82,21 @@ The marketplace plugin's `add`, `remove`, and new `install` command actions each
   - **Why:** A single small file keeps the store's persistence and atomicity story simple: one atomic replace covers every key, and there is exactly one place to look for what is persisted.
   - **Alternatives considered:** One file per key was rejected as more filesystem surface than the concrete need (a handful of small values) justifies, and would have complicated the atomicity guarantee across keys written together.
 
+- **Decision:** Document the config file's exact location and require its top level to be a JSON object, rather than treating both as an internal implementation detail.
+  - **Why:** The concrete marketplace use case requires a user to be able to seed the configured-marketplace list before ever running `tx`. Without a fixed, documented location and a guaranteed object root, there is no way for a user or an external tool to write that seed, and `write`'s key-scoped merge has no defined behavior for a document whose root is not an object.
+  - **Alternatives considered:** Keeping the path undocumented and adding a `tx config` command as the only way to populate it was rejected as exactly the CLI-surface expansion [Change 0016](./0016-add-plugin-capabilities-and-dialogs.md)'s minimalism and this change's own Non-Goals deliberately avoid; a hand-editable file needs no new command.
+
+- **Decision:** `marketplace add` records a credential-free form of the source in the persisted list, never the source as given.
+  - **Why:** The persisted list is explicitly meant to be portable and hand-seedable, which means copied between machines and potentially committed to a dotfiles repository. Writing a raw HTTP(S) source containing a token or password into it would create a new durable plaintext copy of that credential outside the protections `manager.ts` already applies to every reported failure and listing.
+  - **Alternatives considered:** Persisting the source exactly as given was rejected as a credential leak. Rejecting `marketplace add` outright for a credential-bearing source was rejected as breaking a currently-supported installation method for no benefit, when redacting only the persisted copy achieves the same protection `marketplace list` already relies on.
+
+- **Decision:** `marketplace install` rejects a persisted list containing two entries with the same name, installing nothing from it, rather than installing only the first match.
+  - **Why:** Write-back from `marketplace add` cannot itself create this state, since it replaces the existing same-named entry; a duplicate can only reach the document through hand-seeding or external editing, and installing only the first silently satisfies "every configured marketplace" without actually doing what a user watching two entries would expect.
+  - **Alternatives considered:** Silently installing the first and skipping the second as "already installed" was rejected as indistinguishable, from the user's side, between an intentional single marketplace and a mistake in a hand-edited file.
+
 ### Non-Goals
 
-- A `tx config` command for end users to inspect or edit persisted keys.
+- A `tx config` command for end users to inspect or edit persisted keys; end-user access is by hand-editing the documented file directly.
 - A schema description language, validation library dependency, or anything beyond a plain type-guard function.
 - Migration or versioning of a persisted shape between versions of a plugin.
 - Cross-process locking, transactions spanning more than one `write` call, or mutual exclusion between concurrent `tx` invocations.
@@ -95,21 +107,21 @@ The marketplace plugin's `add`, `remove`, and new `install` command actions each
 ## Tasks
 
 - [ ] Add the config capability (PR #1)
-  - [ ] Add `plugins/config/storage.ts` resolving a platform-appropriate per-user data directory and its `config.json` path
+  - [ ] Add `plugins/config/storage.ts` resolving a platform-appropriate per-user data directory and its `config.json` path, documented as a fixed, hand-editable location
   - [ ] Add `plugins/config/index.ts` implementing `define`/`read`/`write` over an atomically-replaced JSON document, registered under `config` with no command namespace
-  - [ ] Preserve exact key matching, per-process single-definition enforcement, guard-checked reads and writes, absence returning `undefined`, and document-corruption rejection
-  - [ ] Cover define-before-use, duplicate definition, read/write round trips, guard rejection on read and on write, first-write document creation, corrupt-document rejection, and concurrent-write non-corruption in tests
+  - [ ] Preserve exact key matching, per-process single-definition enforcement, guard-checked reads and writes, absence returning `undefined`, and document-corruption and non-object-root rejection
+  - [ ] Cover define-before-use, duplicate definition, read/write round trips, guard rejection on read and on write, first-write document creation, corrupt-document rejection, non-object document root rejection, and concurrent-write non-corruption in tests
   - [ ] Compose the config plugin in `cli.ts`
   - [ ] Update `docs/manual/plugins.md` with the implemented config contract
   - [ ] Verify 100% coverage and `bun run check`
 
 - [ ] Consume the config capability in the marketplace plugin (PR #2)
-  - [ ] Define the `marketplace` config key with a type guard for an ordered list of `{ source, name }` entries
-  - [ ] Write back the resolved entry from `marketplace add` and delete the matching entry in `marketplace remove`
+  - [ ] Define the `marketplace` config key with a type guard for an ordered list of `{ source, name }` entries that also rejects a list containing two entries with the same name
+  - [ ] Write back the resolved name and a credential-free source from `marketplace add`, and delete the matching entry in `marketplace remove`
   - [ ] Report a write-back failure separately from, and without undoing, the install or removal that already succeeded
-  - [ ] Add `marketplace install`, installing every persisted entry not currently installed and leaving already-installed entries unchanged
+  - [ ] Add `marketplace install`, rejecting a persisted list with a duplicate name outright, otherwise installing every persisted entry not currently installed and leaving already-installed entries unchanged
   - [ ] Ensure one entry's install failure is reported without stopping the remaining entries
-  - [ ] Cover write-back on add and remove, write-back failure after a successful install or removal, install of missing entries, no-op on already-installed entries, and per-entry failure isolation in tests
+  - [ ] Cover write-back on add and remove, credential-free write-back for an HTTP(S) source with userinfo, write-back failure after a successful install or removal, install of missing entries including a hand-seeded entry, no-op on already-installed entries, duplicate-name rejection, and per-entry failure isolation in tests
   - [ ] Update `docs/manual/plugins.md` and any `marketplace` command help text for the new command
   - [ ] Verify 100% coverage and `bun run check`
 

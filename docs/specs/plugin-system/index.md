@@ -465,10 +465,12 @@ A plugin author needs to run their uncommitted work through the real `tx` execut
 
 A user can seed the list of marketplaces they want installed before ever running `marketplace add`, and install every one of them in a single explicit step rather than adding each individually. Installing configured marketplaces MUST remain a user-invoked action; it MUST NOT run automatically as a side effect of an unrelated command, for the same reason [Updates: Never Automatic](../updates/index.md#never-automatic) prohibits automatic update checking.
 
-- The marketplace plugin MUST define a [Config](../config/) key holding an ordered list of configured marketplaces, each carrying at least the source string `marketplace add` accepts and the resolved local name it was, or would be, installed under.
-- `marketplace add` MUST record its resolved name and source in that persisted list, replacing any existing entry recorded under the same name, after the marketplace is successfully installed.
+- The marketplace plugin MUST define a [Config](../config/) key holding an ordered list of configured marketplaces. Each entry MUST be a JSON object carrying a `source` string and MAY carry a `name` string naming the resolved local name it was, or would be, installed under; a list is otherwise empty or absent exactly as [Config: Reading and Writing](../config/index.md#reading-and-writing) defines absence.
+- Because the persisted document lives at a fixed, documented location per [Config: Storage and Persistence](../config/index.md#storage-and-persistence), a user MAY hand-seed this key directly, before ever installing the config or marketplace plugins' code or running any command, and `marketplace install` MUST accept a list seeded this way exactly as one written by `marketplace add`.
+- `marketplace add` MUST record its resolved name and a credential-free form of its source in that persisted list, replacing any existing entry recorded under the same name, after the marketplace is successfully installed. The recorded source MUST NOT contain a userinfo credential, exactly as `marketplace list` already never reports one; installing a recorded entry later relies on Git's own configured credential helpers or SSH keys, not a persisted credential.
 - `marketplace remove` MUST delete the entry recorded under the removed marketplace's name from that persisted list, if one is present, after the marketplace is successfully removed.
 - If updating the persisted list after a successful install or removal fails, `marketplace add` or `marketplace remove` MUST still report the install or removal it already performed as successful, and MUST separately report the write-back failure so the user knows the persisted list may not reflect it. Neither command MUST undo the install or removal it already performed because the write-back failed.
+- The persisted list MUST NOT be treated as containing two entries with the same name. `marketplace install` MUST reject a persisted list that does, naming the duplicate, without installing any entry from it; write-back from `marketplace add` cannot itself produce this, since it replaces the existing same-named entry, so this case arises only from a hand-seeded or otherwise externally edited document.
 - `marketplace install` MUST install every marketplace in the persisted list that is not currently installed, using the same source and name it was recorded with, and MUST leave a marketplace already installed under that name unchanged.
 - A marketplace installed by `marketplace install` MUST become subject to every other marketplace requirement in this document exactly as one added directly through `marketplace add`, including validation, staging, dependency installation, and diagnostics.
 - Failure to install one configured marketplace MUST NOT prevent `marketplace install` from attempting the rest of the persisted list.
@@ -480,11 +482,23 @@ A user can seed the list of marketplaces they want installed before ever running
 - **WHEN** a user runs `marketplace install`
 - **THEN** that marketplace is installed exactly as `marketplace add` would install it, and installation does not happen on any earlier or unrelated command
 
+#### Scenario: Hand-seeded list installs without ever running `marketplace add`
+
+- **GIVEN** a user hand-edits the persisted document to add a `marketplace` entry before ever running `marketplace add`
+- **WHEN** the user runs `marketplace install`
+- **THEN** the marketplace named by that entry is installed exactly as if `marketplace add` had been run for it
+
 #### Scenario: Already-installed entries are left alone
 
 - **GIVEN** a persisted list names a marketplace that is already installed under its recorded name
 - **WHEN** a user runs `marketplace install`
 - **THEN** that marketplace is left unchanged and installation proceeds for any other configured marketplace not yet installed
+
+#### Scenario: Write-back never records a credential
+
+- **GIVEN** a marketplace is added from an HTTP(S) source carrying a credential in its userinfo
+- **WHEN** the addition succeeds and the persisted list is written back
+- **THEN** the recorded source contains no part of that credential
 
 #### Scenario: Write-back failure does not undo a successful operation
 
@@ -503,6 +517,12 @@ A user can seed the list of marketplaces they want installed before ever running
 - **GIVEN** a persisted list naming two marketplaces not yet installed, one of which fails to install
 - **WHEN** a user runs `marketplace install`
 - **THEN** the other configured marketplace is still installed and the failure is reported against the one that failed
+
+#### Scenario: Duplicate name rejected
+
+- **GIVEN** a hand-seeded persisted list names two entries with the same name
+- **WHEN** a user runs `marketplace install`
+- **THEN** the command rejects the list, names the duplicate, and installs nothing from it
 
 ### Composition and Boundaries
 

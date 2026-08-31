@@ -2,7 +2,7 @@
 
 ## Overview
 
-`tx` provides a bundled config plugin that lets any plugin persist a small JSON value across invocations, scoped to the current user rather than the current working directory. The plugin MUST expose that capability through the generic registry rather than through core vocabulary, and its contract MUST let a plugin declare the shape it expects under its own key before reading or writing it, so a corrupt or foreign value is rejected rather than silently trusted.
+`tx` provides a bundled config plugin that lets any plugin persist a small JSON value across invocations, scoped to the current user rather than the current working directory. The plugin MUST expose that capability through the generic registry rather than through core vocabulary, and its contract MUST let a plugin declare the shape it expects under its own key before reading or writing it, so a corrupt or foreign value is rejected rather than silently trusted. The persisted document lives at a fixed, documented location rather than an internal implementation detail, so a user MAY hand-edit or pre-seed it directly; no `tx` command is required to create or populate it.
 
 [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) specifies the config capability and its first consumer, the marketplace plugin's configured-marketplace list. Neither is implemented yet; every requirement below describes the desired behavior.
 
@@ -104,9 +104,11 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 ### Storage and Persistence
 
 - The capability MUST persist every key's value in one document per user, independent of any single plugin's own data directory.
+- The document MUST live at a fixed, deterministic location per user and platform, following the same platform-appropriate per-user data directory convention `tx`'s bundled plugins already use, so a user or an external script can locate and hand-edit it without running any `tx` command.
+- The document's top level MUST be a JSON object whose properties are the defined keys, so a user hand-editing one plugin's key does not have to touch or understand another's.
 - A write MUST be atomic: an interruption during a write MUST leave the previously persisted document intact rather than a partially written one.
 - The document MUST tolerate being absent; a first write MUST create it and every intermediate directory it needs.
-- A read or write MUST reject when the persisted document exists but cannot be parsed as JSON, rather than silently treating it as empty or discarding its content.
+- A read or write MUST reject when the persisted document exists but either cannot be parsed as JSON or parses to a JSON value whose top level is not an object, rather than silently treating it as empty, coercing it, or discarding its content.
 - Two `tx` invocations writing at the same time MAY race; the capability MUST NOT corrupt the document when they do, but it MUST NOT provide mutual exclusion across processes. Whichever write finishes last is the value a later read observes.
 
 #### Scenario: First write creates the document
@@ -118,6 +120,12 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 #### Scenario: Corrupt document reported rather than discarded
 
 - **GIVEN** the persisted document exists but is not valid JSON
+- **WHEN** a consumer calls `read` or `write`
+- **THEN** the call rejects and the document is left exactly as it was
+
+#### Scenario: Non-object document root rejected
+
+- **GIVEN** the persisted document exists, parses as valid JSON, and its top level is an array, string, number, boolean, or `null`
 - **WHEN** a consumer calls `read` or `write`
 - **THEN** the call rejects and the document is left exactly as it was
 
@@ -143,7 +151,7 @@ The provider registers during initialization. Consumers read the committed value
 - A schema description language, a validation library dependency, and anything beyond a plain type-guard function are out of scope; a consumer's guard is ordinary code.
 - Migration or versioning of a persisted shape is out of scope; a consumer that changes its own shape is responsible for tolerating or rejecting what an older version wrote.
 - Cross-process locking, transactions spanning more than one `write` call, partial or nested key paths within a value, encryption, and access control are out of scope.
-- A `tx config` inspection or editing command is out of scope; the capability is consumed by other plugins, not exposed as end-user vocabulary, in this spec.
+- A `tx config` inspection or editing command is out of scope. End-user access to the persisted document is by hand-editing the fixed-location file directly, per [Storage and Persistence](#storage-and-persistence); the capability's programmatic surface is consumed by other plugins, not exposed as end-user vocabulary, in this spec.
 - Listing every defined or persisted key, subscribing to changes, and deleting a single key without writing a replacement value are out of scope.
 
 ## Open Questions
