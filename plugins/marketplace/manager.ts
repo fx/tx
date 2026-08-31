@@ -817,15 +817,20 @@ async function readPublishedRef(
     checkout,
     [
       "for-each-ref",
-      "--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)",
+      "--format=%(refname)%00%(symref)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)",
       ref,
     ],
     execution,
   );
   for (const line of listed.split("\n")) {
-    const [listedRef, type, object, peeledType, peeledObject] =
+    const [listedRef, symbolic, type, object, peeledType, peeledObject] =
       line.split("\0");
     if (listedRef !== ref) continue;
+    // `remote set-head` synthesizes `refs/remotes/origin/HEAD` as an alias for
+    // the default branch. It is not a branch the remote publishes, so it must
+    // not turn a pin to the local pseudo-ref `HEAD` into an implicit default-
+    // branch pin. The same exclusion applies to any other symbolic alias.
+    if (symbolic !== "") return undefined;
     if (type === "commit") return object;
     return peeledType === "commit" ? peeledObject : undefined;
   }

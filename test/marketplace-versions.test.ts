@@ -351,6 +351,32 @@ describe("adding a pinned marketplace", () => {
     }
   });
 
+  test("rejects the local remote-HEAD alias as an unpublished ref everywhere pins are set", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-remote-head-");
+    try {
+      const { remote } = await createVersionedRemote(temporaryRoot);
+      const root = join(temporaryRoot, "marketplaces");
+      const source = pathToFileURL(remote).href;
+      const installed = manager(root, temporaryRoot);
+
+      // Git synthesizes refs/remotes/origin/HEAD after cloning. It follows the
+      // default branch but is not itself a tag or branch the remote publishes.
+      await expect(installed.add(`${source}@HEAD`)).rejects.toThrow(
+        'Version "HEAD" is not published by the remote',
+      );
+      expect(await readdir(root)).toEqual([]);
+
+      await installed.add(source);
+      await installed.pin("tools", "v1.0.0");
+      await expect(installed.pin("tools", "HEAD")).rejects.toThrow(
+        'Version "HEAD" is not published by the remote',
+      );
+      expect(pinOf(join(root, "tools"))).toBe("v1.0.0");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("rejects an empty version before Git runs", async () => {
     const rejecting = new MarketplaceManager("/unused", {
       runGit: rejectGit,
