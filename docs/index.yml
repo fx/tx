@@ -163,4 +163,5 @@ changes:
     description: Add a bundled config plugin for validated per-user JSON persistence, and let the marketplace plugin seed and explicitly install a configured marketplace list.
     spec: config
     status: draft
-    depends_on: []
+    depends_on:
+      - "0016"

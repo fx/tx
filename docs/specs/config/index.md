@@ -173,4 +173,3 @@ The provider registers during initialization. Consumers read the committed value
 | Date | Change | Document |
 |------|--------|----------|
 | 2026-08-31 | Initial desired config capability, key definition, and persistence behavior | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
-</content>

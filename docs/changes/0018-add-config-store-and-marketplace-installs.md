@@ -6,7 +6,7 @@ Add a bundled config plugin that lets any plugin persist a validated JSON value 
 
 **Specs:** [Config](../specs/config/), [Plugin System](../specs/plugin-system/)
 **Status:** draft
-**Depends On:** —
+**Depends On:** 0016
 
 ## Motivation
 
@@ -148,4 +148,3 @@ None. A `tx config` command, key deletion, and schema migration require a concre
 - Specs: [Config](../specs/config/), [Plugin System](../specs/plugin-system/), [Updates](../specs/updates/), [Architecture](../specs/architecture/)
 - Related changes: [0016-add-plugin-capabilities-and-dialogs](./0016-add-plugin-capabilities-and-dialogs.md), [0008-link-local-marketplace-sources](./0008-link-local-marketplace-sources.md), [0014-pin-marketplace-versions](./0014-pin-marketplace-versions.md)
 - Manual: [Plugins](../manual/plugins.md)
-</content>
