@@ -1,10 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { lstat, mkdir, readdir, rm, symlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   MarketplaceManager,
   type RunGit,
+  runGit,
 } from "../plugins/marketplace/manager.ts";
 import {
   carriesGitSyntax,
@@ -256,6 +265,67 @@ describe("adding a pinned marketplace", () => {
       const checkout = join(root, "tools");
       expect(fixtureGit(checkout, ["rev-parse", "HEAD"])).toBe(first);
       expect(pinOf(checkout)).toBe(first);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("installs a commit named by a unique abbreviation shorter than seven characters", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-add-short-commit-");
+    try {
+      const { remote, first } = await createVersionedRemote(temporaryRoot);
+      const root = join(temporaryRoot, "marketplaces");
+      const abbreviation = [4, 5, 6]
+        .map((length) => first.slice(0, length))
+        .find((candidate) => {
+          const matches = fixtureGit(remote, [
+            "rev-parse",
+            `--disambiguate=${candidate}`,
+          ]).split("\n");
+          return matches.length === 1 && matches[0] === first;
+        });
+      expect(abbreviation).toBeDefined();
+
+      await manager(root, temporaryRoot).add(
+        `${pathToFileURL(remote).href}@${abbreviation}`,
+      );
+
+      const checkout = join(root, "tools");
+      expect(fixtureGit(checkout, ["rev-parse", "HEAD"])).toBe(first);
+      expect(pinOf(checkout)).toBe(abbreviation as string);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a commit abbreviation that is ambiguous with another object", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-add-ambiguous-");
+    try {
+      const { remote, first } = await createVersionedRemote(temporaryRoot);
+      const prefix = first.slice(0, 4);
+      let contents = "";
+      for (let attempt = 0; attempt < 1_000_000; attempt += 1) {
+        const candidate = `ambiguous object ${attempt}\n`;
+        const digest = createHash("sha1")
+          .update(`blob ${Buffer.byteLength(candidate)}\0${candidate}`)
+          .digest("hex");
+        if (digest.startsWith(prefix)) {
+          contents = candidate;
+          break;
+        }
+      }
+      expect(contents).not.toBe("");
+      const objectPath = join(temporaryRoot, "ambiguous-object.txt");
+      await writeFile(objectPath, contents);
+      const blob = fixtureGit(remote, ["hash-object", "-w", "--", objectPath]);
+      expect(blob).toStartWith(prefix);
+      fixtureGit(remote, ["tag", "ambiguous-object", blob]);
+
+      await expect(
+        manager(join(temporaryRoot, "marketplaces"), temporaryRoot).add(
+          `${pathToFileURL(remote).href}@${prefix}`,
+        ),
+      ).rejects.toThrow(`Version "${prefix}" is not published by the remote`);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -531,6 +601,73 @@ describe("marketplace pin and unpin", () => {
       expect(
         fixtureGit(checkout, ["config", "--local", "--list"]),
       ).not.toContain("tx.pin");
+
+      // An explicitly empty value is malformed but still set, so unpin clears
+      // it rather than confusing it with the genuinely absent key above.
+      fixtureGit(checkout, ["config", "--local", "tx.pin", ""]);
+      await installed.unpin("tools");
+      expect(
+        fixtureGit(checkout, ["config", "--local", "--list"]),
+      ).not.toContain("tx.pin");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not treat an operational pin read failure as an unset pin", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-unpin-read-failed-");
+    try {
+      const { remote } = await createVersionedRemote(temporaryRoot);
+      const root = join(temporaryRoot, "marketplaces");
+      const installed = manager(root, temporaryRoot);
+      await installed.add(`${pathToFileURL(remote).href}@v1.0.0`);
+      const checkout = join(root, "tools");
+      const failing = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        env: process.env,
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          if (args.includes("--null") && args.includes("--list")) {
+            throw new Error("Git command failed: pin config unreadable");
+          }
+          return runGit(args, options);
+        },
+      });
+
+      await expect(failing.unpin("tools")).rejects.toThrow(
+        "Git command failed: pin config unreadable",
+      );
+      expect(pinOf(checkout)).toBe("v1.0.0");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not report an operational ref probe failure as unpublished", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-pin-probe-failed-");
+    try {
+      const { remote } = await createVersionedRemote(temporaryRoot);
+      const root = join(temporaryRoot, "marketplaces");
+      const installed = manager(root, temporaryRoot);
+      await installed.add(pathToFileURL(remote).href);
+      const failing = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        env: process.env,
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          if (args.some((arg) => arg.startsWith("refs/tags/v1.0.0"))) {
+            throw new Error("Git command failed: ref database unreadable");
+          }
+          return runGit(args, options);
+        },
+      });
+
+      const failure = await failing.pin("tools", "v1.0.0").then(
+        () => "",
+        (error: Error) => error.message,
+      );
+      expect(failure).toBe("Git command failed: ref database unreadable");
+      expect(failure).not.toContain("not published");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }

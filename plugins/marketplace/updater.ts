@@ -11,6 +11,7 @@ import {
   isCommitAncestor,
   isCommitPublished,
   liveMarketplaceVersion,
+  MarketplaceRefNotPublishedError,
   moveCheckout,
   type ResolvedRef,
   type RunGit,
@@ -82,6 +83,14 @@ function unreachableRemote(error: unknown, source: string): string {
  */
 function unresolvablePin(name: string, error: unknown): string {
   return `${errorMessage(error)}. Run "tx marketplace pin ${name} <ref>" or "tx marketplace unpin ${name}".`;
+}
+
+/** A genuinely unpublished pin, kept distinct from operational Git failures. */
+class UnresolvableMarketplacePinError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnresolvableMarketplacePinError";
+  }
 }
 
 /** The one line of detail an item may carry, joined from whatever the pin and
@@ -223,7 +232,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
         // A pin the remote stopped publishing is this marketplace's own
         // failure and arrives carrying its remedy; anything else came from a
         // checkout tx cannot read, which the outer handler reports as that.
-        if (pin === undefined) throw error;
+        if (!(error instanceof UnresolvableMarketplacePinError)) throw error;
         return { name, current: label, failure: errorMessage(error) };
       }
       // The pin is reported whether or not anything moves: a marketplace held
@@ -303,7 +312,10 @@ export class MarketplaceUpdater implements UpdateParticipant {
     try {
       return await resolveMarketplaceRef(checkout, pin, this.#execution);
     } catch (error) {
-      throw new Error(unresolvablePin(name, error));
+      if (error instanceof MarketplaceRefNotPublishedError) {
+        throw new UnresolvableMarketplacePinError(unresolvablePin(name, error));
+      }
+      throw error;
     }
   }
 

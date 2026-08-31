@@ -74,6 +74,14 @@ export interface ResolvedRef {
   readonly tag: boolean;
 }
 
+/** The one expected negative result of resolving a marketplace version. */
+export class MarketplaceRefNotPublishedError extends Error {
+  constructor(ref: string) {
+    super(`Version "${ref}" is not published by the remote`);
+    this.name = "MarketplaceRefNotPublishedError";
+  }
+}
+
 export interface MarketplaceManagerOptions {
   readonly runGit?: RunGit;
   readonly prepare?: (checkout: string) => Promise<void>;
@@ -101,9 +109,10 @@ const sshCommandVariable = "core.sshcommand";
  * migrate.
  */
 const pinVariable = "tx.pin";
-/** What a pin may name as a commit rather than as a ref: a hash, abbreviated
- * no further than Git's own default. Anything shorter is a name. */
-const commitHashPattern = /^[0-9a-f]{7,40}$/i;
+/** What a pin may name as a commit rather than as a ref: hexadecimal object
+ * name syntax. Git itself decides whether the spelling is a valid unique
+ * abbreviation for this repository's object format. */
+const commitHashPattern = /^[0-9a-f]+$/i;
 /**
  * What Git reads as revision syntax rather than as part of a ref's name:
  * the operators `~`, `^`, `:`, the reflog and upstream form `@{…}`, `@` on its
@@ -114,8 +123,6 @@ const commitHashPattern = /^[0-9a-f]{7,40}$/i;
  * evaluate an expression, answering a pin with an ancestor or a reflog entry
  * nobody published.
  */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the characters Git
-// forbids in a ref name are what this has to match.
 const revisionSyntaxPattern = /[\0-\x20~^:?*[\\\x7f]|@\{|\.\.|^@$/;
 /**
  * A semantic version, optionally spelled with the `v` release tags carry,
@@ -527,23 +534,6 @@ export async function nonInteractiveGitEnvironment(
   return { ...promptless, GIT_SSH_COMMAND: batchModeSshCommand };
 }
 
-/**
- * A Git read whose failure and whose blank answer mean the same thing: the
- * thing asked about is not there. One definition, because every caller of it
- * is asking Git a question it answers by exit status — an unset configuration
- * variable, a revision that names nothing, a checkout too broken to say — and
- * each would otherwise repeat the same swallow.
- */
-async function readOptional(
-  read: () => Promise<string>,
-): Promise<string | undefined> {
-  try {
-    return (await read()) || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** One Git command inside a checkout, answered by its trimmed output. */
 async function readCheckout(
   checkout: string,
@@ -757,22 +747,29 @@ export async function restoreCheckout(
 
 /**
  * The ref a checkout is pinned to, as the user spelled it, or nothing when it
- * tracks its remote's default branch. `git config --get` exits non-zero for a
- * variable that is not set, which is indistinguishable here from a
- * configuration this process cannot read — and both mean the same thing: no
- * pin, so the default branch is what this marketplace follows.
+ * tracks its remote's default branch. Listing local configuration exits zero
+ * when the variable is absent, so absence is data while an unreadable or
+ * otherwise broken configuration remains an operational failure.
  */
 export async function readMarketplacePin(
   checkout: string,
   execution: GitExecution,
 ): Promise<string | undefined> {
-  return readOptional(() =>
-    readCheckout(
-      checkout,
-      ["config", "--local", "--get", pinVariable],
-      execution,
-    ),
+  const listed = await readCheckout(
+    checkout,
+    ["config", "--local", "--null", "--list"],
+    execution,
   );
+  let pin: string | undefined;
+  for (const entry of listed.split("\0")) {
+    const separator = entry.indexOf("\n");
+    if (separator < 0) continue;
+    if (entry.slice(0, separator).toLowerCase() !== pinVariable) continue;
+    // An explicitly empty value is still set. In particular, unpin must clear
+    // it rather than silently treating a malformed pin as already absent.
+    pin = entry.slice(separator + 1).trim();
+  }
+  return pin;
 }
 
 /**
@@ -804,26 +801,6 @@ export async function clearMarketplacePin(
 }
 
 /**
- * One revision, resolved to the commit it names, or nothing — which is how
- * `rev-parse --quiet` answers a revision that names nothing, and the only
- * outcome this has to tell apart. `--end-of-options` keeps a revision
- * beginning with `-` a revision rather than an option.
- */
-async function readResolvedCommit(
-  checkout: string,
-  revision: string,
-  execution: GitExecution,
-): Promise<string | undefined> {
-  return readOptional(() =>
-    readCheckout(
-      checkout,
-      ["rev-parse", "--verify", "--quiet", "--end-of-options", revision],
-      execution,
-    ),
-  );
-}
-
-/**
  * The commit one of the remote's refs names, taking the ref's name as a name:
  * a pin carrying revision syntax names nothing the remote publishes, so it is
  * refused here rather than evaluated as an expression against this checkout.
@@ -835,11 +812,24 @@ async function readPublishedRef(
   execution: GitExecution,
 ): Promise<string | undefined> {
   if (revisionSyntaxPattern.test(name)) return undefined;
-  return readResolvedCommit(
+  const ref = `${namespace}${name}`;
+  const listed = await readCheckout(
     checkout,
-    `${namespace}${name}^{commit}`,
+    [
+      "for-each-ref",
+      "--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)",
+      ref,
+    ],
     execution,
   );
+  for (const line of listed.split("\n")) {
+    const [listedRef, type, object, peeledType, peeledObject] =
+      line.split("\0");
+    if (listedRef !== ref) continue;
+    if (type === "commit") return object;
+    return peeledType === "commit" ? peeledObject : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -863,12 +853,20 @@ async function readPublishedCommit(
   execution: GitExecution,
 ): Promise<string | undefined> {
   if (!commitHashPattern.test(hash)) return undefined;
-  const commit = await readResolvedCommit(
+  const candidates = await readCheckout(
     checkout,
-    `${hash}^{commit}`,
+    ["rev-parse", `--disambiguate=${hash}`],
     execution,
   );
-  if (commit === undefined) return undefined;
+  const objects = candidates === "" ? [] : candidates.split("\n");
+  if (objects.length !== 1) return undefined;
+  const [commit = ""] = objects;
+  const type = await readCheckout(
+    checkout,
+    ["cat-file", "-t", commit],
+    execution,
+  );
+  if (type !== "commit") return undefined;
   return (await isCommitPublished(checkout, commit, execution))
     ? commit
     : undefined;
@@ -911,7 +909,7 @@ export async function resolveMarketplaceRef(
     const hash = await readPublishedCommit(checkout, attempt, execution);
     if (hash !== undefined) return { commit: hash, tag: false };
   }
-  throw new Error(`Version "${ref}" is not published by the remote`);
+  throw new MarketplaceRefNotPublishedError(ref);
 }
 
 /** Whether a tag is a version this plugin may order at all. */
@@ -1005,7 +1003,11 @@ async function listedColumn(
   read: () => Promise<string>,
   placeholder: string,
 ): Promise<string> {
-  return (await readOptional(read)) ?? placeholder;
+  try {
+    return (await read()) || placeholder;
+  } catch {
+    return placeholder;
+  }
 }
 
 export class MarketplaceManager implements MarketplaceOperations {
@@ -1301,10 +1303,12 @@ export class MarketplaceManager implements MarketplaceOperations {
     } catch (error) {
       // Nothing to redact against when the checkout cannot name its remote,
       // which is the safe direction: the failure still reports.
-      const source =
-        (await readOptional(() =>
-          readRemoteSource(checkout, this.#execution),
-        )) ?? "";
+      let source = "";
+      try {
+        source = await readRemoteSource(checkout, this.#execution);
+      } catch {
+        // The fetch failure remains the failure being reported.
+      }
       throw withoutCredentialsInFailure(
         error as Error,
         credentialRedactions(source),

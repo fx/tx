@@ -6,6 +6,7 @@ import type { UpdateItem } from "@fx/tx/plugin";
 import {
   MarketplaceManager,
   type RunGit,
+  runGit,
 } from "../plugins/marketplace/manager.ts";
 import { MarketplaceUpdater } from "../plugins/marketplace/updater.ts";
 import {
@@ -699,6 +700,83 @@ describe("pinned marketplace updates", () => {
     }
   });
 
+  test("does not follow the default branch when reading the pin fails operationally", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-pin-read-failed-",
+    );
+    try {
+      const { remote, root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      await publishSecondVersion(remote);
+      const runWithFailedPinRead: RunGit = async (args, options) => {
+        if (args.includes("--null") && args.includes("--list")) {
+          throw new Error("Git command failed: pin config unreadable");
+        }
+        return runGit(args, options);
+      };
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        prepare: unprepared,
+        runGit: runWithFailedPinRead,
+      });
+
+      expect(await participant.gather()).toEqual([
+        {
+          name: "tools",
+          current: "v1.0.0",
+          failure:
+            'Git command failed: pin config unreadable. Run "tx marketplace remove tools" to remove it.',
+        },
+      ]);
+      await expect(
+        participant.apply({ name: "tools", current: "v1.0.0" }),
+      ).rejects.toThrow("Git command failed: pin config unreadable");
+      expect(headOf(checkout)).not.toBe(
+        fixtureGit(checkout, ["rev-parse", "refs/remotes/origin/HEAD"]),
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not give pin guidance for an operational ref probe failure", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-ref-read-failed-",
+    );
+    try {
+      const { root, checkout } = await installClone(temporaryRoot);
+      pin(checkout, "v1.0.0");
+      const runWithFailedRefRead: RunGit = async (args, options) => {
+        if (args.some((arg) => arg.startsWith("refs/tags/v1.0.0"))) {
+          throw new Error("Git command failed: ref database unreadable");
+        }
+        return runGit(args, options);
+      };
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        prepare: unprepared,
+        runGit: runWithFailedRefRead,
+      });
+
+      const item = gathered(await participant.gather());
+      expect(item.failure).toBe(
+        'Git command failed: ref database unreadable. Run "tx marketplace remove tools" to remove it.',
+      );
+      expect(item.failure).not.toContain("tx marketplace pin");
+
+      const failure = await participant
+        .apply({ name: "tools", current: "v1.0.0" })
+        .then(
+          () => "",
+          (error: Error) => error.message,
+        );
+      expect(failure).toBe("Git command failed: ref database unreadable");
+      expect(failure).not.toContain("tx marketplace pin");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("reports a tag the remote withdrew after it was pinned", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-withdrawn-");
     try {
@@ -886,7 +964,7 @@ describe("marketplace update environment", () => {
         // Read again now the fetch has brought the tags in, since a tag added
         // to the installed commit changes what it is called.
         ["-C", checkout, "describe", "--tags", "--always", "aaaa"],
-        ["-C", checkout, "config", "--local", "--get", "tx.pin"],
+        ["-C", checkout, "config", "--local", "--null", "--list"],
         ["-C", checkout, "rev-parse", "refs/remotes/origin/HEAD"],
         ["-C", checkout, "diff", "--name-only", "HEAD", "--"],
         ["-C", checkout, "rev-list", "--count", "bbbb..aaaa", "--"],

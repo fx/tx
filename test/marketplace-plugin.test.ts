@@ -16,11 +16,23 @@ import {
 import type { CommandProcessContext } from "../src/context.ts";
 import { coreDependencies, initializePlugins } from "../src/plugins.ts";
 import {
-  captureContext,
+  captureContext as captureCommandContext,
   createGitRepository,
   fixtureGit,
   temporaryDirectory,
 } from "./helpers.ts";
+
+const missingDataHome = "/definitely/missing/tx-marketplace-plugin-tests";
+
+/** Keep plugin discovery independent of marketplaces installed for the user
+ * running the suite; tests that need storage pass their own data directory. */
+function captureContext(
+  env: Record<string, string | undefined> = {
+    XDG_DATA_HOME: missingDataHome,
+  },
+) {
+  return captureCommandContext(env);
+}
 
 class RecordingManager implements MarketplaceOperations {
   readonly calls: unknown[][] = [];
@@ -407,9 +419,7 @@ describe("first-party marketplace plugin", () => {
   });
 
   test("resolves marketplace storage from its initialization context", async () => {
-    const context = captureContext({
-      XDG_DATA_HOME: "/definitely/missing/tx-test-data",
-    });
+    const context = captureContext();
     const { namespaces, failures } = await initializePlugins(
       [createMarketplacePlugin()],
       { context },
