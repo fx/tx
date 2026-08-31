@@ -403,11 +403,12 @@ test("bundled plugin module graphs stay behind the public boundary", async () =>
   const entries = await bundledPluginEntries();
   expect(entries.length).toBeGreaterThan(0);
   // The whole graph of every discovered entry is walked below, so naming the
-  // bundled plugins that own no storage keep their own checks from passing
-  // vacuously: neither can reach the marketplace plugin's modules, or core's,
+  // bundled plugins that own no marketplace storage keep their own checks from
+  // passing vacuously: none can reach the marketplace plugin's modules, or core's,
   // without failing here.
   const discovered = entries.map((entry) => relative(repositoryRoot, entry));
   expect(discovered).toContain(join("plugins", "update", "index.ts"));
+  expect(discovered).toContain(join("plugins", "config", "index.ts"));
   expect(discovered).toContain(join("plugins", "dialogs", "index.ts"));
   expect(discovered).toContain(join("plugins", "executable", "index.ts"));
   await withProgram(

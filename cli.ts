@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import configPlugin from "./plugins/config/index.ts";
 import dialogsPlugin from "./plugins/dialogs/index.ts";
 import executablePlugin from "./plugins/executable/index.ts";
 import marketplacePlugin from "./plugins/marketplace/index.ts";
@@ -23,6 +24,7 @@ export const defaultPlugins: readonly PluginDefinition[] = Object.freeze([
   marketplacePlugin,
   updatePlugin,
   dialogsPlugin,
+  configPlugin,
   executablePlugin,
 ]);
 

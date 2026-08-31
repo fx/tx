@@ -10,7 +10,7 @@ The approved target architecture is implemented: the core is generic, the market
 
 [Generic Registry](#generic-registry) and its first concrete provider are implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). The provider remains outside core under `plugins/dialogs/`, registers the opaque `dialogs` capability, and follows the separately owned [Dialogs](../dialogs/) contract.
 
-A second registry provider, the config plugin, and the marketplace plugin's use of it for [Configured Marketplaces](#configured-marketplaces) are not implemented, and are planned by [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md). The provider is intended to remain outside core under `plugins/config/`, registering the opaque `config` capability and following the separately owned [Config](../config/) contract.
+The second registry provider planned by [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) is implemented outside core under `plugins/config/`: it registers the opaque `config` capability and follows the separately owned [Config](../config/) contract. The marketplace plugin's use of it for [Configured Marketplaces](#configured-marketplaces) remains pending, so that consumer section still describes desired behavior.
 
 [Minimal Clone Footprint](#minimal-clone-footprint) is not implemented — every Git-sourced install and update retrieves a marketplace's complete tree today — and is planned by [Change 0019](../../changes/0019-reduce-marketplace-clone-footprint.md).
 
