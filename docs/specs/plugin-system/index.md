@@ -467,7 +467,7 @@ A user can seed the list of marketplaces they want installed before ever running
 
 - The marketplace plugin MUST define a [Config](../config/) key holding an ordered list of configured marketplaces. Each entry MUST be a JSON object carrying a `source` string and MAY carry a `name` string naming the resolved local name it was, or would be, installed under; a list is otherwise empty or absent exactly as [Config: Reading and Writing](../config/index.md#reading-and-writing) defines absence.
 - Because the persisted document lives at a fixed, documented location per [Config: Storage and Persistence](../config/index.md#storage-and-persistence), a user MAY hand-seed this key directly, before ever installing the config or marketplace plugins' code or running any command, and `marketplace install` MUST accept a list seeded this way exactly as one written by `marketplace add`.
-- `marketplace add` MUST record its resolved name and a credential-free form of its source in that persisted list, replacing any existing entry recorded under the same name, after the marketplace is successfully installed. The recorded source MUST NOT contain a userinfo credential, exactly as `marketplace list` already never reports one; installing a recorded entry later relies on Git's own configured credential helpers or SSH keys, not a persisted credential.
+- `marketplace add` MUST record its resolved name in that persisted list, replacing any existing entry recorded under the same name, after the marketplace is successfully installed. For a Git source, the recorded source MUST be a credential-free form of it, MUST NOT contain a userinfo credential, exactly as `marketplace list` already never reports one; installing a recorded entry later relies on Git's own configured credential helpers or SSH keys, not a persisted credential. For a local source, the recorded source MUST be the same fully resolved real path the reference itself is recorded against, per [Local Marketplace Sources](#local-marketplace-sources), and MUST NOT be the path as the user typed it; a relative path recorded as given would resolve against whatever directory `marketplace install` is later run from, which could be a different directory holding different, untrusted code.
 - `marketplace remove` MUST delete the entry recorded under the removed marketplace's name from that persisted list, if one is present, after the marketplace is successfully removed.
 - If updating the persisted list after a successful install or removal fails, `marketplace add` or `marketplace remove` MUST still report the install or removal it already performed as successful, and MUST separately report the write-back failure so the user knows the persisted list may not reflect it. Neither command MUST undo the install or removal it already performed because the write-back failed.
 - The persisted list MUST NOT be treated as containing two entries with the same name. `marketplace install` MUST reject a persisted list that does, naming the duplicate, without installing any entry from it; write-back from `marketplace add` cannot itself produce this, since it replaces the existing same-named entry, so this case arises only from a hand-seeded or otherwise externally edited document.
@@ -499,6 +499,12 @@ A user can seed the list of marketplaces they want installed before ever running
 - **GIVEN** a marketplace is added from an HTTP(S) source carrying a credential in its userinfo
 - **WHEN** the addition succeeds and the persisted list is written back
 - **THEN** the recorded source contains no part of that credential
+
+#### Scenario: Local write-back records the resolved real path
+
+- **GIVEN** a marketplace is added from a local source given as a relative path
+- **WHEN** the addition succeeds and the persisted list is written back
+- **THEN** the recorded source is the same fully resolved real path the reference itself was recorded against, not the relative path as typed
 
 #### Scenario: Write-back failure does not undo a successful operation
 
