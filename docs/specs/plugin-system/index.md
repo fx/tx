@@ -470,11 +470,11 @@ A user can seed the list of marketplaces they want installed before ever running
 - `marketplace add` MUST record its resolved name in that persisted list, replacing any existing entry recorded under the same name, after the marketplace is successfully installed. For a Git source, the recorded source MUST be a credential-free form of it, MUST NOT contain a userinfo credential, exactly as `marketplace list` already never reports one; installing a recorded entry later relies on Git's own configured credential helpers or SSH keys, not a persisted credential. For a local source, the recorded source MUST be the same fully resolved real path the reference itself is recorded against, per [Local Marketplace Sources](#local-marketplace-sources), and MUST NOT be the path as the user typed it; a relative path recorded as given would resolve against whatever directory `marketplace install` is later run from, which could be a different directory holding different, untrusted code.
 - `marketplace remove` MUST delete the entry recorded under the removed marketplace's name from that persisted list, if one is present, after the marketplace is successfully removed.
 - If updating the persisted list after a successful install or removal fails, `marketplace add` or `marketplace remove` MUST still report the install or removal it already performed as successful, and MUST separately report the write-back failure so the user knows the persisted list may not reflect it. Neither command MUST undo the install or removal it already performed because the write-back failed.
-- The persisted list MUST NOT be treated as containing two entries with the same name. `marketplace install` MUST reject a persisted list that does, naming the duplicate, without installing any entry from it; write-back from `marketplace add` cannot itself produce this, since it replaces the existing same-named entry, so this case arises only from a hand-seeded or otherwise externally edited document.
+- Before installing anything, `marketplace install` MUST resolve the name of every entry in the persisted list — an entry's explicit `name` if it carries one, otherwise the name `marketplace add` would derive from its source — and MUST reject the whole list, naming the collision, without installing any entry from it, if two entries resolve to the same name. Write-back from `marketplace add` cannot itself produce two persisted entries with the same explicit name, since it replaces the existing same-named entry, but it cannot prevent two hand-seeded or externally edited entries from resolving to the same name without one, so this check MUST cover both an explicit and a derived collision alike.
 - `marketplace install` MUST install every marketplace in the persisted list that is not currently installed, using the same source and name it was recorded with, and MUST leave a marketplace already installed under that name unchanged.
-- A marketplace installed by `marketplace install` MUST become subject to every other marketplace requirement in this document exactly as one added directly through `marketplace add`, including validation, staging, dependency installation, and diagnostics.
+- A marketplace installed by `marketplace install` MUST become subject to every other marketplace requirement in this document exactly as one added directly through `marketplace add`, including validation, staging, dependency installation, diagnostics, and, once [Updates: Marketplace Versions and Pins](../updates/index.md#marketplace-versions-and-pins) is implemented, honoring a version pin. A recorded source that carries that section's `<source>@<ref>` pin suffix MUST retain it, so `marketplace install` reproduces the same pinned version `marketplace add` would; this section does not define pin parsing, storage, or resolution, which that section owns.
 - Failure to install one configured marketplace MUST NOT prevent `marketplace install` from attempting the rest of the persisted list.
-- The persisted list is a record of desired marketplaces, not a manifest read automatically; `.tx/config.json` and the persisted list remain distinct, and neither substitutes for the other. Marketplace version and manifest information continue to be read directly from each marketplace's own checkout, per [Marketplace Plugin Ownership](#marketplace-plugin-ownership); the persisted list carries only what is needed to install a marketplace, never its version or manifest contents.
+- The persisted list is a record of desired marketplaces, not a manifest read automatically; `.tx/config.json` and the persisted list remain distinct, and neither substitutes for the other. Marketplace manifest information and an installed marketplace's current version label continue to be read directly from each marketplace's own checkout, per [Marketplace Plugin Ownership](#marketplace-plugin-ownership); the persisted list carries only what is needed to install a marketplace at the version it was configured for, never manifest contents or a version label read back from a checkout.
 
 #### Scenario: Seeded list installs on request
 
@@ -526,9 +526,21 @@ A user can seed the list of marketplaces they want installed before ever running
 
 #### Scenario: Duplicate name rejected
 
-- **GIVEN** a hand-seeded persisted list names two entries with the same name
+- **GIVEN** a hand-seeded persisted list names two entries with the same explicit name
 - **WHEN** a user runs `marketplace install`
 - **THEN** the command rejects the list, names the duplicate, and installs nothing from it
+
+#### Scenario: Derived name collision rejected
+
+- **GIVEN** a hand-seeded persisted list has two entries with no explicit name whose sources would derive the same name
+- **WHEN** a user runs `marketplace install`
+- **THEN** the command rejects the list, names the collision, and installs nothing from it
+
+#### Scenario: Configured install reproduces a pin
+
+- **GIVEN** version pins are implemented and a persisted entry's recorded source carries a pin suffix
+- **WHEN** `marketplace install` installs that entry
+- **THEN** it installs the same pinned version `marketplace add` would install from that same source
 
 ### Composition and Boundaries
 
