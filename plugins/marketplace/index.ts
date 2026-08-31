@@ -15,6 +15,7 @@ export type { MarketplaceOperations } from "./manager.ts";
 
 export interface MarketplacePluginOptions {
   readonly manager?: MarketplaceOperations;
+  readonly root?: string;
 }
 
 interface PluginModule {
@@ -139,7 +140,7 @@ export function createMarketplacePlugin(
     identity,
     load(): Plugin {
       return ({ command, context, env, plugin, update }) => {
-        const root = resolveMarketplaceDirectory({ env });
+        const root = options.root ?? resolveMarketplaceDirectory({ env });
         const manager =
           options.manager ??
           new MarketplaceManager(root, { env, cwd: context.cwd });

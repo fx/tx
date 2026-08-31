@@ -13,25 +13,38 @@ import {
   EXIT_FAILURE,
   EXIT_SUCCESS,
 } from "../src/commands.ts";
-import type { CommandProcessContext } from "../src/context.ts";
 import { coreDependencies, initializePlugins } from "../src/plugins.ts";
 import {
+  type CapturedContext,
   captureContext as captureCommandContext,
   createGitRepository,
   fixtureGit,
   temporaryDirectory,
 } from "./helpers.ts";
 
-const missingDataHome = "/definitely/missing/tx-marketplace-plugin-tests";
+interface MarketplaceTestContext extends CapturedContext {
+  readonly marketplaceRoot: string;
+}
 
-/** Keep plugin discovery independent of marketplaces installed for the user
- * running the suite; tests that need storage pass their own data directory. */
+let isolatedMarketplaceRoot = "";
+
+/** Give every plugin constructed from this context an explicit temporary
+ * discovery root, independent of every platform's real user-data location. */
 function captureContext(
-  env: Record<string, string | undefined> = {
-    XDG_DATA_HOME: missingDataHome,
-  },
+  marketplaceRoot = isolatedMarketplaceRoot,
+  env: Record<string, string | undefined> = {},
+): MarketplaceTestContext {
+  return Object.assign(captureCommandContext(env), { marketplaceRoot });
+}
+
+function marketplacePlugin(
+  context: MarketplaceTestContext,
+  manager?: MarketplaceOperations,
 ) {
-  return captureCommandContext(env);
+  const root = context.marketplaceRoot;
+  return createMarketplacePlugin(
+    manager === undefined ? { root } : { manager, root },
+  );
 }
 
 class RecordingManager implements MarketplaceOperations {
@@ -65,28 +78,23 @@ class RecordingManager implements MarketplaceOperations {
   }
 }
 
-let emptyDataHome = "";
-
 beforeAll(async () => {
-  emptyDataHome = await temporaryDirectory("tx-marketplace-plugin-empty-");
+  isolatedMarketplaceRoot = await temporaryDirectory(
+    "tx-marketplace-plugin-empty-",
+  );
 });
 
 afterAll(async () => {
-  await rm(emptyDataHome, { recursive: true, force: true });
+  await rm(isolatedMarketplaceRoot, { recursive: true, force: true });
 });
 
 async function setup(
-  context: CommandProcessContext,
+  context: MarketplaceTestContext,
   manager = new RecordingManager(),
 ) {
   const { namespaces, failures } = await initializePlugins(
-    [createMarketplacePlugin({ manager })],
-    {
-      context: {
-        ...context,
-        env: { ...context.env, XDG_DATA_HOME: emptyDataHome },
-      },
-    },
+    [marketplacePlugin(context, manager)],
+    { context },
   );
   expect(failures).toEqual([]);
   return {
@@ -273,10 +281,10 @@ describe("first-party marketplace plugin", () => {
     try {
       await mkdir(join(dataHome, "tx"), { recursive: true });
       await writeFile(storage, "not a directory");
-      const context = captureContext({ XDG_DATA_HOME: dataHome });
+      const context = captureContext(storage);
 
       const { namespaces, failures } = await initializePlugins(
-        [createMarketplacePlugin({ manager: new RecordingManager() })],
+        [marketplacePlugin(context, new RecordingManager())],
         { context },
       );
 
@@ -342,10 +350,10 @@ describe("first-party marketplace plugin", () => {
           join(storage, "replaced"),
         ),
       ]);
-      const context = captureContext({ XDG_DATA_HOME: dataHome });
+      const context = captureContext(storage);
 
       const { namespaces, failures } = await initializePlugins(
-        [createMarketplacePlugin({ manager: new RecordingManager() })],
+        [marketplacePlugin(context, new RecordingManager())],
         { context },
       );
 
@@ -394,10 +402,10 @@ describe("first-party marketplace plugin", () => {
         pathToFileURL(remote).href,
         join(dataHome, "tx", "marketplaces", "tools"),
       ]);
-      const context = captureContext({ XDG_DATA_HOME: dataHome });
+      const context = captureContext(join(dataHome, "tx", "marketplaces"));
 
       const { namespaces, failures } = await initializePlugins(
-        [createMarketplacePlugin(), updatePlugin],
+        [marketplacePlugin(context), updatePlugin],
         { context },
       );
       expect(failures).toEqual([]);
@@ -418,10 +426,12 @@ describe("first-party marketplace plugin", () => {
     }
   });
 
-  test("resolves marketplace storage from its initialization context", async () => {
-    const context = captureContext();
+  test("uses an explicitly injected root instead of real user storage", async () => {
+    const context = captureContext(isolatedMarketplaceRoot, {
+      ...process.env,
+    });
     const { namespaces, failures } = await initializePlugins(
-      [createMarketplacePlugin()],
+      [marketplacePlugin(context)],
       { context },
     );
 
