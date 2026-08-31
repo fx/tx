@@ -468,6 +468,7 @@ A user can seed the list of marketplaces they want installed before ever running
 - The marketplace plugin MUST define a [Config](../config/) key holding an ordered list of configured marketplaces, each carrying at least the source string `marketplace add` accepts and the resolved local name it was, or would be, installed under.
 - `marketplace add` MUST record its resolved name and source in that persisted list, replacing any existing entry recorded under the same name, after the marketplace is successfully installed.
 - `marketplace remove` MUST delete the entry recorded under the removed marketplace's name from that persisted list, if one is present, after the marketplace is successfully removed.
+- If updating the persisted list after a successful install or removal fails, `marketplace add` or `marketplace remove` MUST still report the install or removal it already performed as successful, and MUST separately report the write-back failure so the user knows the persisted list may not reflect it. Neither command MUST undo the install or removal it already performed because the write-back failed.
 - `marketplace install` MUST install every marketplace in the persisted list that is not currently installed, using the same source and name it was recorded with, and MUST leave a marketplace already installed under that name unchanged.
 - A marketplace installed by `marketplace install` MUST become subject to every other marketplace requirement in this document exactly as one added directly through `marketplace add`, including validation, staging, dependency installation, and diagnostics.
 - Failure to install one configured marketplace MUST NOT prevent `marketplace install` from attempting the rest of the persisted list.
@@ -484,6 +485,12 @@ A user can seed the list of marketplaces they want installed before ever running
 - **GIVEN** a persisted list names a marketplace that is already installed under its recorded name
 - **WHEN** a user runs `marketplace install`
 - **THEN** that marketplace is left unchanged and installation proceeds for any other configured marketplace not yet installed
+
+#### Scenario: Write-back failure does not undo a successful operation
+
+- **GIVEN** `marketplace add` successfully installs a marketplace but the subsequent write-back to the persisted list fails
+- **WHEN** the command finishes
+- **THEN** the marketplace remains installed, the command reports it as installed, and the write-back failure is reported separately
 
 #### Scenario: Add and remove keep the list current
 
