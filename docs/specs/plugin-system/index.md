@@ -12,6 +12,8 @@ The approved target architecture is implemented: the core is generic, the market
 
 A second registry provider, the config plugin, and the marketplace plugin's use of it for [Configured Marketplaces](#configured-marketplaces) are not implemented, and are planned by [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md). The provider is intended to remain outside core under `plugins/config/`, registering the opaque `config` capability and following the separately owned [Config](../config/) contract.
 
+[Minimal Clone Footprint](#minimal-clone-footprint) is not implemented — every Git-sourced install and update retrieves a marketplace's complete tree today — and is planned by [Change 0019](../../changes/0019-reduce-marketplace-clone-footprint.md).
+
 ## Requirements
 
 ### Generic Plugin Host
@@ -407,6 +409,52 @@ The marketplace plugin owns the detailed marketplace command, manifest, path-saf
 - **WHEN** the addition aborts
 - **THEN** the reported failure names both attempted sources and both underlying messages, and neither it, the Git output quoted in it, nor the failures it carries as its cause contain any part of that credential, no staging directory remains, and no marketplace is published
 
+### Minimal Clone Footprint
+
+Some marketplace repositories carry substantially more history and tree content than their `.tx/config.json` manifest and the plugins it declares ever need. This section governs how much of a Git-sourced marketplace `marketplace add` and an update retrieve, without changing what either accepts, rejects, or installs.
+
+- Installing or updating a Git-sourced marketplace SHOULD retrieve from the remote only the manifest and the repository content its validated plugin entries and package selections require, rather than the marketplace's complete history and tree, whenever the local Git installation and the remote support doing so.
+- A marketplace installed or updated with a reduced retrieval MUST validate identically to one installed or updated with its complete tree: a manifest, entry, or package selection that would be accepted against the complete tree MUST be accepted, and one that would be rejected MUST be rejected with the same reported cause, regardless of how much of the tree was actually retrieved.
+- A validation failure whose cause depends on which files are present on disk — an entry or package resolving to a path that does not exist, is not a regular file, or whose containment cannot be confirmed — MUST NOT be reported while a reduced retrieval could itself explain the absence; installation or update MUST retrieve the marketplace's complete tree and re-validate before reporting such a failure.
+- A validation failure whose cause does not depend on which files are present — a missing or unreadable manifest, invalid JSON, an empty or missing `plugins` array, or a field of the wrong shape — MUST be reported without first retrieving the complete tree, since retrieving more of the tree cannot change that outcome.
+- When the local Git installation or the remote does not support a reduced retrieval, or an attempt at one fails for a reason unrelated to the marketplace's own manifest, installation or update MUST fall back to retrieving the marketplace's complete tree, exactly as it does today.
+- Updating a marketplace to a new commit MUST re-derive what a reduced retrieval needs from that commit's manifest before validating it, since a later commit MAY declare different plugin entries or package selections than the commit currently installed.
+- A reduced retrieval MUST make available, at minimum, the directory containing the manifest and the directory containing each validated entry and each validated package selection; it MAY retrieve more.
+- `marketplace add` MUST accept an explicit request to skip a reduced retrieval and always retrieve the complete tree, for a marketplace whose author knows it needs content a reduced retrieval would not make available.
+- [Local Marketplace Sources](#local-marketplace-sources) is unaffected: a local source is never cloned, so nothing in this section changes its contract.
+
+A plugin's nonliteral dynamic import, permitted under [Composition and Boundaries](#composition-and-boundaries), MAY reach a repository path outside the directories a reduced retrieval materialized. Such an import is not guaranteed to find that path, exactly as it would not from any other intentionally partial checkout; this is a known limitation of reduced retrieval rather than a defect in it, tracked in [Open Questions](#open-questions).
+
+#### Scenario: Reduced retrieval matches full validation
+
+- **GIVEN** a marketplace whose manifest and referenced entries would validate successfully against its complete tree
+- **WHEN** it is installed with a reduced retrieval
+- **THEN** it validates successfully and installs exactly as it would from a complete clone
+
+#### Scenario: Ambiguous absence retries against the complete tree
+
+- **GIVEN** a reduced retrieval that did not materialize a path a valid manifest entry resolves to
+- **WHEN** validation is attempted
+- **THEN** installation retrieves the complete tree and re-validates before reporting any failure
+
+#### Scenario: Genuine manifest error reported without retrying
+
+- **GIVEN** a marketplace manifest that is missing, unreadable, or malformed independent of which files are present
+- **WHEN** installation attempts to validate it
+- **THEN** the failure is reported without first retrieving the complete tree
+
+#### Scenario: Unsupported mechanism falls back
+
+- **GIVEN** a Git installation or remote that does not support a reduced retrieval
+- **WHEN** a marketplace is installed
+- **THEN** installation retrieves the complete tree and proceeds exactly as it does today
+
+#### Scenario: Update re-derives footprint for a new commit
+
+- **GIVEN** an installed marketplace updates to a commit whose manifest declares a plugin entry in a directory not previously retrieved
+- **WHEN** the update applies
+- **THEN** that directory is made available before the new commit is validated
+
 ### Local Marketplace Sources
 
 A plugin author needs to run their uncommitted work through the real `tx` executable. Cloning cannot serve that: a clone captures a commit, so every edit would have to be committed and reinstalled before it could be run. A local source is therefore a live reference to a directory the author owns, not a copy of it.
@@ -588,12 +636,14 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - Dependency environment isolation between plugins is not required.
 - Registry key factories, symbol tokens, schemas, runtime type validation, ownership metadata, provider selection, priorities, version negotiation, scopes, unregistering, replacement, subscriptions, events, lazy factories, dependency resolution, lifecycle, disposal, health checks, retries, caching, and persistence are out of scope.
 - Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
+- A reduced clone footprint materializes only the directories entry and package resolution require; it does not guarantee a plugin's nonliteral dynamic import can reach a repository path outside them.
 
 ## Open Questions
 
 - A future plugin API MAY add generic lifecycle hooks beyond initialization and dispatch after concrete plugins require them.
 - Core dependency additions SHOULD be demand-driven and backward-compatible.
 - A convention for plugins that expose a single action at their namespace root, rather than subcommands, could be specified if plugins repeatedly hand-roll one.
+- Whether a marketplace author has any way, short of the explicit full-retrieval request, to declare that their plugins' nonliteral dynamic imports reach outside the manifest-derived directories, so a reduced retrieval is never attempted against a marketplace that cannot tolerate it, is unresolved.
 
 ## References
 
@@ -612,6 +662,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
 - [Change 0016: Add Plugin Capabilities and Dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md)
 - [Change 0018: Add Config Store and Marketplace Installs](../../changes/0018-add-config-store-and-marketplace-installs.md)
+- [Change 0019: Reduce Marketplace Clone Footprint](../../changes/0019-reduce-marketplace-clone-footprint.md)
 - [Dialogs](../dialogs/)
 - [Config](../config/)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
@@ -639,3 +690,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-22 | Specified the minimal opaque plugin registry used by the bundled dialogs provider | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
 | 2026-08-22 | Implemented the registry's namespace-free bundled dialogs provider without adding dialog vocabulary to core | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
 | 2026-08-31 | Specified the persisted list of configured marketplaces, its `marketplace install` command, and its write-back from `marketplace add` and `marketplace remove` | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
+| 2026-08-31 | Specified a manifest-driven reduced clone footprint for Git-sourced marketplace install and update, with a fallback to a complete retrieval | [0019-reduce-marketplace-clone-footprint](../../changes/0019-reduce-marketplace-clone-footprint.md) |
