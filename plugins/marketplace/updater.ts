@@ -31,6 +31,7 @@ import {
   readSparseTargetCollisions,
   resolveMarketplaceRef,
   restoreCheckout,
+  restoreLazyCheckout,
   restoreMarketplaceSparseCheckoutState,
   revisionRepositoryPathsPresent,
   runGit,
@@ -335,7 +336,11 @@ export class MarketplaceUpdater implements UpdateParticipant {
 
     if (moved) {
       try {
-        await restoreCheckout(checkout, current, this.#execution);
+        if (sparseState === undefined) {
+          await restoreCheckout(checkout, current, this.#execution);
+        } else {
+          await restoreLazyCheckout(checkout, current, this.#execution);
+        }
       } catch (error) {
         commitRestoration = error;
       }

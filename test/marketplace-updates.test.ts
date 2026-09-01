@@ -1233,8 +1233,58 @@ describe("reduced marketplace update application", () => {
       expect((failure as Error).message).toContain(
         "https://example.com/acme/tools.git",
       );
-      expect(moveEnvironment?.["GIT_TERMINAL_PROMPT"]).toBe("0");
-      expect(moveEnvironment?.["TX_TEST_MARKER"]).toBe("present");
+      const { GIT_TERMINAL_PROMPT, TX_TEST_MARKER } = moveEnvironment ?? {};
+      expect(GIT_TERMINAL_PROMPT).toBe("0");
+      expect(TX_TEST_MARKER).toBe("present");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("restores a sparse commit noninteractively and redacts checkout failures", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-sparse-restore-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      const env = Object.freeze({ ...process.env, TX_TEST_MARKER: "present" });
+      const source = "https://user:top-secret@example.com/acme/tools.git";
+      let restoreEnvironment:
+        | Readonly<Record<string, string | undefined>>
+        | undefined;
+      const participant = new MarketplaceUpdater(root, {
+        env,
+        runGit: async (args, options) => {
+          if (
+            args[2] === "checkout" &&
+            args.includes("--detach") &&
+            args.includes("--force")
+          ) {
+            restoreEnvironment = options.env;
+            throw new Error(`Git failed for ${source}`);
+          }
+          return runGit(args, options);
+        },
+        prepare: async () => {
+          throw new Error("primary dependency failure");
+        },
+      });
+      const item = gathered(await participant.gather());
+      fixtureGit(checkout, ["config", "remote.origin.url", source]);
+
+      const failure = await participant.apply(item).catch((error) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain(
+        "primary dependency failure",
+      );
+      expect((failure as Error).message).not.toContain("top-secret");
+      expect((failure as Error).message).not.toContain("user@");
+      expect((failure as Error).message).toContain(
+        "https://example.com/acme/tools.git",
+      );
+      const { GIT_TERMINAL_PROMPT, TX_TEST_MARKER } = restoreEnvironment ?? {};
+      expect(GIT_TERMINAL_PROMPT).toBe("0");
+      expect(TX_TEST_MARKER).toBe("present");
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
