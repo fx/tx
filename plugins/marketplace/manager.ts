@@ -1079,7 +1079,7 @@ function plannedMarketplaceDirectories(
       // Root files are already materialized by `git clone --sparse`; `.tx`
       // is selected explicitly before the manifest is planned.
       if (directory === "." || directory === ".tx") continue;
-      directories.add(directory);
+      directories.add(gitRepositoryPath(directory));
     }
   }
   return Object.freeze([...directories]);
@@ -1091,9 +1091,13 @@ interface RepositoryPathProbe {
   readonly pathspecs: readonly string[];
 }
 
+/** Converts a host-normalized repository path to Git's `/` path syntax. */
+export function gitRepositoryPath(path: string, separator = sep): string {
+  return separator === "\\" ? path.replaceAll("\\", "/") : path;
+}
+
 function normalizeRepositoryPath(path: string): string {
-  const normalized = normalize(path);
-  return sep === "\\" ? normalized.replaceAll("\\", "/") : normalized;
+  return gitRepositoryPath(normalize(path));
 }
 
 /**

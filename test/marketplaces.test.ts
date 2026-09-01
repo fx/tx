@@ -15,6 +15,7 @@ import {
   deriveMarketplaceName,
   deriveMarketplaceSshRepository,
   discardStaging,
+  gitRepositoryPath,
   MarketplaceAlreadyInstalledError,
   MarketplaceManager,
   normalizeMarketplaceRepository,
@@ -40,6 +41,30 @@ import {
   initializeGitRepository,
   temporaryDirectory,
 } from "./helpers.ts";
+
+describe("Git repository path arguments", () => {
+  test("converts Windows-normalized sparse directories and pathspecs to slash syntax", () => {
+    const sparseDirectories = [
+      String.raw`plugins\nested`,
+      String.raw`packages\shared`,
+    ].map((path) => gitRepositoryPath(path, "\\"));
+    const pathspecs = [
+      String.raw`.tx\config.json`,
+      String.raw`plugins\linked\plugin.ts`,
+    ].map((path) => gitRepositoryPath(path, "\\"));
+
+    expect(sparseDirectories).toEqual(["plugins/nested", "packages/shared"]);
+    expect(pathspecs).toEqual([".tx/config.json", "plugins/linked/plugin.ts"]);
+    expect(
+      [...sparseDirectories, ...pathspecs].every(
+        (path) => !path.includes("\\"),
+      ),
+    ).toBe(true);
+    expect(gitRepositoryPath(String.raw`literal\name`, "/")).toBe(
+      String.raw`literal\name`,
+    );
+  });
+});
 
 describe("platform user data resolution", () => {
   test("uses deterministic Unix, macOS, and Windows locations", () => {
