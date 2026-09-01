@@ -355,6 +355,7 @@ type Dialogs = {
       readonly value: T
       readonly fields?: readonly TextField[]
     }[]
+    readonly filter?: boolean | "auto"
   }): Promise<
     | {
         readonly value: T
@@ -369,9 +370,13 @@ A bundled consumer declares that compatible type locally and reads `registration
 
 Every dialog requires both the provider's injected standard input and standard error to be TTYs and rejects a non-interactive stream before rendering or changing terminal state; there is no fallback. Dialogs use the injected React and Ink instances, read only injected standard input, and render only on injected standard error, so standard output stays untouched for the consuming command.
 
-`select` additionally rejects an empty options list before rendering, and renders the message plus every label in supplied order. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
+`select` additionally rejects an empty options list before rendering, and renders the message plus the label of every option the filter leaves visible, in supplied order. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
 
-Up and Down move one position and clamp at the list boundaries. Enter on a plain option resolves `{ value, values }`, where `value` is that option's exact value and `values` is empty. Escape and Ctrl-C return `undefined`; the provider does not terminate the process, assign an exit code, or print the selected value. Unrelated input is ignored.
+Up and Down move one position among the visible options and clamp at the first and last of them. Enter on a plain option resolves `{ value, values }`, where `value` is that option's exact value and `values` is empty. Escape and Ctrl-C return `undefined` at every stage; the provider does not terminate the process, assign an exit code, or print the selected value. Input the dialog has no meaning for is ignored, and while the filter is disabled that includes printable characters.
+
+`filter` decides whether the dialog offers a type-to-filter prompt: `true` and `false` decide whatever the option count, and an omitted setting means `"auto"`, which turns the filter on exactly when the request carries more than eight options. So a caller that never thinks about the filter still gets one when the list is long, and a caller whose short list is best unfiltered can say so.
+
+When the filter is on it is the element typed text reaches from the moment the dialog opens; no key moves focus to or from it, and Up, Down, Enter, Escape, and Ctrl-C keep the meanings they have without it. Printable characters and Backspace edit the filter text exactly as they edit an `input` value, and the current text is rendered after a `›` prompt. The text's whitespace-separated pieces are its terms: an option is visible when every term occurs in its label under a case-insensitive comparison, so `rel 1.4` finds `release/1.4` in any term order. Matching is substring only — there is no fuzzy matching, ranking, match highlighting, matching against values, caller-supplied matcher, or initial filter text — so visible options keep the order and the duplicates the caller supplied. An option that declares `fields` is the caller's "let me type it" answer and stays visible whatever the text, since typing something nothing matches is exactly when it is needed. Changing the text makes the first visible option active. When nothing is visible the dialog renders `no match`, Enter and navigation do nothing, and Escape still cancels — Escape never clears the filter instead. Field collection stops filter edits along with navigation, and the filter text never appears in the result.
 
 An option that declares `fields` is user-provided: choosing it collects those values instead of resolving immediately, so one dialog can offer known choices alongside "let me type it". An option declaring no fields is plain and resolves with an empty `values` record, which is how a caller tells the two apart. `select` rejects an option whose field list is empty, or that repeats a field name within itself, before rendering — alongside the empty-options and non-interactive rejections. Field names need only be unique within their own option, and only the chosen option is ever collected.
 

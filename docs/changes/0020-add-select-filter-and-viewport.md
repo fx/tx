@@ -114,15 +114,15 @@ Rendering in this change stays unstyled but uses the glyphs the spec fixes, so i
 
 ## Tasks
 
-- [ ] Add the select filter
-  - [ ] Add `filter?: boolean | "auto"` to the local `SelectRequest` in `plugins/dialogs/index.ts`, defaulting to `"auto"` with the more-than-eight threshold
-  - [ ] Extract the visibility matcher into a module under `plugins/dialogs/`: whitespace-separated terms, case-insensitive substring against the label, fielded options always visible, supplied order preserved
-  - [ ] Render the `›` filter row and route printable input and Backspace to the filter through the existing entry logic when the filter is enabled, leaving printable input ignored when it is disabled
-  - [ ] Make the first visible option active whenever the filter text changes, navigate within the visible list, render the no-match state, and make Enter and navigation no-ops when nothing is visible
-  - [ ] Keep Escape and Ctrl-C cancelling at every stage, and stop filter edits once field collection begins
-  - [ ] Add Bun tests for the matcher directly and for the dialog: auto threshold on either side of eight, explicit `true` and `false`, typing narrows and Enter selects, multi-term matching, Backspace widening, pinned user-provided option, no-match state, navigation within the visible list, cancellation with a non-empty filter, and collection declining filter edits
-  - [ ] Document the filter in `docs/manual/plugins.md` and correct its navigation and ignored-input sentences
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Add the select filter
+  - [x] Add `filter?: boolean | "auto"` to the local `SelectRequest` in `plugins/dialogs/index.ts`, defaulting to `"auto"` with the more-than-eight threshold
+  - [x] Extract the visibility matcher into a module under `plugins/dialogs/`: whitespace-separated terms, case-insensitive substring against the label, fielded options always visible, supplied order preserved
+  - [x] Render the `›` filter row and route printable input and Backspace to the filter through the existing entry logic when the filter is enabled, leaving printable input ignored when it is disabled
+  - [x] Make the first visible option active whenever the filter text changes, navigate within the visible list, render the no-match state, and make Enter and navigation no-ops when nothing is visible
+  - [x] Keep Escape and Ctrl-C cancelling at every stage, and stop filter edits once field collection begins
+  - [x] Add Bun tests for the matcher directly and for the dialog: auto threshold on either side of eight, explicit `true` and `false`, typing narrows and Enter selects, multi-term matching, Backspace widening, pinned user-provided option, no-match state, navigation within the visible list, cancellation with a non-empty filter, and collection declining filter edits
+  - [x] Document the filter in `docs/manual/plugins.md` and correct its navigation and ignored-input sentences
+  - [x] Verify 100% coverage and `bun run check`
 
 - [ ] Add the viewport and extended navigation
   - [ ] Extract the viewport arithmetic into a module under `plugins/dialogs/`: at most ten rows, reduced so the dialog stays strictly shorter than the terminal using a single chrome-height constant, floor of one, minimal window movement, hidden counts per side

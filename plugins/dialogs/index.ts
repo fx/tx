@@ -7,43 +7,18 @@ import type {
   PluginDefinition,
   PluginIdentity,
 } from "@fx/tx/plugin";
-
-type TextField = {
-  readonly type: "text";
-  readonly name: string;
-  readonly message: string;
-  readonly initialValue?: string;
-};
-
-type SelectOption<T> = {
-  readonly label: string;
-  readonly value: T;
-  readonly fields?: readonly TextField[];
-};
-
-type SelectRequest<T> = {
-  readonly message: string;
-  readonly options: readonly SelectOption<T>[];
-};
-
-type SelectResult<T> = {
-  readonly value: T;
-  readonly values: Readonly<Record<string, string>>;
-};
-
-type InputRequest = {
-  readonly message: string;
-  readonly initialValue?: string;
-};
-
-type Dialogs = {
-  input(request: InputRequest): Promise<string | undefined>;
-  select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
-};
-
-type Outcome<T> =
-  | { readonly type: "completed"; readonly value: T }
-  | { readonly type: "cancelled" };
+import { createEntry } from "./entry.ts";
+import { filterIsEnabled } from "./filter.ts";
+import { createSelectView } from "./select.ts";
+import type {
+  Dialogs,
+  DialogView,
+  InputRequest,
+  Outcome,
+  SelectOption,
+  SelectRequest,
+  SelectResult,
+} from "./types.ts";
 
 type Failure =
   | { readonly present: false }
@@ -274,34 +249,6 @@ function requireCollectableFields<T>(
   }
 }
 
-/** A control sequence Ink did not resolve to a key, as it reaches a handler:
- * Ink strips the leading escape, leaving the introducer, any parameter and
- * intermediate bytes, and the final byte. Ink reports the sequences it knows
- * as an empty entry, so anything still shaped like one is an unrecognized key
- * rather than typed text. Shape is all there is to go on — see REVIEW.md — so
- * this covers the CSI form only, and a paste that is exactly a CSI body enters
- * nothing. */
-const unresolvedControlSequence = /^\[\[?[\x20-\x3f]*[\x40-\x7e]$/;
-
-/** Everything a chunk carries that a terminal would display, in order. Control
- * characters drop out, so a pasted line survives while the newline ending it
- * does not, and an unrecognized control sequence contributes nothing at all
- * rather than leaking its payload. */
-function printableText(entry: string): string {
-  if (unresolvedControlSequence.test(entry)) return "";
-  let printable = "";
-  for (const character of entry) {
-    const code = character.codePointAt(0) as number;
-    const control = code < 0x20 || (code >= 0x7f && code <= 0x9f);
-    if (!control) printable += character;
-  }
-  return printable;
-}
-
-type DialogElement = ReturnType<CoreDependencies["react"]["createElement"]>;
-
-type DialogView = () => DialogElement;
-
 type DialogSession = {
   readonly context: CommandContext;
   readonly dependencies: CoreDependencies;
@@ -383,64 +330,6 @@ async function runDialog<T>(
   return outcome?.type === "completed" ? outcome.value : undefined;
 }
 
-type EntryProps = {
-  readonly message: string;
-  readonly initialValue: string | undefined;
-  readonly onSubmit: (value: string) => void;
-  readonly onCancel: () => void;
-};
-
-/**
- * The one text entry implementation, used both by a standalone `input` and by
- * each field of a chosen user-provided option, so entry, editing, submission,
- * and cancellation behave identically in either place. Remounting it under a
- * fresh key starts the next field from that field's own initial value.
- */
-function createEntry(
-  react: CoreDependencies["react"],
-  ink: CoreDependencies["ink"],
-) {
-  return function Entry({
-    message,
-    initialValue,
-    onSubmit,
-    onCancel,
-  }: EntryProps) {
-    const entered = react.useRef(initialValue ?? "");
-    const [value, setValue] = react.useState(entered.current);
-    ink.useInput((entry, key) => {
-      if (key.escape || (key.ctrl && entry === "c")) {
-        onCancel();
-      } else if (key.return) {
-        onSubmit(entered.current);
-      } else if (key.backspace) {
-        entered.current = Array.from(entered.current).slice(0, -1).join("");
-        setValue(entered.current);
-      } else if (!key.ctrl && !key.meta) {
-        const appended = printableText(entry);
-        if (appended.length > 0) {
-          entered.current += appended;
-          setValue(entered.current);
-        }
-      }
-    });
-
-    return react.createElement(
-      ink.Box,
-      { flexDirection: "column" },
-      react.createElement(ink.Text, null, message),
-      react.createElement(ink.Text, null, value),
-    );
-  };
-}
-
-/** The option a user-provided choice committed to, held while its fields are
- * collected so a later navigation attempt cannot change what is submitted. */
-type Collection<T> = {
-  readonly value: T;
-  readonly fields: readonly TextField[];
-};
-
 const identity: PluginIdentity = Object.freeze({ name: "dialogs" });
 
 const definition: PluginDefinition = Object.freeze({
@@ -468,127 +357,23 @@ const definition: PluginDefinition = Object.freeze({
           });
         },
 
-        async select<T>({ message, options }: SelectRequest<T>) {
+        async select<T>({ message, options, filter }: SelectRequest<T>) {
           if (options.length === 0) {
             throw new Error("A select dialog requires at least one option");
           }
           requireCollectableFields(options);
           requireInteractiveStreams(context, "A select dialog");
 
-          return runDialog<SelectResult<T>>(session, "Select", (settle) => {
-            const cancel = () => settle({ type: "cancelled" });
-
-            const Select = () => {
-              const active = react.useRef(0);
-              const [activeIndex, setActiveIndex] = react.useState(0);
-              /** Set the moment a user-provided option is chosen; its presence
-               * is what makes the option list stop accepting input. */
-              const collecting = react.useRef<Collection<T> | undefined>(
-                undefined,
-              );
-              /** Prototype-free, because a field name is an opaque caller key:
-               * `__proto__` would otherwise reach the inherited setter and the
-               * value would vanish instead of being collected. */
-              const collected = react.useRef<Record<string, string>>(
-                Object.create(null) as Record<string, string>,
-              );
-              const field = react.useRef(0);
-              const [fieldIndex, setFieldIndex] = react.useState(-1);
-
-              ink.useInput((value, key) => {
-                if (key.escape || (key.ctrl && value === "c")) {
-                  cancel();
-                  return;
-                }
-                // Ink delivers every key parsed out of one chunk in a single
-                // synchronous pass, so this list keeps receiving input after
-                // the Enter that began collection, before the field entry has
-                // mounted. Everything but cancellation is declined from then
-                // on; cancellation is answered above, at every stage.
-                if (collecting.current) return;
-                if (key.return) {
-                  const option = options[active.current] as SelectOption<T>;
-                  if (option.fields) {
-                    collecting.current = {
-                      value: option.value,
-                      fields: option.fields,
-                    };
-                    setFieldIndex(0);
-                  } else {
-                    settle({
-                      type: "completed",
-                      value: { value: option.value, values: {} },
-                    });
-                  }
-                } else if (key.upArrow) {
-                  active.current = Math.max(0, active.current - 1);
-                  setActiveIndex(active.current);
-                } else if (key.downArrow) {
-                  active.current = Math.min(
-                    options.length - 1,
-                    active.current + 1,
-                  );
-                  setActiveIndex(active.current);
-                }
-              });
-
-              /** `index` is the field the submitting entry was rendered for.
-               * The entry stays mounted for the rest of the synchronous pass
-               * that submitted it, so a later Enter in the same chunk would
-               * otherwise answer the next field before it is presented. */
-              const submitField = (index: number, entered: string) => {
-                if (index !== field.current) return;
-                const collection = collecting.current as Collection<T>;
-                const current = collection.fields[field.current] as TextField;
-                collected.current[current.name] = entered;
-                const next = field.current + 1;
-                if (next < collection.fields.length) {
-                  field.current = next;
-                  setFieldIndex(next);
-                } else {
-                  settle({
-                    type: "completed",
-                    value: {
-                      value: collection.value,
-                      values: { ...collected.current },
-                    },
-                  });
-                }
-              };
-
-              const children: DialogElement[] = [
-                react.createElement(ink.Text, { key: "message" }, message),
-                ...options.map((option, index) =>
-                  react.createElement(
-                    ink.Text,
-                    { key: `option-${index}` },
-                    `${index === activeIndex ? ">" : " "} ${option.label}`,
-                  ),
-                ),
-              ];
-              if (fieldIndex >= 0) {
-                const collection = collecting.current as Collection<T>;
-                const pending = collection.fields[fieldIndex] as TextField;
-                children.push(
-                  react.createElement(Entry, {
-                    key: `field-${fieldIndex}`,
-                    message: pending.message,
-                    initialValue: pending.initialValue,
-                    onSubmit: (entered: string) =>
-                      submitField(fieldIndex, entered),
-                    onCancel: cancel,
-                  }),
-                );
-              }
-
-              return react.createElement(
-                ink.Box,
-                { flexDirection: "column" },
-                ...children,
-              );
-            };
-            return Select;
-          });
+          const filtering = filterIsEnabled(filter, options.length);
+          return runDialog<SelectResult<T>>(session, "Select", (settle) =>
+            createSelectView(
+              react,
+              ink,
+              Entry,
+              { message, options, filtering },
+              settle,
+            ),
+          );
         },
       };
 
