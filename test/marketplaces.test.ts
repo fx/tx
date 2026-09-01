@@ -1178,6 +1178,38 @@ describe("MarketplaceManager", () => {
     }
   });
 
+  test("does not replace a symlink published after preparation", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-marketplace-symlink-race-",
+    );
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const target = join(root, "race");
+      const winner = join(temporaryRoot, "winner");
+      await mkdir(winner);
+      const manager = new MarketplaceManager(root, {
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+        prepare: async () => {
+          await symlink(winner, target);
+        },
+      });
+
+      await expect(manager.add("repository", "race")).rejects.toBeInstanceOf(
+        MarketplaceAlreadyInstalledError,
+      );
+      expect(await readlink(target)).toBe(winner);
+      expect(
+        (await readdir(root)).filter((name) => name.includes("staging")),
+      ).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("types a local-reference collision created during preparation", async () => {
     const temporaryRoot = await temporaryDirectory(
       "tx-marketplace-local-race-",
