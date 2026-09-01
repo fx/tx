@@ -25,6 +25,7 @@ import {
   MarketplaceManifestContentError,
   type MarketplaceManifestPlan,
   MarketplaceManifestRepositoryPathError,
+  parseMarketplaceManifestDocument,
   pathExists,
   planMarketplaceManifest,
   prepareMarketplace,
@@ -124,6 +125,12 @@ export const unknownMarketplaceVersion = "<unknown>";
 export const liveMarketplaceVersion = "live";
 const originRemote = "origin";
 const remoteHeadRef = "refs/remotes/origin/HEAD";
+const manifestFilename = ".tx/config.json";
+const legacyManifestFilename = "tx.marketplace.json";
+const manifestFilenames = Object.freeze([
+  manifestFilename,
+  legacyManifestFilename,
+]);
 const defaultSshUser = "git";
 const batchModeSshCommand = "ssh -o BatchMode=yes";
 const sshCommandScopes = ["--global", "--system"] as const;
@@ -1068,22 +1075,31 @@ async function listedColumn(
   }
 }
 
-function plannedMarketplaceDirectories(
+/** The complete cone tx derives from one manifest plan. */
+export function marketplacePlanConeDirectories(
   plan: MarketplaceManifestPlan,
 ): readonly string[] {
-  const directories = new Set<string>();
+  const directories = new Set<string>([".tx"]);
   for (const plugin of plan.plugins) {
     for (const path of [plugin.entry, plugin.package]) {
       if (path === undefined) continue;
       const directory = normalize(dirname(path));
-      // Root files are already materialized by `git clone --sparse`; `.tx`
-      // is selected explicitly before the manifest is planned.
+      // Root files are materialized by cone mode itself. The canonical
+      // manifest directory stays explicit so canonical/legacy transitions
+      // remain available at the next target commit.
       if (directory === "." || directory === ".tx") continue;
       directories.add(gitRepositoryPath(directory));
     }
   }
   return Object.freeze([...directories]);
 }
+
+export type MarketplaceSparseCheckoutState =
+  | { readonly enabled: false }
+  | {
+      readonly enabled: true;
+      readonly directories: readonly string[];
+    };
 
 interface RepositoryPathProbe {
   readonly ancestors: ReadonlySet<string>;
@@ -1136,6 +1152,322 @@ function repositoryPathIsPresent(
     if (mode === "120000" && probe.ancestors.has(path)) return true;
   }
   return false;
+}
+
+function gitBoolean(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["", "1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+/** Reads sparse intent without changing the checkout. */
+export async function readMarketplaceSparseCheckoutState(
+  checkout: string,
+  execution: GitExecution,
+): Promise<MarketplaceSparseCheckoutState> {
+  const listed = await readCheckout(
+    checkout,
+    ["config", "--null", "--list"],
+    execution,
+  );
+  const values = new Map<string, string>();
+  for (const entry of listed.split("\0")) {
+    const separator = entry.indexOf("\n");
+    if (separator < 0) continue;
+    values.set(
+      entry.slice(0, separator).toLowerCase(),
+      entry.slice(separator + 1),
+    );
+  }
+  const sparseValue = values.get("core.sparsecheckout");
+  const sparseEnabled = gitBoolean(sparseValue);
+  if (sparseValue === undefined || sparseEnabled === false) {
+    return Object.freeze({ enabled: false });
+  }
+  if (sparseEnabled !== true) {
+    throw new Error(
+      "Cannot update a marketplace with an invalid sparse-checkout configuration",
+    );
+  }
+  if (gitBoolean(values.get("core.sparsecheckoutcone")) !== true) {
+    throw new Error(
+      "Cannot update a marketplace with an unexpected non-cone sparse checkout",
+    );
+  }
+  const output = await readCheckout(
+    checkout,
+    ["sparse-checkout", "list"],
+    execution,
+  );
+  const directories = output === "" ? [] : output.split("\n");
+  if (directories.length === 0) {
+    throw new Error(
+      "Cannot update a marketplace with an unexpected empty sparse checkout",
+    );
+  }
+  return Object.freeze({
+    enabled: true,
+    directories: Object.freeze(directories),
+  });
+}
+
+/**
+ * Runs an operation that may lazily fetch partial-clone objects. It therefore
+ * uses the same checkout-aware noninteractive environment as fetch and
+ * removes credentials from any Git failure before it crosses the boundary.
+ */
+async function runLazyCheckoutGit(
+  checkout: string,
+  args: readonly string[],
+  execution: GitExecution,
+): Promise<GitResult> {
+  const env = await nonInteractiveGitEnvironment(execution, checkout);
+  try {
+    return await execution.runGit(["-C", checkout, ...args], { env });
+  } catch (error) {
+    let source = "";
+    try {
+      source = await readRemoteSource(checkout, execution);
+    } catch {
+      // A checkout that cannot name its remote has no source credential to
+      // redact. Preserve the original failure in that case.
+    }
+    const failure = error instanceof Error ? error : new Error(String(error));
+    throw withoutCredentialsInFailure(failure, credentialRedactions(source));
+  }
+}
+
+/** Moves a partial checkout while protecting any target-object lazy fetch. */
+export async function moveLazyCheckout(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<void> {
+  await runLazyCheckoutGit(
+    checkout,
+    ["checkout", "--detach", commit],
+    execution,
+  );
+}
+
+/** Restores a partial checkout while protecting any old-object lazy fetch. */
+export async function restoreLazyCheckout(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<void> {
+  await runLazyCheckoutGit(
+    checkout,
+    ["checkout", "--force", "--detach", commit],
+    execution,
+  );
+}
+
+interface TreeEntry {
+  readonly mode: string;
+  readonly type: string;
+  readonly path: string;
+}
+
+function treeEntries(stdout: string): readonly TreeEntry[] {
+  return stdout.split("\0").flatMap((record) => {
+    if (record === "") return [];
+    const tab = record.indexOf("\t");
+    const header = record.slice(0, tab).split(" ");
+    const [mode = "", type = ""] = header;
+    return [{ mode, type, path: record.slice(tab + 1) }];
+  });
+}
+
+/** Plans the manifest stored at a target commit without moving HEAD. */
+export async function planMarketplaceManifestAtRevision(
+  checkout: string,
+  revision: string,
+  execution: GitExecution,
+): Promise<MarketplaceManifestPlan> {
+  const listed = await runLazyCheckoutGit(
+    checkout,
+    [
+      "--literal-pathspecs",
+      "ls-tree",
+      "-z",
+      revision,
+      "--",
+      ".tx",
+      manifestFilename,
+      legacyManifestFilename,
+    ],
+    execution,
+  );
+  const entries = treeEntries(listed.stdout);
+  const canonical = entries.find(({ path }) => path === manifestFilename);
+  const canonicalAncestor = entries.find(
+    ({ mode, path }) => mode === "120000" && path === ".tx",
+  );
+  if (canonical === undefined && canonicalAncestor !== undefined) {
+    throw new MarketplaceManifestRepositoryPathError(
+      `${manifestFilename} cannot be resolved from the target tree`,
+      [manifestFilename],
+    );
+  }
+  const selected =
+    canonical ?? entries.find(({ path }) => path === legacyManifestFilename);
+  if (selected === undefined) {
+    throw new MarketplaceManifestRepositoryPathError(
+      `Missing ${manifestFilename}`,
+      manifestFilenames,
+    );
+  }
+  if (
+    selected.type !== "blob" ||
+    (selected.mode !== "100644" && selected.mode !== "100755")
+  ) {
+    throw new MarketplaceManifestRepositoryPathError(
+      `${selected.path} is not a regular file`,
+      [selected.path],
+    );
+  }
+  const document = await runLazyCheckoutGit(
+    checkout,
+    ["cat-file", "blob", `${revision}:${selected.path}`],
+    execution,
+  );
+  return parseMarketplaceManifestDocument(
+    resolve(checkout),
+    selected.path,
+    document.stdout,
+  );
+}
+
+/** Whether a revision contains a failed leaf or a symlinked proper ancestor. */
+export async function revisionRepositoryPathsPresent(
+  checkout: string,
+  revision: string,
+  paths: readonly string[],
+  execution: GitExecution,
+): Promise<boolean> {
+  const probe = repositoryPathProbe(paths);
+  const result = await runLazyCheckoutGit(
+    checkout,
+    [
+      "--literal-pathspecs",
+      "ls-tree",
+      "-z",
+      revision,
+      "--",
+      ...probe.pathspecs,
+    ],
+    execution,
+  );
+  return repositoryPathIsPresent(result.stdout, probe);
+}
+
+/**
+ * Untracked files a target commit would write. Sparse checkout can otherwise
+ * leave one present with a skip-worktree target entry while reporting a
+ * successful checkout, so the update must make the same refusal a full
+ * checkout makes before considering HEAD moved.
+ */
+export async function readSparseTargetCollisions(
+  checkout: string,
+  revision: string,
+  execution: GitExecution,
+): Promise<readonly string[]> {
+  const untracked = await readCheckout(
+    checkout,
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+    execution,
+  );
+  const paths = untracked.split("\0").filter(Boolean);
+  if (paths.length === 0) return [];
+  const pathspecs = [
+    ...new Set(
+      paths.flatMap((path) => {
+        const segments = path.split("/");
+        return segments.map((_, index) =>
+          segments.slice(0, index + 1).join("/"),
+        );
+      }),
+    ),
+  ];
+  const result = await runLazyCheckoutGit(
+    checkout,
+    [
+      "--literal-pathspecs",
+      "ls-tree",
+      "-r",
+      "--name-only",
+      "-z",
+      revision,
+      "--",
+      ...pathspecs,
+    ],
+    execution,
+  );
+  const tracked = result.stdout.split("\0").filter(Boolean);
+  return Object.freeze(
+    paths.filter((path) =>
+      tracked.some(
+        (target) =>
+          target === path ||
+          target.startsWith(`${path}/`) ||
+          path.startsWith(`${target}/`),
+      ),
+    ),
+  );
+}
+
+/** Adds a target plan to an existing tx-created cone. */
+export async function addMarketplaceSparseDirectories(
+  checkout: string,
+  plan: MarketplaceManifestPlan,
+  execution: GitExecution,
+): Promise<void> {
+  await runLazyCheckoutGit(
+    checkout,
+    [
+      "sparse-checkout",
+      "add",
+      "--skip-checks",
+      "--",
+      ...marketplacePlanConeDirectories(plan),
+    ],
+    execution,
+  );
+}
+
+/** Materializes the complete tree in the same checkout. */
+export async function disableMarketplaceSparseCheckout(
+  checkout: string,
+  execution: GitExecution,
+): Promise<void> {
+  await runLazyCheckoutGit(checkout, ["sparse-checkout", "disable"], execution);
+}
+
+/** Restores the exact tx-created sparse intent captured before a transaction. */
+export async function restoreMarketplaceSparseCheckoutState(
+  checkout: string,
+  state: MarketplaceSparseCheckoutState,
+  execution: GitExecution,
+): Promise<void> {
+  if (!state.enabled) {
+    await disableMarketplaceSparseCheckout(checkout, execution);
+    return;
+  }
+  await runLazyCheckoutGit(
+    checkout,
+    [
+      "sparse-checkout",
+      "set",
+      "--cone",
+      "--skip-checks",
+      "--",
+      ...state.directories,
+    ],
+    execution,
+  );
 }
 
 export class MarketplaceManager implements MarketplaceOperations {
@@ -1442,7 +1774,9 @@ export class MarketplaceManager implements MarketplaceOperations {
       return;
     }
 
-    const directories = plannedMarketplaceDirectories(plan);
+    const directories = marketplacePlanConeDirectories(plan).filter(
+      (directory) => directory !== ".tx",
+    );
     if (directories.length > 0) {
       await this.#runGit(
         [
