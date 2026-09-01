@@ -1134,8 +1134,8 @@ describe("MarketplaceManager", () => {
         },
       });
 
-      await expect(manager.add("repository", "race")).rejects.toThrow(
-        "already installed",
+      await expect(manager.add("repository", "race")).rejects.toBeInstanceOf(
+        MarketplaceAlreadyInstalledError,
       );
       expect(await readFile(join(target, "existing.txt"), "utf8")).toBe(
         "existing",
@@ -1143,6 +1143,60 @@ describe("MarketplaceManager", () => {
       expect(
         (await readdir(root)).filter((name) => name.includes("staging")),
       ).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not replace an empty directory published after preparation", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-marketplace-empty-race-",
+    );
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const target = join(root, "race");
+      const manager = new MarketplaceManager(root, {
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+          return { stdout: "" };
+        },
+        prepare: async () => {
+          await mkdir(target);
+        },
+      });
+
+      await expect(manager.add("repository", "race")).rejects.toBeInstanceOf(
+        MarketplaceAlreadyInstalledError,
+      );
+      expect(await readdir(target)).toEqual([]);
+      expect(
+        (await readdir(root)).filter((name) => name.includes("staging")),
+      ).toEqual([]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("types a local-reference collision created during preparation", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-marketplace-local-race-",
+    );
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const source = join(temporaryRoot, "source");
+      const target = join(root, "race");
+      await mkdir(source);
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {
+          await mkdir(target);
+        },
+      });
+
+      await expect(manager.add(source, "race")).rejects.toBeInstanceOf(
+        MarketplaceAlreadyInstalledError,
+      );
+      expect(await readdir(target)).toEqual([]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
