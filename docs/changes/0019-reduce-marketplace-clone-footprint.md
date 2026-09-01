@@ -115,7 +115,7 @@ The update path mirrors this: `fetchCheckoutRemote`'s `git fetch` already keeps 
   - [x] Verify 100% coverage and `bun run check`
 
 - [ ] Re-derive the footprint on update
-  - [ ] In `updater.ts`, read the target commit's manifest content before `moveCheckout` runs, without requiring that commit's complete tree to already be present, and run it through the same syntax-only planning step PR #1 adds
+  - [ ] In `updater.ts`, read the target commit's manifest content before `moveCheckout` runs, without requiring that commit's complete tree to already be present, and run it through the same syntax-only planning step the install task adds
   - [ ] Extend the checkout's sparse-checkout set for whatever directories that planning pass names before `moveCheckout` completes and `prepareMarketplace` re-validates against the existing, unmodified `resolveMarketplaceManifest`
   - [ ] Apply the same presence-dependent-failure fallback to a complete retrieval as install uses, using `restoreCheckout` exactly as today's rollback already does if `prepareMarketplace` still fails afterward
   - [ ] Cover: an update whose new commit adds a plugin entry in a previously unretrieved directory; an update whose new commit's manifest fails validation for a content-only reason; an update falling back to a complete retrieval on a presence-dependent failure
