@@ -15,6 +15,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  carriesGitSyntax,
+  parseGitSourceVersion,
+  windowsDrivePattern,
+} from "./source.ts";
+import {
   containedMarketplacePath,
   discoverInstalledMarketplaces,
   isMarketplaceReference,
@@ -34,7 +39,9 @@ export interface MarketplaceListing {
 export interface MarketplaceOperations {
   add(source: string, requestedName?: string): Promise<string>;
   list(): Promise<readonly MarketplaceListing[]>;
+  pin(name: string, ref: string): Promise<string>;
   remove(name: string): Promise<void>;
+  unpin(name: string): Promise<void>;
 }
 
 export interface GitResult {
@@ -56,6 +63,25 @@ export interface GitExecution {
   readonly env: Readonly<Record<string, string | undefined>>;
 }
 
+/**
+ * What a ref resolved to, and whether it resolved as one of the remote's tags.
+ * The kind is carried rather than re-derived from the ref's spelling, because a
+ * newer release is reported for a marketplace pinned to a tag — a branch named
+ * like a version is not one, however much it looks like one.
+ */
+export interface ResolvedRef {
+  readonly commit: string;
+  readonly tag: boolean;
+}
+
+/** The one expected negative result of resolving a marketplace version. */
+export class MarketplaceRefNotPublishedError extends Error {
+  constructor(ref: string) {
+    super(`Version "${ref}" is not published by the remote`);
+    this.name = "MarketplaceRefNotPublishedError";
+  }
+}
+
 export interface MarketplaceManagerOptions {
   readonly runGit?: RunGit;
   readonly prepare?: (checkout: string) => Promise<void>;
@@ -64,7 +90,6 @@ export interface MarketplaceManagerOptions {
 }
 
 const githubRepositoryPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
-const windowsDrivePattern = /^[A-Za-z]:[\\/]/;
 const unknownSource = "<unknown>";
 /** What a marketplace whose checkout cannot be read reports as its version. */
 export const unknownMarketplaceVersion = "<unknown>";
@@ -77,6 +102,44 @@ const defaultSshUser = "git";
 const batchModeSshCommand = "ssh -o BatchMode=yes";
 const sshCommandScopes = ["--global", "--system"] as const;
 const sshCommandVariable = "core.sshcommand";
+/**
+ * Where a pin lives: the checkout's own Git configuration, so it has the
+ * lifetime of the checkout — `marketplace remove` deletes the directory and
+ * the pin goes with it, with no index to keep consistent and no format to
+ * migrate.
+ */
+const pinVariable = "tx.pin";
+/** What a pin may name as a commit rather than as a ref: hexadecimal object
+ * name syntax. Git itself decides whether the spelling is a valid unique
+ * abbreviation for this repository's object format. */
+const commitHashPattern = /^[0-9a-f]+$/i;
+/**
+ * What Git reads as revision syntax rather than as part of a ref's name:
+ * the operators `~`, `^`, `:`, the reflog and upstream form `@{…}`, `@` on its
+ * own, the range `..`, the glob characters a pattern would expand, and control
+ * characters. Git forbids every one of them inside a ref name, so a pin
+ * carrying one names no ref the remote could publish — and appending it to
+ * `refs/tags/` or `refs/remotes/origin/` would otherwise ask `rev-parse` to
+ * evaluate an expression, answering a pin with an ancestor or a reflog entry
+ * nobody published.
+ */
+const revisionSyntaxPattern = /[\0-\x20~^:?*[\\\x7f]|@\{|\.\.|^@$/;
+/**
+ * A semantic version, optionally spelled with the `v` release tags carry,
+ * implemented with the exclusions the specification makes so a leading zero or
+ * an empty pre-release identifier is rejected rather than coerced by the
+ * runtime's comparison. The marketplace plugin carries its own copy because a
+ * bundled plugin's module graph stays inside that plugin; sharing one would
+ * put marketplace-and-release vocabulary into feature-neutral core.
+ */
+const numericIdentifier = "0|[1-9]\\d*";
+const prereleaseIdentifier = `${numericIdentifier}|\\d*[A-Za-z-][0-9A-Za-z-]*`;
+const buildIdentifier = "[0-9A-Za-z-]+";
+const versionPattern = new RegExp(
+  `^v?(?:${numericIdentifier})\\.(?:${numericIdentifier})\\.(?:${numericIdentifier})` +
+    `(?:-(?:${prereleaseIdentifier})(?:\\.(?:${prereleaseIdentifier}))*)?` +
+    `(?:\\+${buildIdentifier}(?:\\.${buildIdentifier})*)?$`,
+);
 
 export function normalizeMarketplaceRepository(repository: string): string {
   if (!githubRepositoryPattern.test(repository)) return repository;
@@ -132,7 +195,7 @@ export function deriveMarketplaceName(repository: string): string {
     candidate = url.pathname;
   } catch {
     const scpSeparator = candidate.indexOf(":");
-    if (scpSeparator >= 0 && !/^[A-Za-z]:[\\/]/.test(candidate)) {
+    if (scpSeparator >= 0 && !windowsDrivePattern.test(candidate)) {
       candidate = candidate.slice(scpSeparator + 1);
     }
   }
@@ -143,18 +206,6 @@ export function deriveMarketplaceName(repository: string): string {
     ? finalComponent.slice(0, -4)
     : finalComponent;
   return validateMarketplaceName(name);
-}
-
-/**
- * A URL scheme and SCP-style `host:path` syntax both put a colon ahead of the
- * first slash, which is exactly when Git reads one as a remote; a Windows
- * drive letter is the one such colon that still names a local path. Git keeps
- * every source carrying either, which is what leaves `file://` a clone.
- */
-function carriesGitSyntax(source: string): boolean {
-  const separator = source.indexOf(":");
-  if (separator < 0 || windowsDrivePattern.test(source)) return false;
-  return !source.slice(0, separator).includes("/");
 }
 
 /**
@@ -559,10 +610,51 @@ export async function isCommitAncestor(
 }
 
 /**
+ * Whether the remote still publishes a commit somewhere — on one of its
+ * branches, or under one of its tags — as the last fetch saw it.
+ *
+ * It is what separates the two ways a commit can fail to be an ancestor of
+ * what a marketplace tracks. A commit the remote no longer has anywhere is a
+ * rewritten or force-pushed upstream, and the checkout has to be replaced. A
+ * commit the remote still publishes, on a side branch or at a tag, is where a
+ * pin left the checkout, and re-pinning is the remedy rather than removal.
+ */
+export async function isCommitPublished(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<boolean> {
+  const containing = await readCheckout(
+    checkout,
+    [
+      "for-each-ref",
+      "--count",
+      "1",
+      "--contains",
+      commit,
+      `refs/remotes/${originRemote}`,
+      "refs/tags",
+    ],
+    execution,
+  );
+  return containing !== "";
+}
+
+/**
  * Brings a checkout's view of its remote up to date, tags included, and
  * re-resolves the remote's default branch. Re-resolution is what keeps a
  * marketplace installed before its remote renamed its default branch from
  * reporting a missing ref forever.
+ *
+ * Refs are taken as the remote publishes them now, in both directions. A fetch
+ * that is not forced refuses to update a tag that already exists locally and
+ * fails the whole fetch for it, which would report an unreachable remote for a
+ * publisher who merely moved a tag; a fetch that does not prune keeps a branch
+ * and a tag the remote has withdrawn, which would leave a pin resolving to a
+ * ref nobody publishes any more and a withdrawn release still advertised as
+ * available. Tag immutability is the remote's contract rather than tx's, and
+ * the checkout is tx's own, so following what the remote says is both the
+ * honest reading and the only one that keeps a pin answerable.
  *
  * Both commands reach the remote, so both run non-interactively.
  */
@@ -576,7 +668,11 @@ export async function fetchCheckoutRemote(
     // repository counts: a fetch runs inside it and Git applies it.
     env: await nonInteractiveGitEnvironment(execution, checkout),
   };
-  await readCheckout(checkout, ["fetch", "--tags", originRemote], remote);
+  await readCheckout(
+    checkout,
+    ["fetch", "--tags", "--force", "--prune", "--prune-tags", originRemote],
+    remote,
+  );
   await readCheckout(
     checkout,
     ["remote", "set-head", originRemote, "--auto"],
@@ -650,6 +746,260 @@ export async function restoreCheckout(
 }
 
 /**
+ * The ref a checkout is pinned to, as the user spelled it, or nothing when it
+ * tracks its remote's default branch. Listing local configuration exits zero
+ * when the variable is absent, so absence is data while an unreadable or
+ * otherwise broken configuration remains an operational failure.
+ */
+export async function readMarketplacePin(
+  checkout: string,
+  execution: GitExecution,
+): Promise<string | undefined> {
+  const listed = await readCheckout(
+    checkout,
+    ["config", "--local", "--null", "--list"],
+    execution,
+  );
+  let pin: string | undefined;
+  for (const entry of listed.split("\0")) {
+    const separator = entry.indexOf("\n");
+    if (separator < 0) continue;
+    if (entry.slice(0, separator).toLowerCase() !== pinVariable) continue;
+    // An explicitly empty value is still set. In particular, unpin must clear
+    // it rather than silently treating a malformed pin as already absent.
+    pin = entry.slice(separator + 1).trim();
+  }
+  return pin;
+}
+
+/**
+ * Records a pin, as the user spelled it. `--end-of-options` is what keeps a
+ * ref beginning with `-` a ref rather than an option Git would try to read.
+ */
+export async function writeMarketplacePin(
+  checkout: string,
+  ref: string,
+  execution: GitExecution,
+): Promise<void> {
+  await readCheckout(
+    checkout,
+    ["config", "--local", "--end-of-options", pinVariable, ref],
+    execution,
+  );
+}
+
+/** Clears a pin, returning the marketplace to its remote's default branch. */
+export async function clearMarketplacePin(
+  checkout: string,
+  execution: GitExecution,
+): Promise<void> {
+  await readCheckout(
+    checkout,
+    ["config", "--local", "--unset", pinVariable],
+    execution,
+  );
+}
+
+/**
+ * The commit one of the remote's refs names, taking the ref's name as a name:
+ * a pin carrying revision syntax names nothing the remote publishes, so it is
+ * refused here rather than evaluated as an expression against this checkout.
+ */
+async function readPublishedRef(
+  checkout: string,
+  namespace: string,
+  name: string,
+  execution: GitExecution,
+): Promise<string | undefined> {
+  if (revisionSyntaxPattern.test(name)) return undefined;
+  const ref = `${namespace}${name}`;
+  const listed = await readCheckout(
+    checkout,
+    [
+      "for-each-ref",
+      "--format=%(refname)%00%(symref)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)",
+      ref,
+    ],
+    execution,
+  );
+  for (const line of listed.split("\n")) {
+    const [listedRef, symbolic, type, object, peeledType, peeledObject] =
+      line.split("\0");
+    if (listedRef !== ref) continue;
+    // `remote set-head` synthesizes `refs/remotes/origin/HEAD` as an alias for
+    // the default branch. It is not a branch the remote publishes, so it must
+    // not turn a pin to the local pseudo-ref `HEAD` into an implicit default-
+    // branch pin. The same exclusion applies to any other symbolic alias.
+    if (symbolic !== "") return undefined;
+    if (type === "commit") return object;
+    return peeledType === "commit" ? peeledObject : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The commit a hash names, when the remote publishes that commit.
+ *
+ * Only a hash is read this way. Everything else the user could type here is a
+ * name Git would resolve against the *local* repository — the clone's own
+ * default branch, a local tag, `HEAD`, `@`, `HEAD~1` — and resolving one of
+ * those would answer a pin out of the checkout rather than out of the remote,
+ * which is exactly the question. A branch the remote withdrew would go on
+ * resolving through the local branch of the same name, and a marketplace
+ * pinned to `HEAD` would report itself current forever.
+ *
+ * The publication check is what makes the hash honest too: a commit is a
+ * commit-ish the remote publishes only while some ref of the remote's still
+ * reaches it.
+ */
+async function readPublishedCommit(
+  checkout: string,
+  hash: string,
+  execution: GitExecution,
+): Promise<string | undefined> {
+  if (!commitHashPattern.test(hash)) return undefined;
+  const candidates = await readCheckout(
+    checkout,
+    ["rev-parse", `--disambiguate=${hash}`],
+    execution,
+  );
+  const objects = candidates === "" ? [] : candidates.split("\n");
+  if (objects.length !== 1) return undefined;
+  const [commit = ""] = objects;
+  const type = await readCheckout(
+    checkout,
+    ["cat-file", "-t", commit],
+    execution,
+  );
+  if (type !== "commit") return undefined;
+  return (await isCommitPublished(checkout, commit, execution))
+    ? commit
+    : undefined;
+}
+
+/**
+ * The commit a ref names, resolved against what the remote published into this
+ * repository: a tag first, then a remote branch, then the ref as a commit
+ * hash, which is the order the spec fixes. A ref beginning with a digit is
+ * tried once more with a `v` prefix, because `@1.4.0` is what a user types and
+ * `v1.4.0` is what almost every repository tags — bounded to one extra
+ * attempt, after the literal ref failed everywhere, so it can shadow nothing.
+ *
+ * Each candidate is peeled to a commit, so an annotated tag resolves to what
+ * it points at rather than to the tag object.
+ */
+export async function resolveMarketplaceRef(
+  checkout: string,
+  ref: string,
+  execution: GitExecution,
+): Promise<ResolvedRef> {
+  const attempts = /^\d/.test(ref) ? [ref, `v${ref}`] : [ref];
+  for (const attempt of attempts) {
+    const tagged = await readPublishedRef(
+      checkout,
+      "refs/tags/",
+      attempt,
+      execution,
+    );
+    if (tagged !== undefined) return { commit: tagged, tag: true };
+
+    const branch = await readPublishedRef(
+      checkout,
+      `refs/remotes/${originRemote}/`,
+      attempt,
+      execution,
+    );
+    if (branch !== undefined) return { commit: branch, tag: false };
+
+    const hash = await readPublishedCommit(checkout, attempt, execution);
+    if (hash !== undefined) return { commit: hash, tag: false };
+  }
+  throw new MarketplaceRefNotPublishedError(ref);
+}
+
+/** Whether a tag is a version this plugin may order at all. */
+function isSemanticVersion(tag: string): boolean {
+  return versionPattern.test(tag);
+}
+
+/** A validated version's numeric components, and whether it carries a
+ * pre-release — read ahead of the build metadata, which may itself contain the
+ * `-` that introduces one. */
+function versionParts(version: string): {
+  readonly core: readonly string[];
+  readonly prerelease: boolean;
+} {
+  const [withoutBuild = ""] = version.split("+");
+  const core = withoutBuild.replace(/^v/, "");
+  const separator = core.indexOf("-");
+  return {
+    core: (separator < 0 ? core : core.slice(0, separator)).split("."),
+    prerelease: separator >= 0,
+  };
+}
+
+/**
+ * Whether a release version is higher than another version, as semantic
+ * versions. The candidate carries no pre-release — every caller excludes one
+ * before comparing, because a pre-release is the version its publisher has not
+ * offered yet — so identical cores are decided by the other side alone: a
+ * pre-release precedes the release it leads to, and two releases with the same
+ * core are the same version. That is the whole ordering this plugin needs, and
+ * it is written out rather than delegated because the marketplace plugin is
+ * type-checked by consumers who have no Bun types.
+ *
+ * Components are ordered as digits rather than as numbers: the grammar above
+ * forbids a leading zero, so the longer run of digits is the larger value and
+ * equal-length runs compare lexically. Reading them as numbers would round two
+ * different versions above 2^53 into the same one and report neither as higher
+ * than the other.
+ */
+function isHigherRelease(candidate: string, version: string): boolean {
+  const left = versionParts(candidate);
+  const right = versionParts(version);
+  for (let index = 0; index < left.core.length; index += 1) {
+    const [leading = "0", trailing = "0"] = [
+      left.core[index],
+      right.core[index],
+    ];
+    if (leading === trailing) continue;
+    return leading.length === trailing.length
+      ? leading > trailing
+      : leading.length > trailing.length;
+  }
+  return right.prerelease;
+}
+
+/**
+ * The highest release tag the remote publishes above a pin, or nothing.
+ *
+ * Only a tag that parses as a semantic version may be reported, and only a pin
+ * that parses as one may be compared against: creation time, lexical order and
+ * reachability each order tags differently, and only one of them answers the
+ * question a user asks about a release. A pre-release is never reported,
+ * whatever the pin is — it is precisely the version its publisher has not
+ * offered yet — while a pin may name one, and the first ordinary release above
+ * it is then reported normally.
+ */
+export async function readHigherReleaseTag(
+  checkout: string,
+  pin: string,
+  execution: GitExecution,
+): Promise<string | undefined> {
+  if (!isSemanticVersion(pin)) return undefined;
+
+  const listed = await readCheckout(checkout, ["tag", "--list"], execution);
+  let highest: string | undefined;
+  for (const line of listed.split("\n")) {
+    const tag = line.trim();
+    if (!isSemanticVersion(tag) || versionParts(tag).prerelease) continue;
+    if (!isHigherRelease(tag, pin)) continue;
+    if (highest === undefined || isHigherRelease(tag, highest)) highest = tag;
+  }
+  return highest;
+}
+
+/**
  * One column of a listing, or the placeholder that stands for what a corrupt
  * checkout could not answer. Blank counts as unanswered, so the listing never
  * leaves a column empty or varies its wording between rows.
@@ -689,12 +1039,22 @@ export class MarketplaceManager implements MarketplaceOperations {
     // happens to be standing.
     if (!source) throw new Error("Marketplace source must not be empty");
 
+    // Classification first, on the argument exactly as it was typed: a
+    // directory named `tools@2` is that directory, so only a source Git is
+    // being handed is examined for a version at all.
     const local = await this.#resolveLocalSource(source);
+    const { source: repository, ref } =
+      local === undefined
+        ? parseGitSourceVersion(source)
+        : { source, ref: undefined };
+    if (ref !== undefined)
+      await this.#requireVersionableSource(repository, ref);
+
     const name =
       requestedName ??
       derivedName(source, () =>
         local === undefined
-          ? deriveMarketplaceName(source)
+          ? deriveMarketplaceName(repository)
           : deriveLocalMarketplaceName(local),
       );
     const target = containedMarketplacePath(this.#root, name);
@@ -702,7 +1062,26 @@ export class MarketplaceManager implements MarketplaceOperations {
     await this.#requireAvailable(name, target);
 
     if (local !== undefined) return this.#reference(local, name, target);
-    return this.#clone(source, name, target);
+    return this.#clone(repository, name, target, ref);
+  }
+
+  /**
+   * Refuses a version suffix whose source turns out to name a local directory.
+   * Classification already decided this argument belongs to Git — the literal
+   * the user typed does not exist — so this probe never changes which source is
+   * installed; it only reports the version the user asked for as impossible,
+   * which is what `./tools@v1` beside a `./tools` directory means, rather than
+   * quietly cloning a snapshot of a directory that would have been referenced
+   * live.
+   */
+  async #requireVersionableSource(
+    repository: string,
+    ref: string,
+  ): Promise<void> {
+    if ((await this.#resolveLocalSource(repository)) === undefined) return;
+    throw new Error(
+      `Marketplace source "${repository}" is a local directory, so version "${ref}" cannot be pinned to it; a local marketplace is referenced live`,
+    );
   }
 
   /**
@@ -799,9 +1178,15 @@ export class MarketplaceManager implements MarketplaceOperations {
    * lifecycle script and the name check reports a marketplace someone else
    * installed, and neither becomes true by cloning the same commit again.
    */
-  async #clone(source: string, name: string, target: string): Promise<string> {
+  async #clone(
+    source: string,
+    name: string,
+    target: string,
+    ref?: string,
+  ): Promise<string> {
     const staging = await this.#cloneStaging(source, name, dirname(target));
     try {
+      if (ref !== undefined) await this.#stageVersion(staging, ref);
       await this.#prepareCheckout(staging);
       await this.#requireAvailable(name, target);
       await rename(staging, target);
@@ -812,6 +1197,23 @@ export class MarketplaceManager implements MarketplaceOperations {
       // filesystem refuses would replace them from inside this `finally`.
       await discardStaging(staging);
     }
+  }
+
+  /**
+   * Moves the staged clone onto the ref the user named and records the pin
+   * there, before anything is validated or published. The clone itself is
+   * unchanged — one clone, retry included — and only what is checked out
+   * afterwards differs; a ref that resolves nowhere fails the addition, and
+   * staging is discarded exactly as it is for any other publication failure.
+   */
+  async #stageVersion(staging: string, ref: string): Promise<void> {
+    const { commit } = await resolveMarketplaceRef(
+      staging,
+      ref,
+      this.#execution,
+    );
+    await moveCheckout(staging, commit, this.#execution);
+    await writeMarketplacePin(staging, ref, this.#execution);
   }
 
   async #prepareCheckout(checkout: string): Promise<void> {
@@ -866,6 +1268,80 @@ export class MarketplaceManager implements MarketplaceOperations {
     return (await isMarketplaceReference(checkout))
       ? liveMarketplaceVersion
       : readCommitLabel(checkout, "HEAD", this.#execution);
+  }
+
+  /**
+   * Records a pin against a ref the remote really publishes, and answers with
+   * the version label the next update will move to.
+   *
+   * The remote is fetched first, so a ref published since the marketplace was
+   * installed resolves; the pin is written only once the ref resolved, so a
+   * typo is rejected while the previous pin stands. The checkout is
+   * deliberately not moved: moving one runs validation and a trusted
+   * dependency installation, which is `tx update`'s job and carries its
+   * failure handling, and a pin command that quietly did all that would be an
+   * update with a different name.
+   */
+  async pin(name: string, ref: string): Promise<string> {
+    const checkout = await this.#pinnableCheckout(name);
+    await this.#fetchCheckout(checkout);
+    const { commit } = await resolveMarketplaceRef(
+      checkout,
+      ref,
+      this.#execution,
+    );
+    await writeMarketplacePin(checkout, ref, this.#execution);
+    return readCommitLabel(checkout, commit, this.#execution);
+  }
+
+  /**
+   * Fetches, with the recorded remote's credential taken out of whatever Git
+   * says when it cannot reach it. Git quotes the URL it was working with, and a
+   * marketplace installed from a source carrying a token has that token in the
+   * URL, so reporting the failure unaltered would print it — the same
+   * guarantee `tx update` makes about its own fetch, made in the one other
+   * place that fetches.
+   */
+  async #fetchCheckout(checkout: string): Promise<void> {
+    try {
+      await fetchCheckoutRemote(checkout, this.#execution);
+    } catch (error) {
+      // Nothing to redact against when the checkout cannot name its remote,
+      // which is the safe direction: the failure still reports.
+      let source = "";
+      try {
+        source = await readRemoteSource(checkout, this.#execution);
+      } catch {
+        // The fetch failure remains the failure being reported.
+      }
+      throw withoutCredentialsInFailure(
+        error as Error,
+        credentialRedactions(source),
+      );
+    }
+  }
+
+  /** Clears a pin, if one is set, so the marketplace tracks its remote's
+   * default branch again on the next update. */
+  async unpin(name: string): Promise<void> {
+    const checkout = await this.#pinnableCheckout(name);
+    if ((await readMarketplacePin(checkout, this.#execution)) !== undefined) {
+      await clearMarketplacePin(checkout, this.#execution);
+    }
+  }
+
+  /** An installed marketplace a pin can be about at all. */
+  async #pinnableCheckout(name: string): Promise<string> {
+    const checkout = containedMarketplacePath(this.#root, name);
+    if (!(await pathExists(checkout))) {
+      throw new Error(`Marketplace "${name}" is not installed`);
+    }
+    if (await isMarketplaceReference(checkout)) {
+      throw new Error(
+        `Marketplace "${name}" is a live local reference, so there is no version to pin it to`,
+      );
+    }
+    return checkout;
   }
 
   async remove(name: string): Promise<void> {

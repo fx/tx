@@ -13,10 +13,12 @@ tx marketplace add owner/repository
 tx marketplace add https://example.com/tools.git --name tools
 tx marketplace add ./my-plugins
 tx marketplace list
+tx marketplace pin tools v1.4.0
+tx marketplace unpin tools
 tx marketplace remove tools
 ```
 
-`list` prints one tab-separated line per marketplace: its name, its version label, and its source. `add` accepts any Git clone source. Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+`list` prints one tab-separated line per marketplace: its name, its version label, and its source. `add` accepts any Git clone source, optionally with the `@<ref>` version described in [Marketplace versions](#marketplace-versions). Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
 
 ## Private repositories over SSH
 
@@ -26,7 +28,7 @@ The derived source is always `git@host:path`, in the SCP syntax a forge's own in
 
 Clone attempts run without Git's terminal prompt. Without that, a private HTTPS clone with no credential stops on the prompt and waits, and the SSH retry never happens. Credential helpers and `GIT_ASKPASS` are untouched, so a credential you have configured is still found and the HTTPS clone still succeeds. Only Git's own prompt is suppressed, and only while reaching a remote — cloning, and the fetch `tx update` performs, which needs it for a stronger reason: an update walks every marketplace you have, and one prompt would stall the run. Reading Git configuration, `marketplace list`, and dependency installation are unaffected.
 
-Every clone attempt, and every fetch, runs `ssh -o BatchMode=yes` by default, so an unknown host key or a missing key fails rather than asking. For a clone that covers the first attempt as well as the SSH retry, because the first one can be an SSH connection too: an `url.<base>.insteadOf` rule rewrites an HTTP(S) source to SSH before Git dials, and ssh's own host-key and passphrase prompts go to the terminal, where turning off Git's prompt cannot reach them. On a clone that really does speak HTTP(S) the setting does nothing at all.
+Every clone attempt, and every fetch, runs `ssh -o BatchMode=yes` by default, so an unknown host key or a missing key fails rather than asking. On a clone, that default covers the first attempt as well as the SSH retry, because the first attempt can be an SSH connection too: an `url.<base>.insteadOf` rule rewrites an HTTP(S) source to SSH before Git dials, and ssh's own host-key and passphrase prompts go to the terminal, where turning off Git's prompt cannot reach them. On a clone that really does speak HTTP(S) the setting does nothing at all.
 
 If you already configure an SSH command — through `GIT_SSH_COMMAND`, through `GIT_SSH`, through Git's own `core.sshCommand` in your global or system configuration, or as command-scope configuration supplied by the environment (`GIT_CONFIG_COUNT` with its `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` entries), any of which is how a CI job usually pins a deploy key — that command is used exactly as it stands, and none of them is overridden. Yours is a deliberate invocation, an identity file, an alternate config, a proxy command, and `tx` has no business rewriting it. That includes its prompting behavior: a key whose passphrase is not already in your agent can still stop and ask. Which configuration files count depends on what is about to run, and the rule is the same one either way: a scope counts when Git will really apply it. A `core.sshCommand` set in a single repository's own configuration does not count for a clone, because `git clone` never applies it — the clone creates its repository rather than joining the one you are standing in — so `tx` would be standing down for a command Git will not run. It does count for the fetch behind `tx update`, which runs inside the installed checkout, where Git applies that checkout's own configuration and it outranks your global and system files: a deploy key you pinned in one marketplace's checkout is used, and is asked for first.
 
@@ -55,6 +57,31 @@ A local source is validated and has its selected dependency manifests installed 
 
 Marketplaces and their plugins execute in deterministic order: installed marketplace names are sorted, entries retain their manifest order, and the host initializes roots followed by contributed children in FIFO order.
 
+## Marketplace versions
+
+`add` takes a version on the source, spelled the way every package manager spells one:
+
+```sh
+tx marketplace add fx/cc@1.4.0
+tx marketplace add fx/cc@release/1.4
+tx marketplace add git@github.com:fx/cc.git@v1.4.0
+```
+
+The ref is a commit-ish the remote publishes, resolved as a tag, then a branch, then a commit. A ref beginning with a digit is tried once more with a `v` prefix, so `@1.4.0` finds the `v1.4.0` tag almost every repository publishes, this project included. A ref that resolves nowhere fails the addition and installs nothing. The version never reaches the name: `fx/cc@1.4.0` installs as `cc`.
+
+The separator is the last `@` outside the source's authority — the part Git reads to find the host — so an SSH login and an HTTP(S) credential are never read as one: `git@github.com:fx/cc.git` and `https://token@example.com/fx/cc.git` are unpinned sources. That is also what lets a ref contain `/`. A ref whose own *name* contains `@` cannot be written as a suffix, because nothing can tell which `@` you meant; give it to `tx marketplace pin`, where the ref is an argument of its own. Nothing is unreachable, and the failure is loud either way: the addition fails against the source it actually tried.
+
+Classification runs first, so a version is only ever read from a source that is going to Git. A directory named `tools@2` is added as a live reference under that name, and `./tools@v1.0.0` beside a `./tools` directory is an error rather than a clone — a reference is live, so there is no version to pin it to.
+
+A pin changes afterwards, and takes effect on the next update rather than moving the checkout itself:
+
+```sh
+tx marketplace pin cc v1.5.0
+tx marketplace unpin cc
+```
+
+`pin` fetches first and refuses a ref the remote does not publish, leaving the previous pin exactly as it was, so a mistyped ref never silently unpins anything. It records without checking anything out, because moving a checkout runs validation and a trusted dependency installation — that is `tx update`'s job, and it carries `tx update`'s failure handling. `unpin` clears the pin and the marketplace tracks its remote's default branch again.
+
 ## Update what is installed
 
 `tx update` updates everything `tx` has installed. `tx update --dry-run` reports exactly the same thing and applies nothing, and positional names limit a run to the items you name.
@@ -81,18 +108,28 @@ tools	v1.4.0	-> v1.5.0
 mine	live	up to date
 ```
 
-Gathering fetches, because there is no way to learn what a remote has without asking it, and a dry run whose answer is "probably" is not worth running. The fetch writes remote-tracking refs and the objects behind them and nothing else, so the checkout, the working tree, and the dependencies installed beside them come out of a dry run untouched. Fetching runs non-interactively, exactly as cloning does — an update walks every marketplace you have, and one credential or host-key prompt would stall the whole run. Reading Git configuration, `marketplace list`, and dependency installation keep your environment as it is.
+Gathering fetches, because there is no way to learn what a remote has without asking it, and a dry run whose answer is "probably" is not worth running. The fetch writes remote-tracking refs, tags, and the objects behind them, and nothing else, so the checkout, the working tree, and the dependencies installed beside them come out of a dry run untouched. Refs follow what the remote publishes now, in both directions: a tag its publisher moved moves, and a branch or tag they withdrew goes, so a pin is always answered against what is really there rather than against a ref only your copy still has. Fetching runs non-interactively, exactly as cloning does — an update walks every marketplace you have, and one credential or host-key prompt would stall the whole run. Reading Git configuration, `marketplace list`, and dependency installation keep your environment as it is.
 
 Applying moves the checkout onto the target commit, detached, then validates the marketplace and installs its selected dependency manifests exactly as adding it would — the new commit may declare different plugins or different dependencies. A marketplace whose checkout did not move is not revalidated. If validation or installation fails, the checkout is put back on the commit it held and the marketplace is reported as failed. Putting it back discards whatever the failed preparation rewrote — an install that rewrites a committed lockfile before failing would otherwise strand the marketplace on the commit that just failed — and nothing of yours is in that set, because the update refused to start unless the checkout was clean. What a trusted installation already wrote outside the checkout's tracked files is not put back, and `tx` says so rather than claiming otherwise.
 
 A fetch that fails is reported as Git reported it, with the credential of the recorded remote taken out of the message, so a marketplace installed from a source carrying a token does not print that token when its remote goes unreachable.
 
+A [pinned](#marketplace-versions) marketplace targets what its pin resolves to now, rather than the remote's default branch. The pin names a ref and is re-resolved on every run, so a pin to a hash never moves, a pin to a branch moves with that branch, and a pin to a tag moves if its publisher moves the tag — tag immutability is the remote's contract, not `tx`'s. Every run reports the pin, and reports the highest release the remote publishes above it as detail, without proposing to apply it: you pinned a version, and being moved off it unasked would defeat the pin. "Higher" means higher as a semantic version, so a tag that is not one is never reported and a pin that is not one is compared against nothing; a pre-release is never reported, though you may pin to one and hear about the first ordinary release above it.
+
+```
+$ tx update --dry-run
+tools	v1.4.0	up to date	pinned to v1.4.0; the remote publishes v1.5.0
+```
+
+A pin may move a checkout in either direction, because you named the commit — going back to the last version that worked is most of the reason to set one. Only an unpinned marketplace is held to moving forward. A pin naming a ref the remote has stopped publishing is reported as a failed item pointing at `tx marketplace pin` and `tx marketplace unpin`, not at removing the marketplace.
+
 Two situations stop an update, and both are reported as detail on a dry run before they refuse anything for real:
 
 - **A tracked file you edited.** The edit is yours and is never discarded. Resolve it in the checkout and run the update again. Untracked files are ignored, because `bun install` writes them into every checkout — except one occupying a path the new commit tracks, which cannot be kept and moved onto: that collision is reported with the path, and the file survives.
-- **A rewritten upstream.** If the commit you have is no longer an ancestor of the remote's, the branch was force-pushed or rebuilt, and moving anyway would silently discard the history the checkout was validated against. `tx marketplace remove` and add it again is the remedy.
+- **A commit that is not an ancestor of the target.** Moving anyway would silently discard the history the checkout was validated against, so an unpinned marketplace is refused — and which refusal you get says what happened. If the remote no longer has that commit anywhere, the branch was force-pushed or rebuilt, and `tx marketplace remove` and add it again is the remedy. If the remote still publishes it, on a side branch or at a tag, nothing is broken: that is where a pin left the checkout, so `tx marketplace pin` names it as the remedy first. A pinned marketplace is never refused for this — you named the commit.
 
 A marketplace whose plugins fail to load updates like any other — the participant reads storage rather than depending on a marketplace having loaded, which is what makes `tx update` the way out of a broken commit. A checkout `tx` cannot read at all is reported as one failed item naming its `marketplace remove` remedy, while the marketplaces around it still report and still update.
+
 ### Updating tx itself
 
 One of the items `tx update` gathers is `tx`, contributed by a bundled plugin that owns the running executable and defines no commands of its own. It compares the running version against the project's latest published release as a semantic version and offers only a strictly newer one, so a locally built executable is never dragged backwards. The lookup sends a token when `GH_TOKEN` or `GITHUB_TOKEN` is set — the first of those two that is non-empty, and no other variable is ever sent as one — which raises the rate limit; the release is public, so it works without either.

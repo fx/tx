@@ -13,14 +13,39 @@ import {
   EXIT_FAILURE,
   EXIT_SUCCESS,
 } from "../src/commands.ts";
-import type { CommandProcessContext } from "../src/context.ts";
 import { coreDependencies, initializePlugins } from "../src/plugins.ts";
 import {
-  captureContext,
+  type CapturedContext,
+  captureContext as captureCommandContext,
   createGitRepository,
   fixtureGit,
   temporaryDirectory,
 } from "./helpers.ts";
+
+interface MarketplaceTestContext extends CapturedContext {
+  readonly marketplaceRoot: string;
+}
+
+let isolatedMarketplaceRoot = "";
+
+/** Give every plugin constructed from this context an explicit temporary
+ * discovery root, independent of every platform's real user-data location. */
+function captureContext(
+  marketplaceRoot = isolatedMarketplaceRoot,
+  env: Record<string, string | undefined> = {},
+): MarketplaceTestContext {
+  return Object.assign(captureCommandContext(env), { marketplaceRoot });
+}
+
+function marketplacePlugin(
+  context: MarketplaceTestContext,
+  manager?: MarketplaceOperations,
+) {
+  const root = context.marketplaceRoot;
+  return createMarketplacePlugin(
+    manager === undefined ? { root } : { manager, root },
+  );
+}
 
 class RecordingManager implements MarketplaceOperations {
   readonly calls: unknown[][] = [];
@@ -39,33 +64,37 @@ class RecordingManager implements MarketplaceOperations {
     return this.listings;
   }
 
+  async pin(name: string, ref: string): Promise<string> {
+    this.calls.push(["pin", name, ref]);
+    return "v1.4.0";
+  }
+
   async remove(name: string): Promise<void> {
     this.calls.push(["remove", name]);
   }
+
+  async unpin(name: string): Promise<void> {
+    this.calls.push(["unpin", name]);
+  }
 }
 
-let emptyDataHome = "";
-
 beforeAll(async () => {
-  emptyDataHome = await temporaryDirectory("tx-marketplace-plugin-empty-");
+  isolatedMarketplaceRoot = await temporaryDirectory(
+    "tx-marketplace-plugin-empty-",
+  );
 });
 
 afterAll(async () => {
-  await rm(emptyDataHome, { recursive: true, force: true });
+  await rm(isolatedMarketplaceRoot, { recursive: true, force: true });
 });
 
 async function setup(
-  context: CommandProcessContext,
+  context: MarketplaceTestContext,
   manager = new RecordingManager(),
 ) {
   const { namespaces, failures } = await initializePlugins(
-    [createMarketplacePlugin({ manager })],
-    {
-      context: {
-        ...context,
-        env: { ...context.env, XDG_DATA_HOME: emptyDataHome },
-      },
-    },
+    [marketplacePlugin(context, manager)],
+    { context },
   );
   expect(failures).toEqual([]);
   return {
@@ -95,6 +124,8 @@ describe("first-party marketplace plugin", () => {
     );
     expect(namespaceHelp.stdoutText()).toContain("add [options] <source>");
     expect(namespaceHelp.stdoutText()).toContain("list ");
+    expect(namespaceHelp.stdoutText()).toContain("pin <name> <ref>");
+    expect(namespaceHelp.stdoutText()).toContain("unpin <name>");
     expect(namespaceHelp.stdoutText()).toContain("remove <name>");
     expect(namespaceHelp.stderrText()).toBe("");
 
@@ -149,6 +180,38 @@ describe("first-party marketplace plugin", () => {
     expect(context.stderrText()).toBe("");
   });
 
+  test("pins through the manager and reports what the next update applies", async () => {
+    const context = captureContext();
+    const { manager, program } = await setup(context);
+
+    expect(
+      await dispatch(
+        program,
+        ["marketplace", "pin", "personal", "1.4.0"],
+        context,
+      ),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(manager.calls).toEqual([["pin", "personal", "1.4.0"]]);
+    expect(context.stdoutText()).toBe(
+      'Pinned marketplace "personal" to "1.4.0"; the next "tx update" applies v1.4.0.\n',
+    );
+    expect(context.stderrText()).toBe("");
+  });
+
+  test("unpins through the manager and reports what it tracks again", async () => {
+    const context = captureContext();
+    const { manager, program } = await setup(context);
+
+    expect(
+      await dispatch(program, ["marketplace", "unpin", "personal"], context),
+    ).toEqual({ exitCode: EXIT_SUCCESS });
+    expect(manager.calls).toEqual([["unpin", "personal"]]);
+    expect(context.stdoutText()).toBe(
+      'Unpinned marketplace "personal"; it tracks its remote\'s default branch again.\n',
+    );
+    expect(context.stderrText()).toBe("");
+  });
+
   test("removes through the manager and reports success", async () => {
     const context = captureContext();
     const { manager, program } = await setup(context);
@@ -171,6 +234,10 @@ describe("first-party marketplace plugin", () => {
     ],
     ["add", ["repository", "--unknown"], "unknown option '--unknown'"],
     ["list", ["extra"], "too many arguments"],
+    ["pin", ["personal"], "missing required argument 'ref'"],
+    ["pin", ["one", "two", "three"], "too many arguments"],
+    ["unpin", [], "missing required argument 'name'"],
+    ["unpin", ["one", "two"], "too many arguments"],
     ["remove", [], "missing required argument 'name'"],
     ["remove", ["one", "two"], "too many arguments"],
   ])("reports declared %s usage errors", async (command, args, message) => {
@@ -187,6 +254,8 @@ describe("first-party marketplace plugin", () => {
 
   test.each([
     ["add", ["repository", "--name", "../escape"]],
+    ["pin", ["../escape", "v1.4.0"]],
+    ["unpin", ["../escape"]],
     ["remove", ["../escape"]],
   ])(
     "keeps rejecting unsafe %s names through its own namespace",
@@ -212,10 +281,10 @@ describe("first-party marketplace plugin", () => {
     try {
       await mkdir(join(dataHome, "tx"), { recursive: true });
       await writeFile(storage, "not a directory");
-      const context = captureContext({ XDG_DATA_HOME: dataHome });
+      const context = captureContext(storage);
 
       const { namespaces, failures } = await initializePlugins(
-        [createMarketplacePlugin({ manager: new RecordingManager() })],
+        [marketplacePlugin(context, new RecordingManager())],
         { context },
       );
 
@@ -281,10 +350,10 @@ describe("first-party marketplace plugin", () => {
           join(storage, "replaced"),
         ),
       ]);
-      const context = captureContext({ XDG_DATA_HOME: dataHome });
+      const context = captureContext(storage);
 
       const { namespaces, failures } = await initializePlugins(
-        [createMarketplacePlugin({ manager: new RecordingManager() })],
+        [marketplacePlugin(context, new RecordingManager())],
         { context },
       );
 
@@ -333,10 +402,10 @@ describe("first-party marketplace plugin", () => {
         pathToFileURL(remote).href,
         join(dataHome, "tx", "marketplaces", "tools"),
       ]);
-      const context = captureContext({ XDG_DATA_HOME: dataHome });
+      const context = captureContext(join(dataHome, "tx", "marketplaces"));
 
       const { namespaces, failures } = await initializePlugins(
-        [createMarketplacePlugin(), updatePlugin],
+        [marketplacePlugin(context), updatePlugin],
         { context },
       );
       expect(failures).toEqual([]);
@@ -357,12 +426,12 @@ describe("first-party marketplace plugin", () => {
     }
   });
 
-  test("resolves marketplace storage from its initialization context", async () => {
-    const context = captureContext({
-      XDG_DATA_HOME: "/definitely/missing/tx-test-data",
+  test("uses an explicitly injected root instead of real user storage", async () => {
+    const context = captureContext(isolatedMarketplaceRoot, {
+      ...process.env,
     });
     const { namespaces, failures } = await initializePlugins(
-      [createMarketplacePlugin()],
+      [marketplacePlugin(context)],
       { context },
     );
 

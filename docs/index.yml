@@ -131,7 +131,7 @@ changes:
     path: changes/0014-pin-marketplace-versions.md
     description: Accept a version suffix on a marketplace source, record the pin in its checkout, and honor it when updating.
     spec: updates
-    status: draft
+    status: complete
     depends_on:
       - "0013"
   - id: "0015"
