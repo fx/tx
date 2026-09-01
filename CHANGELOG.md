@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.0](https://github.com/fx/tx/compare/v1.4.0...v1.5.0) (2026-09-01)
+
+
+### Features
+
+* add bundled config capability ([#46](https://github.com/fx/tx/issues/46)) ([648f5f5](https://github.com/fx/tx/commit/648f5f5e1238ac46784c96768e92e399b7bee02b))
+* **marketplace:** install configured marketplaces ([#49](https://github.com/fx/tx/issues/49)) ([995c7a9](https://github.com/fx/tx/commit/995c7a9fc7cebeee12ac8570e555bd329861a6d4))
+* **marketplace:** pin marketplace versions ([#47](https://github.com/fx/tx/issues/47)) ([9e16710](https://github.com/fx/tx/commit/9e1671054b0488bf1b6d23d8d62f8b12d06d667a))
+* **marketplace:** rederive sparse update footprint ([#51](https://github.com/fx/tx/issues/51)) ([369bf40](https://github.com/fx/tx/commit/369bf40ef0a7948eaaf822e64f14b082fed407e4))
+* **marketplace:** reduce install retrieval ([#50](https://github.com/fx/tx/issues/50)) ([386d41b](https://github.com/fx/tx/commit/386d41b8600c32a43ec3150815dce85de26f5b72))
+
 ## [1.4.0](https://github.com/fx/tx/compare/v1.3.0...v1.4.0) (2026-08-29)
 
 
