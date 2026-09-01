@@ -6,7 +6,7 @@
 |------|-------------|--------|
 | [Architecture](specs/architecture/) | Generic core runtime, neutral composition, packaging, and development conventions for tx. | active |
 | [Plugin System](specs/plugin-system/) | Generic plugin hosting, opaque capability registration, and externalized marketplace-plugin ownership contracts. | active |
-| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection and text input composed through user-provided options. | active |
+| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, text input composed through user-provided options, and a greyscale Norton Commander presentation. | active |
 | [Updates](specs/updates/) | User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited. | active |
 | [Config](specs/config/) | Shared per-user JSON config persistence supplied by a bundled plugin, covering validated key definition, reads, writes, and atomic storage. | active |
 
@@ -33,3 +33,5 @@
 | 0017 | [Add Dialog Text Input and Composition](changes/0017-add-dialog-text-input-and-composition.md) | [Dialogs](specs/dialogs/) | complete | 0016 |
 | 0018 | [Add Config Store and Marketplace Installs](changes/0018-add-config-store-and-marketplace-installs.md) | [Config](specs/config/) | complete | 0016 |
 | 0019 | [Reduce Marketplace Clone Footprint](changes/0019-reduce-marketplace-clone-footprint.md) | [Plugin System](specs/plugin-system/) | complete | — |
+| 0020 | [Add Select Filter and Viewport](changes/0020-add-select-filter-and-viewport.md) | [Dialogs](specs/dialogs/) | draft | 0017 |
+| 0021 | [Restyle Dialogs as Norton Commander](changes/0021-restyle-dialogs-as-norton-commander.md) | [Dialogs](specs/dialogs/) | draft | 0020 |
