@@ -1239,6 +1239,19 @@ async function runLazyCheckoutGit(
   }
 }
 
+/** Moves a partial checkout while protecting any target-object lazy fetch. */
+export async function moveLazyCheckout(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<void> {
+  await runLazyCheckoutGit(
+    checkout,
+    ["checkout", "--detach", commit],
+    execution,
+  );
+}
+
 interface TreeEntry {
   readonly mode: string;
   readonly type: string;

@@ -16,6 +16,7 @@ import {
   MarketplaceRefNotPublishedError,
   type MarketplaceSparseCheckoutState,
   moveCheckout,
+  moveLazyCheckout,
   planMarketplaceManifestAtRevision,
   type ResolvedRef,
   type RunGit,
@@ -233,7 +234,11 @@ export class MarketplaceUpdater implements UpdateParticipant {
 
       // An untracked file occupying a path the target tracks is refused here,
       // by the checkout itself, which names the path and moves nothing.
-      await moveCheckout(checkout, target, this.#execution);
+      if (sparseState.enabled) {
+        await moveLazyCheckout(checkout, target, this.#execution);
+      } else {
+        await moveCheckout(checkout, target, this.#execution);
+      }
       moved = true;
 
       try {

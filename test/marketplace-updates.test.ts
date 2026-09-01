@@ -1199,6 +1199,47 @@ describe("reduced marketplace update application", () => {
     }
   });
 
+  test("moves a sparse target noninteractively and redacts checkout failures", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-sparse-move-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      const env = Object.freeze({ ...process.env, TX_TEST_MARKER: "present" });
+      const source = "https://user:top-secret@example.com/acme/tools.git";
+      let moveEnvironment:
+        | Readonly<Record<string, string | undefined>>
+        | undefined;
+      const participant = new MarketplaceUpdater(root, {
+        env,
+        runGit: async (args, options) => {
+          if (args[2] === "checkout" && args.includes("--detach")) {
+            moveEnvironment = options.env;
+            throw new Error(`Git failed for ${source}`);
+          }
+          return runGit(args, options);
+        },
+        prepare: async () => {
+          throw new Error("Preparation must not run");
+        },
+      });
+      const item = gathered(await participant.gather());
+      fixtureGit(checkout, ["config", "remote.origin.url", source]);
+
+      const failure = await participant.apply(item).catch((error) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).not.toContain("top-secret");
+      expect((failure as Error).message).not.toContain("user@");
+      expect((failure as Error).message).toContain(
+        "https://example.com/acme/tools.git",
+      );
+      expect(moveEnvironment?.["GIT_TERMINAL_PROMPT"]).toBe("0");
+      expect(moveEnvironment?.["TX_TEST_MARKER"]).toBe("present");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   for (const restoration of [
     {
       name: "commit restoration",
