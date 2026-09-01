@@ -11,6 +11,7 @@ A marketplace is a Git repository containing one or more plugins, or a local dir
 ```sh
 tx marketplace add owner/repository
 tx marketplace add https://example.com/tools.git --name tools
+tx marketplace add owner/repository --full
 tx marketplace add ./my-plugins
 tx marketplace install
 tx marketplace list
@@ -48,6 +49,10 @@ Write-back stores a Git source without URL userinfo credentials and retains its
 later invocation from another working directory cannot redirect it. If config
 read or write-back fails after an add or removal succeeded, the successful
 marketplace mutation stands and the config failure is reported separately.
+
+By default, a Git-sourced add starts with a partial, sparse clone. It materializes both supported manifest locations, then the directories containing the manifest's validated plugin entries and package selections. Commit history is unchanged; the reduction applies to repository file content and the checked-out tree. If Git or the remote cannot perform the reduced retrieval, tx starts a fresh complete clone of the same source. If a declared repository path exists but the sparse tree cannot resolve it — including a symbolic link whose target was not selected — tx expands that same checkout to the complete tree and validates again before reporting a failure.
+
+Pass `--full` when a plugin imports repository content outside those manifest-derived directories. It skips the reduced attempt and clones the complete Git tree immediately. This option does not change local sources: a local directory remains a live reference and Git is never run for it.
 
 ## Private repositories over SSH
 

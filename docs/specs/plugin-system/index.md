@@ -12,7 +12,7 @@ The approved target architecture is implemented: the core is generic, the market
 
 The second registry provider from [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) is implemented outside core under `plugins/config/`: it registers the opaque `config` capability and follows the separately owned [Config](../config/) contract. The marketplace plugin consumes it for [Configured Marketplaces](#configured-marketplaces), including explicit installation and add/remove write-back.
 
-[Minimal Clone Footprint](#minimal-clone-footprint) is not implemented — every Git-sourced install and update retrieves a marketplace's complete tree today — and is planned by [Change 0019](../../changes/0019-reduce-marketplace-clone-footprint.md).
+[Minimal Clone Footprint](#minimal-clone-footprint) is implemented for Git-sourced installs, including the explicit complete-tree option. Update-time footprint re-derivation remains pending in [Change 0019](../../changes/0019-reduce-marketplace-clone-footprint.md).
 
 ## Requirements
 
