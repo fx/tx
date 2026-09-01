@@ -54,6 +54,49 @@ async function installClone(
   return { remote, root, checkout };
 }
 
+async function installSparseClone(
+  temporaryRoot: string,
+  files: Readonly<Record<string, string>> = {
+    ".tx/config.json":
+      '{"plugins":[{"name":"tools","entry":"plugins/old/index.ts"}]}',
+    "plugins/old/index.ts": entry,
+    "assets/unused.bin": "unused old content\n",
+  },
+): Promise<Installed> {
+  const remote = await createGitRepository(
+    temporaryRoot,
+    "tools-sparse-remote",
+    files,
+  );
+  fixtureGit(remote, ["tag", "v1.0.0"]);
+  const root = join(temporaryRoot, "marketplaces");
+  const checkout = join(root, "tools");
+  fixtureGit(temporaryRoot, [
+    "clone",
+    "--quiet",
+    "--filter=blob:none",
+    "--sparse",
+    "--",
+    pathToFileURL(remote).href,
+    checkout,
+  ]);
+  fixtureGit(checkout, [
+    "sparse-checkout",
+    "set",
+    "--cone",
+    "--skip-checks",
+    "--",
+    ".tx",
+    "plugins/old",
+  ]);
+  return { remote, root, checkout };
+}
+
+function sparseDirectories(checkout: string): readonly string[] {
+  const listed = fixtureGit(checkout, ["sparse-checkout", "list"]);
+  return listed === "" ? [] : listed.split("\n");
+}
+
 /** A second commit on the remote, published as `v2.0.0`. */
 async function publishSecondVersion(
   remote: string,
@@ -481,6 +524,711 @@ describe("marketplace update application", () => {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
+});
+
+describe("reduced marketplace update application", () => {
+  test("adds the target entry and package cones before moving", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-sparse-plan-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      const target = await commitFixtureFiles(
+        remote,
+        {
+          ".tx/config.json":
+            '{"plugins":[{"name":"tools","entry":"extensions/new/index.ts","package":"packages/shared/package.json"}]}',
+          "extensions/new/index.ts": "export default () => 'new';\n",
+          "packages/shared/package.json": '{"name":"shared"}\n',
+          "assets/new-unused.bin": "still excluded\n",
+        },
+        "move plugin footprint",
+      );
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const calls: readonly string[][] = [];
+      const recorded: string[][] = calls as string[][];
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          recorded.push([...args]);
+          return runGit(args, options);
+        },
+        prepare: async (moved) => {
+          expect(
+            await readFile(join(moved, "extensions/new/index.ts"), "utf8"),
+          ).toContain("new");
+          expect(
+            await readFile(join(moved, "packages/shared/package.json"), "utf8"),
+          ).toContain("shared");
+        },
+      });
+
+      const item = gathered(await participant.gather());
+      expect(await participant.apply(item)).toEqual({
+        applied: true,
+        version: "v2.0.0",
+      });
+      expect(headOf(checkout)).toBe(target);
+      expect(sparseDirectories(checkout)).toEqual([
+        ".tx",
+        "extensions/new",
+        "packages/shared",
+        "plugins/old",
+      ]);
+      expect(
+        recorded.find(
+          (args) => args[2] === "sparse-checkout" && args[3] === "add",
+        ),
+      ).toEqual([
+        "-C",
+        checkout,
+        "sparse-checkout",
+        "add",
+        "--skip-checks",
+        "--",
+        ".tx",
+        "extensions/new",
+        "packages/shared",
+      ]);
+      expect(
+        await Bun.file(join(checkout, "assets/new-unused.bin")).exists(),
+      ).toBe(false);
+      expect(recorded.some((args) => args.includes("disable"))).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  for (const transition of [
+    "canonical to legacy",
+    "legacy to canonical",
+  ] as const) {
+    test(`honors ${transition} manifest precedence at the target`, async () => {
+      const temporaryRoot = await temporaryDirectory("tx-update-transition-");
+      try {
+        const legacyFirst = transition === "legacy to canonical";
+        const initialManifest = legacyFirst
+          ? "tx.marketplace.json"
+          : ".tx/config.json";
+        const targetManifest = legacyFirst
+          ? ".tx/config.json"
+          : "tx.marketplace.json";
+        const { remote, root, checkout } = await installSparseClone(
+          temporaryRoot,
+          {
+            [initialManifest]:
+              '{"plugins":[{"name":"tools","entry":"plugins/old/index.ts"}]}',
+            "plugins/old/index.ts": entry,
+          },
+        );
+        await rm(join(remote, initialManifest));
+        await commitFixtureFiles(
+          remote,
+          {
+            [targetManifest]:
+              '{"plugins":[{"name":"tools","entry":"plugins/new/index.ts"}]}',
+            "plugins/new/index.ts": "export default () => 'transition';\n",
+          },
+          transition,
+        );
+        fixtureGit(remote, ["tag", "v2.0.0"]);
+
+        const participant = updater(root, async (moved) => {
+          expect(
+            await readFile(join(moved, "plugins/new/index.ts"), "utf8"),
+          ).toContain("transition");
+        });
+        expect(
+          await participant.apply(gathered(await participant.gather())),
+        ).toEqual({ applied: true, version: "v2.0.0" });
+        expect(sparseDirectories(checkout)).toContain("plugins/new");
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test("uses canonical symlink precedence and keeps a successful fallback full", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-symlink-plan-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await rm(join(remote, ".tx/config.json"));
+      await commitFixtureFiles(
+        remote,
+        {
+          "config/canonical.json":
+            '{"plugins":[{"name":"canonical","entry":"canonical/index.ts"}]}',
+          "canonical/index.ts": "export default () => 'canonical';\n",
+          "tx.marketplace.json":
+            '{"plugins":[{"name":"legacy","entry":"legacy/index.ts"}]}',
+          "legacy/index.ts": "export default () => 'legacy';\n",
+        },
+        "stage symlink target",
+      );
+      await symlink(
+        "../config/canonical.json",
+        join(remote, ".tx/config.json"),
+      );
+      fixtureGit(remote, ["add", "--all"]);
+      fixtureGit(remote, ["commit", "-m", "prefer canonical symlink"]);
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+
+      const participant = updater(root, async (moved) => {
+        expect(
+          await readFile(join(moved, "canonical/index.ts"), "utf8"),
+        ).toContain("canonical");
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+      expect(await Bun.file(join(checkout, "legacy/index.ts")).exists()).toBe(
+        true,
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("uses a symlinked canonical manifest parent before a legacy file", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-parent-link-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await rm(join(remote, ".tx"), { recursive: true });
+      await commitFixtureFiles(
+        remote,
+        {
+          "metadata/config.json":
+            '{"plugins":[{"name":"canonical","entry":"canonical/index.ts"}]}',
+          "canonical/index.ts": "export default () => 'canonical parent';\n",
+          "tx.marketplace.json":
+            '{"plugins":[{"name":"legacy","entry":"legacy/index.ts"}]}',
+          "legacy/index.ts": "export default () => 'legacy';\n",
+        },
+        "stage canonical parent target",
+      );
+      await symlink("metadata", join(remote, ".tx"));
+      fixtureGit(remote, ["add", "--all"]);
+      fixtureGit(remote, ["commit", "-m", "link canonical parent"]);
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+
+      const participant = updater(root, async (moved) => {
+        expect(
+          await readFile(join(moved, "canonical/index.ts"), "utf8"),
+        ).toContain("canonical parent");
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  for (const invalid of [
+    {
+      name: "missing manifest",
+      mutate: async (remote: string) => {
+        await rm(join(remote, ".tx/config.json"));
+      },
+      expected: "Missing .tx/config.json",
+    },
+    {
+      name: "malformed manifest",
+      mutate: async (remote: string) => {
+        await writeFile(join(remote, ".tx/config.json"), "{");
+      },
+      expected: "Invalid .tx/config.json",
+    },
+    {
+      name: "lexically invalid entry",
+      mutate: async (remote: string) => {
+        await writeFile(
+          join(remote, ".tx/config.json"),
+          '{"plugins":[{"name":"tools","entry":"../outside.ts"}]}',
+        );
+      },
+      expected: "entry escapes the marketplace",
+    },
+  ]) {
+    test(`rejects ${invalid.name} before sparse or HEAD mutation`, async () => {
+      const temporaryRoot = await temporaryDirectory("tx-update-content-");
+      try {
+        const { remote, root, checkout } =
+          await installSparseClone(temporaryRoot);
+        const before = headOf(checkout);
+        const cones = sparseDirectories(checkout);
+        await invalid.mutate(remote);
+        fixtureGit(remote, ["add", "--all"]);
+        fixtureGit(remote, ["commit", "-m", invalid.name]);
+        fixtureGit(remote, ["tag", "v2.0.0"]);
+        const calls: string[][] = [];
+        const participant = new MarketplaceUpdater(root, {
+          env: process.env,
+          runGit: async (args, options) => {
+            calls.push([...args]);
+            return runGit(args, options);
+          },
+          prepare: async () => {
+            throw new Error("Preparation must not run");
+          },
+        });
+
+        const item = gathered(await participant.gather());
+        await expect(participant.apply(item)).rejects.toThrow(invalid.expected);
+        expect(headOf(checkout)).toBe(before);
+        expect(sparseDirectories(checkout)).toEqual(cones);
+        expect(
+          calls.some(
+            (args) =>
+              (args[2] === "sparse-checkout" &&
+                ["add", "set", "disable"].includes(args[3] ?? "")) ||
+              args[2] === "checkout",
+          ),
+        ).toBe(false);
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test("falls back in the same checkout when target-tree planning fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-plan-fallback-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote, {
+        ".tx/config.json": manifest,
+        "plugin.ts": entry,
+      });
+      let failed = false;
+      const calls: string[][] = [];
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          if (!failed && args.includes("ls-tree")) {
+            failed = true;
+            throw new Error("target tree unavailable");
+          }
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(calls.filter((args) => args.includes("disable"))).toHaveLength(1);
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+      expect(calls.some((args) => args[0] === "clone")).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("retries repository-path preparation once against the complete tree", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-path-retry-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await commitFixtureFiles(
+        remote,
+        {
+          ".tx/config.json":
+            '{"plugins":[{"name":"tools","entry":"linked/index.ts"}]}',
+          "real/index.ts": "export default () => 'linked target';\n",
+        },
+        "symlinked entry parent",
+      );
+      await symlink("real", join(remote, "linked"));
+      fixtureGit(remote, ["add", "--all"]);
+      fixtureGit(remote, ["commit", "-m", "link entry parent"]);
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const participant = new MarketplaceUpdater(root, { env: process.env });
+
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(
+        await readFile(join(checkout, "linked/index.ts"), "utf8"),
+      ).toContain("linked target");
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not retry a repository path absent from the target", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-path-absent-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await commitFixtureFiles(
+        remote,
+        {
+          ".tx/config.json":
+            '{"plugins":[{"name":"tools","entry":"missing/index.ts"}]}',
+        },
+        "missing entry",
+      );
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const before = headOf(checkout);
+      const cones = sparseDirectories(checkout);
+      const calls: string[][] = [];
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          return runGit(args, options);
+        },
+      });
+
+      await expect(
+        participant.apply(gathered(await participant.gather())),
+      ).rejects.toThrow("entry does not exist: missing/index.ts");
+      expect(headOf(checkout)).toBe(before);
+      expect(sparseDirectories(checkout)).toEqual(cones);
+      expect(calls.filter((args) => args.includes("disable"))).toHaveLength(0);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("restores the old commit and exact cone after preparation fails", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-sparse-rollback-",
+    );
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await commitFixtureFiles(
+        remote,
+        {
+          ".tx/config.json":
+            '{"plugins":[{"name":"tools","entry":"plugins/new/index.ts"}]}',
+          "plugins/new/index.ts": "export default () => 'new';\n",
+        },
+        "new sparse directory",
+      );
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const before = headOf(checkout);
+      const cones = sparseDirectories(checkout);
+      const participant = updater(root, async () => {
+        throw new Error("dependency failed");
+      });
+
+      await expect(
+        participant.apply(gathered(await participant.gather())),
+      ).rejects.toThrow(
+        "dependency failed. The previous commit was restored; installed dependencies were not.",
+      );
+      expect(headOf(checkout)).toBe(before);
+      expect(sparseDirectories(checkout)).toEqual(cones);
+      expect(
+        await Bun.file(join(checkout, "plugins/new/index.ts")).exists(),
+      ).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("restores only sparse intent when an untracked collision prevents the move", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-sparse-collision-",
+    );
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote, {
+        ".tx/config.json":
+          '{"plugins":[{"name":"tools","entry":"new/added.txt"}]}',
+        "new/added.txt": "published\n",
+      });
+      await mkdir(join(checkout, "new"), { recursive: true });
+      await writeFile(join(checkout, "new/added.txt"), "mine\n");
+      const before = headOf(checkout);
+      const cones = sparseDirectories(checkout);
+      const calls: string[][] = [];
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          return runGit(args, options);
+        },
+        prepare: async () => {
+          throw new Error("Preparation must not run");
+        },
+      });
+
+      await expect(
+        participant.apply(gathered(await participant.gather())),
+      ).rejects.toThrow("added.txt");
+      expect(headOf(checkout)).toBe(before);
+      expect(sparseDirectories(checkout)).toEqual(cones);
+      expect(await readFile(join(checkout, "new/added.txt"), "utf8")).toBe(
+        "mine\n",
+      );
+      expect(
+        calls.some(
+          (args) => args[2] === "checkout" && args.includes("--force"),
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("never runs sparse mutation commands for a durable full checkout", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-full-intent-");
+    try {
+      const { remote, root } = await installClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      const calls: string[][] = [];
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(calls.some((args) => args.includes("sparse-checkout"))).toBe(
+        false,
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an unexpected non-cone sparse checkout before mutation", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-non-cone-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      fixtureGit(checkout, [
+        "config",
+        "--worktree",
+        "core.sparseCheckoutCone",
+        "false",
+      ]);
+      const before = headOf(checkout);
+      const calls: string[][] = [];
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          return runGit(args, options);
+        },
+        prepare: async () => {
+          throw new Error("Preparation must not run");
+        },
+      });
+      const item = gathered(await participant.gather());
+
+      await expect(participant.apply(item)).rejects.toThrow(
+        "unexpected non-cone sparse checkout",
+      );
+      expect(headOf(checkout)).toBe(before);
+      expect(
+        calls.some(
+          (args) =>
+            args[2] === "sparse-checkout" &&
+            ["add", "set", "disable"].includes(args[3] ?? ""),
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rolls back a sparse update when final version labeling fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-label-rollback-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      const target = await commitFixtureFiles(
+        remote,
+        {
+          ".tx/config.json":
+            '{"plugins":[{"name":"tools","entry":"plugins/new/index.ts"}]}',
+          "plugins/new/index.ts": entry,
+        },
+        "new label target",
+      );
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const before = headOf(checkout);
+      const cones = sparseDirectories(checkout);
+      let failLabel = false;
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (failLabel && args[2] === "describe" && args.at(-1) === target) {
+            throw new Error("cannot label target");
+          }
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      const item = gathered(await participant.gather());
+      failLabel = true;
+
+      await expect(participant.apply(item)).rejects.toThrow(
+        "cannot label target. The previous commit was restored",
+      );
+      expect(headOf(checkout)).toBe(before);
+      expect(sparseDirectories(checkout)).toEqual(cones);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("redacts checkout credentials from sparse fallback failures", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-sparse-secret-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await commitFixtureFiles(
+        remote,
+        {
+          ".tx/config.json":
+            '{"plugins":[{"name":"tools","entry":"plugins/new/index.ts"}]}',
+          "plugins/new/index.ts": entry,
+        },
+        "secret failure target",
+      );
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const env = Object.freeze({ ...process.env, TX_TEST_MARKER: "present" });
+      const environments: Readonly<Record<string, string | undefined>>[] = [];
+      let failSparse = false;
+      const source = "https://user:top-secret@example.com/acme/tools.git";
+      const participant = new MarketplaceUpdater(root, {
+        env,
+        runGit: async (args, options) => {
+          if (
+            failSparse &&
+            args[2] === "sparse-checkout" &&
+            (args[3] === "add" || args[3] === "disable")
+          ) {
+            environments.push(options.env);
+            throw new Error(`Git failed for ${source}`);
+          }
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      const item = gathered(await participant.gather());
+      fixtureGit(checkout, ["config", "remote.origin.url", source]);
+      failSparse = true;
+
+      const failure = await participant.apply(item).catch((error) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).not.toContain("top-secret");
+      expect((failure as Error).message).not.toContain("user@");
+      expect((failure as Error).message).toContain(
+        "https://example.com/acme/tools.git",
+      );
+      expect(environments).toHaveLength(2);
+      for (const applied of environments) {
+        const { GIT_TERMINAL_PROMPT, TX_TEST_MARKER } = applied;
+        expect(GIT_TERMINAL_PROMPT).toBe("0");
+        expect(TX_TEST_MARKER).toBe("present");
+      }
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  for (const restoration of [
+    {
+      name: "commit restoration",
+      commitFails: true,
+      sparseFails: false,
+      expected: "Restoring commit",
+    },
+    {
+      name: "sparse restoration",
+      commitFails: false,
+      sparseFails: true,
+      expected: "restoring the sparse checkout failed",
+    },
+    {
+      name: "both restorations",
+      commitFails: true,
+      sparseFails: true,
+      expected: "Restoring the sparse checkout also failed",
+    },
+  ]) {
+    test(`preserves the primary failure when ${restoration.name} fails`, async () => {
+      const temporaryRoot = await temporaryDirectory("tx-update-restore-pair-");
+      try {
+        const { remote, root, checkout } =
+          await installSparseClone(temporaryRoot);
+        const target = await commitFixtureFiles(
+          remote,
+          {
+            ".tx/config.json":
+              '{"plugins":[{"name":"tools","entry":"plugins/new/index.ts"}]}',
+            "plugins/new/index.ts": entry,
+          },
+          "restoration target",
+        );
+        fixtureGit(remote, ["tag", "v2.0.0"]);
+        const before = headOf(checkout);
+        let sparseRestorations = 0;
+        const participant = new MarketplaceUpdater(root, {
+          env: process.env,
+          runGit: async (args, options) => {
+            if (
+              restoration.commitFails &&
+              args[2] === "checkout" &&
+              args.includes("--force")
+            ) {
+              throw new Error("commit restore unavailable");
+            }
+            if (args[2] === "sparse-checkout" && args[3] === "set") {
+              sparseRestorations += 1;
+              if (restoration.sparseFails) {
+                throw new Error("sparse restore unavailable");
+              }
+            }
+            return runGit(args, options);
+          },
+          prepare: async () => {
+            throw new Error("primary dependency failure");
+          },
+        });
+
+        const failure = await participant
+          .apply(gathered(await participant.gather()))
+          .catch((error) => error);
+        expect((failure as Error).message).toStartWith(
+          "primary dependency failure",
+        );
+        expect((failure as Error).message).toContain(restoration.expected);
+        expect(sparseRestorations).toBe(1);
+        expect(headOf(checkout)).toBe(
+          restoration.commitFails ? target : before,
+        );
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 describe("pinned marketplace updates", () => {

@@ -397,58 +397,24 @@ interface MarketplaceManifestSyntax {
   readonly candidates: readonly MarketplaceManifestPlanEntry[];
 }
 
-async function readMarketplaceManifestSyntax(
-  checkout: string,
-): Promise<MarketplaceManifestSyntax> {
-  let checkoutPath: string;
-  let selectedManifestFilename = manifestFilename;
+/**
+ * Parses one selected manifest blob without consulting the filesystem. The
+ * checkout path exists only to apply the same lexical containment rules the
+ * full resolver uses; the raw repository-relative values are kept in the
+ * returned plan for Git path selection.
+ */
+export function parseMarketplaceManifestDocument(
+  checkoutPath: string,
+  selectedManifestFilename: string,
+  contents: string,
+): MarketplaceManifestPlan {
   let document: unknown;
   try {
-    checkoutPath = await realpath(checkout);
-    const preferredManifestPath = resolve(checkoutPath, manifestFilename);
-    if (!(await pathExists(preferredManifestPath))) {
-      const legacyManifestPath = resolve(checkoutPath, legacyManifestFilename);
-      if (!(await pathExists(legacyManifestPath))) {
-        throw new MarketplaceManifestRepositoryPathError(
-          `Missing ${manifestFilename}`,
-          manifestFilenames,
-        );
-      }
-      selectedManifestFilename = legacyManifestFilename;
-    }
-    const resolvedManifestPath = await realpath(
-      resolve(checkoutPath, selectedManifestFilename),
-    );
-    if (!isContainedPath(checkoutPath, resolvedManifestPath)) {
-      throw new MarketplaceManifestRepositoryPathError(
-        `${selectedManifestFilename} escapes the marketplace`,
-        [selectedManifestFilename],
-      );
-    }
-    document = JSON.parse(await readFile(resolvedManifestPath, "utf8"));
+    document = JSON.parse(contents);
   } catch (error) {
-    if (
-      error instanceof MarketplaceManifestContentError ||
-      error instanceof MarketplaceManifestRepositoryPathError
-    ) {
-      throw error;
-    }
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new MarketplaceManifestRepositoryPathError(
-        `Missing ${selectedManifestFilename}`,
-        manifestFilenames,
-        failureOptions(error),
-      );
-    }
     if (error instanceof SyntaxError) {
       throw new MarketplaceManifestContentError(
         `Invalid ${selectedManifestFilename}: ${error.message}`,
-        failureOptions(error),
-      );
-    }
-    if (typeof (error as NodeJS.ErrnoException).code === "string") {
-      throw new MarketplaceManifestContentError(
-        `Unable to read ${selectedManifestFilename}: ${(error as Error).message}`,
         failureOptions(error),
       );
     }
@@ -529,6 +495,67 @@ async function readMarketplaceManifestSyntax(
       ...(packageValue === undefined ? {} : { package: packageValue }),
     });
   });
+
+  return Object.freeze({ plugins: Object.freeze(candidates) });
+}
+
+async function readMarketplaceManifestSyntax(
+  checkout: string,
+): Promise<MarketplaceManifestSyntax> {
+  let checkoutPath: string;
+  let selectedManifestFilename = manifestFilename;
+  let contents: string;
+  try {
+    checkoutPath = await realpath(checkout);
+    const preferredManifestPath = resolve(checkoutPath, manifestFilename);
+    if (!(await pathExists(preferredManifestPath))) {
+      const legacyManifestPath = resolve(checkoutPath, legacyManifestFilename);
+      if (!(await pathExists(legacyManifestPath))) {
+        throw new MarketplaceManifestRepositoryPathError(
+          `Missing ${manifestFilename}`,
+          manifestFilenames,
+        );
+      }
+      selectedManifestFilename = legacyManifestFilename;
+    }
+    const resolvedManifestPath = await realpath(
+      resolve(checkoutPath, selectedManifestFilename),
+    );
+    if (!isContainedPath(checkoutPath, resolvedManifestPath)) {
+      throw new MarketplaceManifestRepositoryPathError(
+        `${selectedManifestFilename} escapes the marketplace`,
+        [selectedManifestFilename],
+      );
+    }
+    contents = await readFile(resolvedManifestPath, "utf8");
+  } catch (error) {
+    if (
+      error instanceof MarketplaceManifestContentError ||
+      error instanceof MarketplaceManifestRepositoryPathError
+    ) {
+      throw error;
+    }
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new MarketplaceManifestRepositoryPathError(
+        `Missing ${selectedManifestFilename}`,
+        manifestFilenames,
+        failureOptions(error),
+      );
+    }
+    if (typeof (error as NodeJS.ErrnoException).code === "string") {
+      throw new MarketplaceManifestContentError(
+        `Unable to read ${selectedManifestFilename}: ${(error as Error).message}`,
+        failureOptions(error),
+      );
+    }
+    throw error;
+  }
+
+  const { plugins: candidates } = parseMarketplaceManifestDocument(
+    checkoutPath,
+    selectedManifestFilename,
+    contents,
+  );
 
   return Object.freeze({
     checkoutPath,

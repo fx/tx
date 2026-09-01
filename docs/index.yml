@@ -170,5 +170,5 @@ changes:
     path: changes/0019-reduce-marketplace-clone-footprint.md
     description: Let Git-sourced marketplace install and update retrieve only the manifest and its referenced plugin content instead of the marketplace's complete tree, with a fallback to a complete retrieval.
     spec: plugin-system
-    status: draft
+    status: complete
     depends_on: []

@@ -5,25 +5,33 @@ import type {
 } from "@fx/tx/plugin";
 
 import {
+  addMarketplaceSparseDirectories,
   credentialRedactions,
+  disableMarketplaceSparseCheckout,
   fetchCheckoutRemote,
   type GitExecution,
   isCommitAncestor,
   isCommitPublished,
   liveMarketplaceVersion,
   MarketplaceRefNotPublishedError,
+  type MarketplaceSparseCheckoutState,
   moveCheckout,
+  planMarketplaceManifestAtRevision,
   type ResolvedRef,
   type RunGit,
   readCheckoutCommit,
   readCommitLabel,
   readHigherReleaseTag,
   readMarketplacePin,
+  readMarketplaceSparseCheckoutState,
   readModifiedTrackedFiles,
   readRemoteDefaultCommit,
   readRemoteSource,
+  readSparseTargetCollisions,
   resolveMarketplaceRef,
   restoreCheckout,
+  restoreMarketplaceSparseCheckoutState,
+  revisionRepositoryPathsPresent,
   runGit,
   unknownMarketplaceVersion,
   withoutCredentials,
@@ -32,6 +40,9 @@ import {
   containedMarketplacePath,
   discoverInstalledMarketplaces,
   isMarketplaceReference,
+  MarketplaceManifestContentError,
+  type MarketplaceManifestPlan,
+  MarketplaceManifestRepositoryPathError,
   prepareMarketplace,
 } from "./storage.ts";
 
@@ -161,35 +172,208 @@ export class MarketplaceUpdater implements UpdateParticipant {
     );
     if (blocked !== undefined) throw new Error(blocked);
 
-    // An untracked file occupying a path the target tracks is refused here,
-    // by the checkout itself, which names the path and moves nothing.
-    await moveCheckout(checkout, target, this.#execution);
+    const sparseState = await readMarketplaceSparseCheckoutState(
+      checkout,
+      this.#execution,
+    );
+    const targetPlan = sparseState.enabled
+      ? await this.#targetManifestPlan(checkout, target)
+      : undefined;
+    let sparseMutation = false;
+    let sparseActive = sparseState.enabled && targetPlan !== undefined;
+    let moved = false;
     try {
-      await this.#prepare(checkout);
-    } catch (error) {
-      const failure = errorMessage(error);
-      try {
-        // Forced, because preparation may have rewritten tracked files — a
-        // dependency install rewriting a committed lockfile is ordinary — and
-        // an ordinary checkout would refuse to overwrite them and leave the
-        // marketplace on the commit that just failed validation.
-        await restoreCheckout(checkout, current, this.#execution);
-      } catch (restoration) {
-        // The failure that started this stays the headline — it is what the
-        // user has to act on — and the commit the checkout is stuck on is
-        // named, because restoring it is now their job rather than tx's.
-        throw new Error(
-          `${failure}. Restoring commit ${current} failed too, so the checkout is left on ${target}: ${errorMessage(restoration)}`,
-        );
+      if (sparseState.enabled) {
+        sparseMutation = true;
+        if (targetPlan === undefined) {
+          await disableMarketplaceSparseCheckout(checkout, this.#execution);
+          sparseActive = false;
+        } else {
+          try {
+            await addMarketplaceSparseDirectories(
+              checkout,
+              targetPlan,
+              this.#execution,
+            );
+          } catch (mechanism) {
+            // Sparse support is an optimization. If extending its cone fails,
+            // materialize the same checkout and continue in full.
+            try {
+              await disableMarketplaceSparseCheckout(checkout, this.#execution);
+            } catch (fallback) {
+              throw new Error(
+                `${errorMessage(mechanism)}. Falling back to the complete tree failed too: ${errorMessage(fallback)}`,
+                { cause: new AggregateError([mechanism, fallback]) },
+              );
+            }
+            sparseActive = false;
+          }
+        }
       }
-      throw new Error(
-        `${failure}. The previous commit was restored; installed dependencies were not.`,
+
+      if (sparseActive) {
+        let collisions: readonly string[];
+        try {
+          collisions = await readSparseTargetCollisions(
+            checkout,
+            target,
+            this.#execution,
+          );
+        } catch {
+          await disableMarketplaceSparseCheckout(checkout, this.#execution);
+          sparseActive = false;
+          collisions = [];
+        }
+        if (collisions.length > 0) {
+          throw new Error(
+            `The following untracked working tree files would be overwritten by checkout: ${collisions.join(", ")}`,
+          );
+        }
+      }
+
+      // An untracked file occupying a path the target tracks is refused here,
+      // by the checkout itself, which names the path and moves nothing.
+      await moveCheckout(checkout, target, this.#execution);
+      moved = true;
+
+      try {
+        await this.#prepare(checkout);
+      } catch (error) {
+        if (
+          sparseActive &&
+          error instanceof MarketplaceManifestRepositoryPathError
+        ) {
+          let retryFull = false;
+          try {
+            retryFull = await revisionRepositoryPathsPresent(
+              checkout,
+              target,
+              error.paths,
+              this.#execution,
+            );
+          } catch {
+            retryFull = true;
+          }
+          if (retryFull) {
+            await disableMarketplaceSparseCheckout(checkout, this.#execution);
+            sparseActive = false;
+            await this.#prepare(checkout);
+          } else {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      // Version resolution is transactional too: a label failure must not
+      // strand the checkout on an update tx cannot report.
+      const version = await readCommitLabel(checkout, target, this.#execution);
+      return { applied: true, version };
+    } catch (error) {
+      return await this.#rollbackApply(
+        checkout,
+        current,
+        target,
+        error,
+        moved,
+        sparseMutation ? sparseState : undefined,
       );
     }
-    return {
-      applied: true,
-      version: await readCommitLabel(checkout, target, this.#execution),
-    };
+  }
+
+  async #targetManifestPlan(
+    checkout: string,
+    target: string,
+  ): Promise<MarketplaceManifestPlan | undefined> {
+    try {
+      return await planMarketplaceManifestAtRevision(
+        checkout,
+        target,
+        this.#execution,
+      );
+    } catch (error) {
+      if (error instanceof MarketplaceManifestContentError) throw error;
+      if (!(error instanceof MarketplaceManifestRepositoryPathError)) {
+        return undefined;
+      }
+      let present: boolean;
+      try {
+        present = await revisionRepositoryPathsPresent(
+          checkout,
+          target,
+          error.paths,
+          this.#execution,
+        );
+      } catch {
+        return undefined;
+      }
+      if (present) return undefined;
+      throw new MarketplaceManifestContentError(error.message, {
+        ...(error.cause === undefined ? {} : { cause: error.cause }),
+        ...(error.code === undefined ? {} : { code: error.code }),
+      });
+    }
+  }
+
+  /** Restores the old commit first and exact sparse intent second. */
+  async #rollbackApply(
+    checkout: string,
+    current: string,
+    target: string,
+    primary: unknown,
+    moved: boolean,
+    sparseState: MarketplaceSparseCheckoutState | undefined,
+  ): Promise<never> {
+    let commitRestoration: unknown;
+    let sparseRestoration: unknown;
+
+    if (moved) {
+      try {
+        await restoreCheckout(checkout, current, this.#execution);
+      } catch (error) {
+        commitRestoration = error;
+      }
+    }
+    if (sparseState !== undefined) {
+      try {
+        await restoreMarketplaceSparseCheckoutState(
+          checkout,
+          sparseState,
+          this.#execution,
+        );
+      } catch (error) {
+        sparseRestoration = error;
+      }
+    }
+
+    const failure = errorMessage(primary);
+    if (!moved) {
+      if (sparseRestoration !== undefined) {
+        throw new Error(
+          `${failure}. Restoring the sparse checkout failed too: ${errorMessage(sparseRestoration)}`,
+        );
+      }
+      throw primary;
+    }
+    if (commitRestoration !== undefined && sparseRestoration !== undefined) {
+      throw new Error(
+        `${failure}. Restoring commit ${current} failed too, so the checkout may be left on ${target}: ${errorMessage(commitRestoration)}. Restoring the sparse checkout also failed: ${errorMessage(sparseRestoration)}`,
+      );
+    }
+    if (commitRestoration !== undefined) {
+      throw new Error(
+        `${failure}. Restoring commit ${current} failed too, so the checkout is left on ${target}: ${errorMessage(commitRestoration)}`,
+      );
+    }
+    if (sparseRestoration !== undefined) {
+      throw new Error(
+        `${failure}. The previous commit was restored, but restoring the sparse checkout failed: ${errorMessage(sparseRestoration)}. Installed dependencies were not restored.`,
+      );
+    }
+    throw new Error(
+      `${failure}. The previous commit was restored; installed dependencies were not.`,
+    );
   }
 
   async #gatherMarketplace(
