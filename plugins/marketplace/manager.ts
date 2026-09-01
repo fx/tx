@@ -1356,6 +1356,16 @@ export async function readSparseTargetCollisions(
   );
   const paths = untracked.split("\0").filter(Boolean);
   if (paths.length === 0) return [];
+  const pathspecs = [
+    ...new Set(
+      paths.flatMap((path) => {
+        const segments = path.split("/");
+        return segments.map((_, index) =>
+          segments.slice(0, index + 1).join("/"),
+        );
+      }),
+    ),
+  ];
   const result = await runLazyCheckoutGit(
     checkout,
     [
@@ -1366,12 +1376,21 @@ export async function readSparseTargetCollisions(
       "-z",
       revision,
       "--",
-      ...paths,
+      ...pathspecs,
     ],
     execution,
   );
-  const tracked = new Set(result.stdout.split("\0").filter(Boolean));
-  return Object.freeze(paths.filter((path) => tracked.has(path)));
+  const tracked = result.stdout.split("\0").filter(Boolean);
+  return Object.freeze(
+    paths.filter((path) =>
+      tracked.some(
+        (target) =>
+          target === path ||
+          target.startsWith(`${path}/`) ||
+          path.startsWith(`${target}/`),
+      ),
+    ),
+  );
 }
 
 /** Adds a target plan to an existing tx-created cone. */

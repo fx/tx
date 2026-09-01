@@ -989,6 +989,52 @@ describe("reduced marketplace update application", () => {
     }
   });
 
+  test("refuses sparse untracked collisions on either side of a path hierarchy", async () => {
+    const scenarios = [
+      {
+        name: "untracked ancestor",
+        published: { "blocked/published.txt": "published\n" },
+        untracked: "blocked",
+      },
+      {
+        name: "untracked descendant",
+        published: { blocked: "published\n" },
+        untracked: "blocked/mine.txt",
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const temporaryRoot = await temporaryDirectory(
+        `tx-update-sparse-${scenario.name.replace(" ", "-")}-`,
+      );
+      try {
+        const { remote, root, checkout } =
+          await installSparseClone(temporaryRoot);
+        await publishSecondVersion(remote, scenario.published);
+        await mkdir(join(checkout, scenario.untracked, ".."), {
+          recursive: true,
+        });
+        await writeFile(join(checkout, scenario.untracked), "mine\n");
+        const before = headOf(checkout);
+        const cones = sparseDirectories(checkout);
+        const participant = updater(root, async () => {
+          throw new Error("Preparation must not run");
+        });
+
+        await expect(
+          participant.apply(gathered(await participant.gather())),
+        ).rejects.toThrow(scenario.untracked);
+        expect(headOf(checkout)).toBe(before);
+        expect(sparseDirectories(checkout)).toEqual(cones);
+        expect(await readFile(join(checkout, scenario.untracked), "utf8")).toBe(
+          "mine\n",
+        );
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
   test("never runs sparse mutation commands for a durable full checkout", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-full-intent-");
     try {
