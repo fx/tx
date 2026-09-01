@@ -320,6 +320,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - A dialog MUST use only the terminal's default foreground and background, their dimmed form, and their inversion; it MUST NOT emit any hue.
 - A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys.
 - A frame MUST fit its content and MUST NOT exceed the terminal width; a title or label wider than the inner width MUST be truncated at its end with an ellipsis rather than wrapped, and filter text or a value under entry wider than the inner width MUST keep its end visible, so the caret is never cut off.
+- Twenty columns is the narrowest supported terminal: below it, a dialog MUST lay itself out as if the terminal were twenty columns wide, and how the terminal wraps the result is unspecified.
 - Text entry and the filter MUST show a caret after the current text, and the caret SHOULD alternate between visible and hidden at an interval between 400 and 600 milliseconds while the dialog waits for input.
 - Confirming a plain option SHOULD flash the active bar before the dialog settles; once confirmed, the dialog MUST settle within 250 milliseconds and MUST ignore every key, cancellation included, because the choice is already made.
 - An overflow indicator SHOULD pulse between its dimmed and normal rendering at the caret's interval.
