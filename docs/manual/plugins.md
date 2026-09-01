@@ -12,6 +12,7 @@ A marketplace is a Git repository containing one or more plugins, or a local dir
 tx marketplace add owner/repository
 tx marketplace add https://example.com/tools.git --name tools
 tx marketplace add ./my-plugins
+tx marketplace install
 tx marketplace list
 tx marketplace pin tools v1.4.0
 tx marketplace unpin tools
@@ -19,6 +20,34 @@ tx marketplace remove tools
 ```
 
 `list` prints one tab-separated line per marketplace: its name, its version label, and its source. `add` accepts any Git clone source, optionally with the `@<ref>` version described in [Marketplace versions](#marketplace-versions). Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+
+Every successful `marketplace add` records the installed marketplace in the
+`marketplace` property of the [bundled config document](#use-the-bundled-config-capability),
+and every successful `marketplace remove` removes its matching entry. The list
+is ordered and can also be hand-seeded before anything is installed:
+
+```json
+{
+  "marketplace": [
+    { "source": "owner/repository" },
+    { "source": "https://example.com/tools.git", "name": "tools" }
+  ]
+}
+```
+
+Run `tx marketplace install` explicitly to install every configured marketplace
+that is missing. Already-installed names are left unchanged, and one failed
+entry does not stop later entries from being attempted; any such failure makes
+the overall command fail after the rest have run. The command validates and
+resolves the complete list before installing anything, rejecting duplicate
+effective names whether names are explicit or derived. It never writes the
+config list and never runs automatically.
+
+Write-back stores a Git source without URL userinfo credentials and retains its
+`@<ref>` suffix. A local source is stored as its fully resolved real path, so a
+later invocation from another working directory cannot redirect it. If config
+read or write-back fails after an add or removal succeeded, the successful
+marketplace mutation stands and the config failure is reported separately.
 
 ## Private repositories over SSH
 

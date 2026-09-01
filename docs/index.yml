@@ -162,7 +162,7 @@ changes:
     path: changes/0018-add-config-store-and-marketplace-installs.md
     description: Add a bundled config plugin for validated per-user JSON persistence, and let the marketplace plugin seed and explicitly install a configured marketplace list.
     spec: config
-    status: draft
+    status: complete
     depends_on:
       - "0016"
   - id: "0019"
