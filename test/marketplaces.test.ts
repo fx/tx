@@ -1998,12 +1998,17 @@ describe("marketplace reduced retrieval", () => {
         },
         "new manifest",
       );
-      const calls: string[][] = [];
+      const initialEnv = Object.freeze({ PATH: "/usr/bin:/bin" });
+      const calls: {
+        readonly args: readonly string[];
+        readonly env: Readonly<Record<string, string | undefined>>;
+      }[] = [];
       const root = join(temporaryRoot, "marketplaces");
       const manager = new MarketplaceManager(root, {
+        env: initialEnv,
         prepare: async () => {},
         runGit: async (args, options) => {
-          calls.push([...args]);
+          calls.push({ args: [...args], env: options.env });
           return runGit(args, options);
         },
       });
@@ -2015,10 +2020,24 @@ describe("marketplace reduced retrieval", () => {
         source: `${pathToFileURL(repository).href}@v1`,
       });
       const add = calls.find(
-        (args) => args[2] === "sparse-checkout" && args[3] === "add",
-      );
+        ({ args }) => args[2] === "sparse-checkout" && args[3] === "add",
+      )?.args;
       expect(add?.at(-1)).toBe("old");
       expect(add).not.toContain("new");
+      const nonInteractiveEnv = {
+        ...initialEnv,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+      };
+      expect(
+        calls
+          .filter(({ args }) => !readsSshCommand(args))
+          .every(({ env }) =>
+            Object.entries(nonInteractiveEnv).every(
+              ([name, value]) => env[name] === value,
+            ),
+          ),
+      ).toBe(true);
       expect(
         (await readMarketplaceManifest(join(root, "pinned"))).plugins[0]?.name,
       ).toBe("old");

@@ -1316,7 +1316,7 @@ export class MarketplaceManager implements MarketplaceOperations {
           // staging it is not a transport retry boundary: once the clone
           // succeeded, a bad ref is the answer for this repository.
           try {
-            if (ref !== undefined) await this.#stageVersion(staging, ref);
+            if (ref !== undefined) await this.#stageVersion(staging, ref, env);
           } catch (error) {
             await discardStaging(staging);
             throw error;
@@ -1334,9 +1334,9 @@ export class MarketplaceManager implements MarketplaceOperations {
                 "--",
                 ".tx",
               ],
-              { env: this.#env },
+              { env },
             );
-            await this.#validateReducedCheckout(staging);
+            await this.#validateReducedCheckout(staging, env);
             return staging;
           } catch (error) {
             await discardStaging(staging);
@@ -1362,7 +1362,7 @@ export class MarketplaceManager implements MarketplaceOperations {
         continue;
       }
       try {
-        if (ref !== undefined) await this.#stageVersion(staging, ref);
+        if (ref !== undefined) await this.#stageVersion(staging, ref, env);
         return staging;
       } catch (error) {
         await discardStaging(staging);
@@ -1377,12 +1377,15 @@ export class MarketplaceManager implements MarketplaceOperations {
    * are terminal. A repository-path failure is expanded only when HEAD really
    * carries one of its literal paths; otherwise the same failure is final.
    */
-  async #validateReducedCheckout(staging: string): Promise<void> {
+  async #validateReducedCheckout(
+    staging: string,
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<void> {
     let plan: MarketplaceManifestPlan;
     try {
       plan = await planMarketplaceManifest(staging);
     } catch (error) {
-      await this.#resolveReducedValidationFailure(staging, error);
+      await this.#resolveReducedValidationFailure(staging, error, env);
       return;
     }
 
@@ -1390,20 +1393,21 @@ export class MarketplaceManager implements MarketplaceOperations {
     if (directories.length > 0) {
       await this.#runGit(
         ["-C", staging, "sparse-checkout", "add", "--", ...directories],
-        { env: this.#env },
+        { env },
       );
     }
 
     try {
       await validateMarketplaceManifest(staging);
     } catch (error) {
-      await this.#resolveReducedValidationFailure(staging, error);
+      await this.#resolveReducedValidationFailure(staging, error, env);
     }
   }
 
   async #resolveReducedValidationFailure(
     staging: string,
     error: unknown,
+    env: Readonly<Record<string, string | undefined>>,
   ): Promise<void> {
     if (error instanceof MarketplaceManifestContentError) throw error;
     if (!(error instanceof MarketplaceManifestRepositoryPathError)) {
@@ -1421,7 +1425,7 @@ export class MarketplaceManager implements MarketplaceOperations {
         "--",
         ...error.paths,
       ],
-      { env: this.#env },
+      { env },
     );
     if (stdout === "") {
       throw new MarketplaceManifestContentError(error.message, {
@@ -1431,7 +1435,7 @@ export class MarketplaceManager implements MarketplaceOperations {
     }
 
     await this.#runGit(["-C", staging, "sparse-checkout", "disable"], {
-      env: this.#env,
+      env,
     });
     await validateMarketplaceManifest(staging);
   }
@@ -1473,14 +1477,15 @@ export class MarketplaceManager implements MarketplaceOperations {
    * afterwards differs; a ref that resolves nowhere fails the addition, and
    * staging is discarded exactly as it is for any other publication failure.
    */
-  async #stageVersion(staging: string, ref: string): Promise<void> {
-    const { commit } = await resolveMarketplaceRef(
-      staging,
-      ref,
-      this.#execution,
-    );
-    await moveCheckout(staging, commit, this.#execution);
-    await writeMarketplacePin(staging, ref, this.#execution);
+  async #stageVersion(
+    staging: string,
+    ref: string,
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<void> {
+    const execution = { runGit: this.#runGit, env };
+    const { commit } = await resolveMarketplaceRef(staging, ref, execution);
+    await moveCheckout(staging, commit, execution);
+    await writeMarketplacePin(staging, ref, execution);
   }
 
   async #prepareCheckout(checkout: string): Promise<void> {
