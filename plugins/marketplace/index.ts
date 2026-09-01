@@ -22,7 +22,10 @@ import {
 } from "./storage.ts";
 import { MarketplaceUpdater } from "./updater.ts";
 
-export type { MarketplaceOperations } from "./manager.ts";
+export type {
+  MarketplaceAddOptions,
+  MarketplaceOperations,
+} from "./manager.ts";
 
 export interface MarketplacePluginOptions {
   readonly manager?: MarketplaceOperations;
@@ -172,25 +175,38 @@ export function createMarketplacePlugin(
               "--name <name>",
               "Local marketplace name, instead of one derived from the source",
             )
-            .action(async (source: string, flags: { name?: string }) => {
-              const requested =
-                flags.name === undefined
-                  ? undefined
-                  : validateMarketplaceName(flags.name);
-              const added = await manager.add(source, requested);
-              context.stdout.write(`Added marketplace "${added.name}".\n`);
-              try {
-                await recordConfiguredMarketplace(
-                  requireConfigCapability(registrations),
-                  manager,
-                  added,
+            .option(
+              "--full",
+              "Retrieve the complete Git tree instead of a reduced checkout",
+            )
+            .action(
+              async (
+                source: string,
+                flags: { name?: string; full?: boolean },
+              ) => {
+                const requested =
+                  flags.name === undefined
+                    ? undefined
+                    : validateMarketplaceName(flags.name);
+                const added = await manager.add(
+                  source,
+                  requested,
+                  flags.full ? { full: true } : undefined,
                 );
-              } catch (error) {
-                context.stderr.write(
-                  `Marketplace "${added.name}" was added, but config synchronization failed: ${errorMessage(error)}\n`,
-                );
-              }
-            });
+                context.stdout.write(`Added marketplace "${added.name}".\n`);
+                try {
+                  await recordConfiguredMarketplace(
+                    requireConfigCapability(registrations),
+                    manager,
+                    added,
+                  );
+                } catch (error) {
+                  context.stderr.write(
+                    `Marketplace "${added.name}" was added, but config synchronization failed: ${errorMessage(error)}\n`,
+                  );
+                }
+              },
+            );
 
           namespace
             .command("install")

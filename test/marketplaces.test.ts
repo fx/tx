@@ -15,6 +15,7 @@ import {
   deriveMarketplaceName,
   deriveMarketplaceSshRepository,
   discardStaging,
+  gitRepositoryPath,
   MarketplaceAlreadyInstalledError,
   MarketplaceManager,
   normalizeMarketplaceRepository,
@@ -23,6 +24,9 @@ import {
 } from "../plugins/marketplace/manager.ts";
 import {
   discoverInstalledMarketplaces,
+  MarketplaceManifestContentError,
+  MarketplaceManifestRepositoryPathError,
+  planMarketplaceManifest,
   prepareMarketplace,
   readMarketplaceManifest,
   resolveMarketplaceDirectory,
@@ -30,7 +34,37 @@ import {
   runBun,
   validateMarketplaceName,
 } from "../plugins/marketplace/storage.ts";
-import { createGitRepository, temporaryDirectory } from "./helpers.ts";
+import {
+  commitFixtureFiles,
+  createGitRepository,
+  fixtureGit,
+  initializeGitRepository,
+  temporaryDirectory,
+} from "./helpers.ts";
+
+describe("Git repository path arguments", () => {
+  test("converts Windows-normalized sparse directories and pathspecs to slash syntax", () => {
+    const sparseDirectories = [
+      String.raw`plugins\nested`,
+      String.raw`packages\shared`,
+    ].map((path) => gitRepositoryPath(path, "\\"));
+    const pathspecs = [
+      String.raw`.tx\config.json`,
+      String.raw`plugins\linked\plugin.ts`,
+    ].map((path) => gitRepositoryPath(path, "\\"));
+
+    expect(sparseDirectories).toEqual(["plugins/nested", "packages/shared"]);
+    expect(pathspecs).toEqual([".tx/config.json", "plugins/linked/plugin.ts"]);
+    expect(
+      [...sparseDirectories, ...pathspecs].every(
+        (path) => !path.includes("\\"),
+      ),
+    ).toBe(true);
+    expect(gitRepositoryPath(String.raw`literal\name`, "/")).toBe(
+      String.raw`literal\name`,
+    );
+  });
+});
 
 describe("platform user data resolution", () => {
   test("uses deterministic Unix, macOS, and Windows locations", () => {
@@ -174,6 +208,121 @@ describe("marketplace names and arguments", () => {
 });
 
 describe("marketplace manifests", () => {
+  test("plans frozen raw paths without requiring entries or packages to exist", async () => {
+    const root = await temporaryDirectory("tx-manifest-plan-");
+    try {
+      await mkdir(join(root, ".tx"));
+      await writeFile(
+        join(root, ".tx/config.json"),
+        JSON.stringify({
+          plugins: [
+            { name: "nested", entry: "plugins/nested/index.ts" },
+            {
+              name: "shared",
+              entry: "plugins/shared.ts",
+              package: "packages/shared/package.json",
+            },
+          ],
+        }),
+      );
+
+      const plan = await planMarketplaceManifest(root);
+      expect(plan).toEqual({
+        plugins: [
+          { name: "nested", entry: "plugins/nested/index.ts" },
+          {
+            name: "shared",
+            entry: "plugins/shared.ts",
+            package: "packages/shared/package.json",
+          },
+        ],
+      });
+      expect(Object.isFrozen(plan)).toBe(true);
+      expect(Object.isFrozen(plan.plugins)).toBe(true);
+      expect(plan.plugins.every(Object.isFrozen)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    [
+      "entry field type",
+      { name: "plugin", entry: 1 },
+      'Plugin "plugin" entry must be a string',
+    ],
+    [
+      "absolute entry",
+      { name: "plugin", entry: "/plugin.ts" },
+      'Plugin "plugin" entry must be a repository-relative path',
+    ],
+    [
+      "escaping entry",
+      { name: "plugin", entry: "../plugin.ts" },
+      'Plugin "plugin" entry escapes the marketplace',
+    ],
+    [
+      "package field type",
+      { name: "plugin", entry: "plugin.ts", package: 1 },
+      'Plugin "plugin" package must be a string',
+    ],
+    [
+      "absolute package",
+      { name: "plugin", entry: "plugin.ts", package: "/package.json" },
+      'Plugin "plugin" package must be a repository-relative path to package.json',
+    ],
+    [
+      "escaping package",
+      { name: "plugin", entry: "plugin.ts", package: "../package.json" },
+      'Plugin "plugin" package escapes the marketplace',
+    ],
+    [
+      "wrong package basename",
+      { name: "plugin", entry: "plugin.ts", package: "packages/plugin.json" },
+      'Plugin "plugin" package must name package.json exactly',
+    ],
+  ])(
+    "shares %s validation between planning and full resolution",
+    async (_label, plugin, message) => {
+      const root = await temporaryDirectory("tx-manifest-plan-invalid-");
+      try {
+        await mkdir(join(root, ".tx"));
+        await writeFile(
+          join(root, ".tx/config.json"),
+          JSON.stringify({ plugins: [plugin] }),
+        );
+
+        const planned = planMarketplaceManifest(root).catch((error) => error);
+        const resolved = readMarketplaceManifest(root).catch((error) => error);
+        const [planError, resolutionError] = await Promise.all([
+          planned,
+          resolved,
+        ]);
+        expect(planError).toBeInstanceOf(MarketplaceManifestContentError);
+        expect(planError.message).toBe(message);
+        expect(resolutionError).toBeInstanceOf(MarketplaceManifestContentError);
+        expect(resolutionError.message).toBe(message);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("carries both supported repository paths when the manifest is missing", async () => {
+    const root = await temporaryDirectory("tx-manifest-plan-missing-");
+    try {
+      const error = await planMarketplaceManifest(root).catch(
+        (failure) => failure,
+      );
+      expect(error).toBeInstanceOf(MarketplaceManifestRepositoryPathError);
+      expect(error.message).toBe("Missing .tx/config.json");
+      expect(error.paths).toEqual([".tx/config.json", "tx.marketplace.json"]);
+      expect(Object.isFrozen(error.paths)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("accepts unknown fields and preserves manifest order", async () => {
     const root = await temporaryDirectory("tx-manifest-valid-");
     try {
@@ -926,7 +1075,10 @@ describe("MarketplaceManager", () => {
         },
       });
 
-      expect(await manager.add(source)).toEqual({ name: "source", source });
+      expect(await manager.add(source, undefined, { full: true })).toEqual({
+        name: "source",
+        source,
+      });
       expect(prepared).toBe(true);
       expect(await manager.list()).toEqual([
         // No tag is published, so the label is the abbreviated commit.
@@ -936,7 +1088,9 @@ describe("MarketplaceManager", () => {
           version: expect.stringMatching(/^[0-9a-f]+$/),
         },
       ]);
-      await expect(manager.add(source)).rejects.toThrow("already installed");
+      await expect(
+        manager.add(source, undefined, { full: true }),
+      ).rejects.toThrow("already installed");
       expect((await lstat(join(root, "source"))).isSymbolicLink()).toBe(false);
       expect(await readFile(join(root, "source", "README.txt"), "utf8")).toBe(
         "marketplace\n",
@@ -1073,7 +1227,7 @@ describe("MarketplaceManager", () => {
         prepare: async () => {},
       });
 
-      await manager.add("fx/tx", "installed");
+      await manager.add("fx/tx", "installed", { full: true });
       await manager.list();
 
       expect(calls.map(({ args }) => args)).toEqual([
@@ -1417,6 +1571,638 @@ describe("MarketplaceManager", () => {
   });
 });
 
+describe("marketplace reduced retrieval", () => {
+  test("materializes canonical root, entry, and package directories once", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-canonical-");
+    try {
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "source.git",
+        {
+          ".tx/config.json": JSON.stringify({
+            plugins: [
+              { name: "nested", entry: "plugins/nested/index.ts" },
+              {
+                name: "shared",
+                entry: "plugins/shared.ts",
+                package: "packages/shared/package.json",
+              },
+              {
+                name: "root",
+                entry: "root.ts",
+                package: "packages/shared/package.json",
+              },
+            ],
+          }),
+          "plugins/nested/index.ts": "export default () => {};\n",
+          "plugins/shared.ts": "export default () => {};\n",
+          "packages/shared/package.json": "{}\n",
+          "root.ts": "export default () => {};\n",
+          "unused/large.txt": "not materialized\n",
+        },
+      );
+      const source = pathToFileURL(repository).href;
+      const root = join(temporaryRoot, "marketplaces");
+      const calls: readonly string[][] = [];
+      const mutableCalls = calls as string[][];
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          mutableCalls.push([...args]);
+          return runGit(args, options);
+        },
+      });
+
+      expect(await manager.add(source, "canonical")).toEqual({
+        name: "canonical",
+        source,
+      });
+      const target = join(root, "canonical");
+      expect(await readFile(join(target, "root.ts"), "utf8")).toContain(
+        "export default",
+      );
+      expect(
+        await readFile(join(target, "plugins/nested/index.ts"), "utf8"),
+      ).toContain("export default");
+      expect(
+        await readFile(join(target, "packages/shared/package.json"), "utf8"),
+      ).toBe("{}\n");
+      await expect(
+        lstat(join(target, "unused/large.txt")),
+      ).rejects.toHaveProperty("code", "ENOENT");
+
+      expect(calls.find((args) => args[0] === "clone")).toEqual([
+        "clone",
+        "--filter=blob:none",
+        "--sparse",
+        "--",
+        source,
+        expect.stringContaining(".canonical-staging-"),
+      ]);
+      expect(
+        calls.find(
+          (args) =>
+            args[0] === "-C" &&
+            args[2] === "sparse-checkout" &&
+            args[3] === "add",
+        ),
+      ).toEqual([
+        "-C",
+        expect.stringContaining(".canonical-staging-"),
+        "sparse-checkout",
+        "add",
+        "--skip-checks",
+        "--",
+        "plugins/nested",
+        "plugins",
+        "packages/shared",
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("installs a legacy root manifest with no .tx directory", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-legacy-");
+    try {
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "legacy.git",
+        {
+          "tx.marketplace.json": JSON.stringify({
+            plugins: [{ name: "legacy", entry: "plugins/legacy.ts" }],
+          }),
+          "plugins/legacy.ts": "export default () => {};\n",
+          "unused/data.txt": "not materialized\n",
+        },
+      );
+      const root = join(temporaryRoot, "marketplaces");
+      expect(
+        await new MarketplaceManager(root, { prepare: async () => {} }).add(
+          pathToFileURL(repository).href,
+        ),
+      ).toEqual({ name: "legacy", source: pathToFileURL(repository).href });
+      expect(
+        (await readMarketplaceManifest(join(root, "legacy"))).plugins[0]?.name,
+      ).toBe("legacy");
+      await expect(
+        lstat(join(root, "legacy", "unused/data.txt")),
+      ).rejects.toHaveProperty("code", "ENOENT");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("expands a manifest symlink in the same checkout", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-manifest-link-");
+    try {
+      const repository = join(temporaryRoot, "source.git");
+      await Promise.all([
+        mkdir(join(repository, ".tx"), { recursive: true }),
+        mkdir(join(repository, "meta"), { recursive: true }),
+        mkdir(join(repository, "plugins"), { recursive: true }),
+      ]);
+      await Promise.all([
+        symlink("../meta/config.json", join(repository, ".tx/config.json")),
+        writeFile(
+          join(repository, "meta/config.json"),
+          JSON.stringify({
+            plugins: [{ name: "linked", entry: "plugins/plugin.ts" }],
+          }),
+        ),
+        writeFile(
+          join(repository, "plugins/plugin.ts"),
+          "export default () => {};\n",
+        ),
+      ]);
+      initializeGitRepository(repository);
+      const root = join(temporaryRoot, "marketplaces");
+      const calls: string[][] = [];
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          return runGit(args, options);
+        },
+      });
+
+      expect(
+        await manager.add(pathToFileURL(repository).href, "linked"),
+      ).toEqual({ name: "linked", source: pathToFileURL(repository).href });
+      const clone = calls.find((args) => args[0] === "clone");
+      const disabled = calls.find(
+        (args) => args[2] === "sparse-checkout" && args[3] === "disable",
+      );
+      expect(calls.filter((args) => args[0] === "clone")).toHaveLength(1);
+      expect(disabled?.[1]).toBe(clone?.at(-1));
+      expect(
+        await readFile(join(root, "linked", "meta/config.json"), "utf8"),
+      ).toContain("linked");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    [
+      "manifest",
+      async (repository: string) => {
+        await Promise.all([
+          mkdir(join(repository, "meta"), { recursive: true }),
+          mkdir(join(repository, "plugins"), { recursive: true }),
+        ]);
+        await Promise.all([
+          symlink("meta", join(repository, ".tx")),
+          writeFile(
+            join(repository, "meta/config.json"),
+            JSON.stringify({
+              plugins: [{ name: "plugin", entry: "plugins/plugin.ts" }],
+            }),
+          ),
+          writeFile(
+            join(repository, "plugins/plugin.ts"),
+            "export default () => {};\n",
+          ),
+        ]);
+      },
+      ".tx/config.json",
+      ".tx",
+      "meta/config.json",
+    ],
+    [
+      "entry",
+      async (repository: string) => {
+        await Promise.all([
+          mkdir(join(repository, ".tx"), { recursive: true }),
+          mkdir(join(repository, "plugins"), { recursive: true }),
+          mkdir(join(repository, "hidden"), { recursive: true }),
+        ]);
+        await Promise.all([
+          writeFile(
+            join(repository, ".tx/config.json"),
+            JSON.stringify({
+              plugins: [{ name: "plugin", entry: "plugins/link/plugin.ts" }],
+            }),
+          ),
+          symlink("../hidden", join(repository, "plugins/link")),
+          writeFile(
+            join(repository, "hidden/plugin.ts"),
+            "export default () => {};\n",
+          ),
+        ]);
+      },
+      "plugins/link/plugin.ts",
+      "plugins/link",
+      "hidden/plugin.ts",
+    ],
+    [
+      "package",
+      async (repository: string) => {
+        await Promise.all([
+          mkdir(join(repository, ".tx"), { recursive: true }),
+          mkdir(join(repository, "plugins"), { recursive: true }),
+          mkdir(join(repository, "packages"), { recursive: true }),
+          mkdir(join(repository, "hidden"), { recursive: true }),
+        ]);
+        await Promise.all([
+          writeFile(
+            join(repository, ".tx/config.json"),
+            JSON.stringify({
+              plugins: [
+                {
+                  name: "plugin",
+                  entry: "plugins/plugin.ts",
+                  package: "packages/link/package.json",
+                },
+              ],
+            }),
+          ),
+          writeFile(
+            join(repository, "plugins/plugin.ts"),
+            "export default () => {};\n",
+          ),
+          symlink("../hidden", join(repository, "packages/link")),
+          writeFile(join(repository, "hidden/package.json"), "{}\n"),
+        ]);
+      },
+      "packages/link/package.json",
+      "packages/link",
+      "hidden/package.json",
+    ],
+  ])(
+    "expands a symlinked %s parent in the same checkout",
+    async (kind, populate, failedPath, symlinkPath, resolvedPath) => {
+      const temporaryRoot = await temporaryDirectory(
+        `tx-reduced-${kind}-parent-link-`,
+      );
+      try {
+        const repository = join(temporaryRoot, "source.git");
+        await populate(repository);
+        initializeGitRepository(repository);
+        const calls: string[][] = [];
+        const root = join(temporaryRoot, "marketplaces");
+        const manager = new MarketplaceManager(root, {
+          prepare: async () => {},
+          runGit: async (args, options) => {
+            calls.push([...args]);
+            return runGit(args, options);
+          },
+        });
+        const source = pathToFileURL(repository).href;
+
+        expect(await manager.add(source, kind)).toEqual({
+          name: kind,
+          source,
+        });
+        const clone = calls.find((args) => args[0] === "clone");
+        const tree = calls.find((args) => args.includes("ls-tree"));
+        const disabled = calls.find(
+          (args) => args[2] === "sparse-checkout" && args[3] === "disable",
+        );
+        expect(calls.filter((args) => args[0] === "clone")).toHaveLength(1);
+        expect(tree).toContain(failedPath);
+        expect(tree).toContain(symlinkPath);
+        expect(disabled?.[1]).toBe(clone?.at(-1));
+        expect(await readFile(join(root, kind, resolvedPath), "utf8")).not.toBe(
+          "",
+        );
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("expands an entry symlink whose target was not materialized", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-entry-link-");
+    try {
+      const repository = join(temporaryRoot, "source.git");
+      await Promise.all([
+        mkdir(join(repository, ".tx"), { recursive: true }),
+        mkdir(join(repository, "plugins"), { recursive: true }),
+        mkdir(join(repository, "hidden"), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          join(repository, ".tx/config.json"),
+          JSON.stringify({
+            plugins: [{ name: "linked", entry: "plugins/plugin.ts" }],
+          }),
+        ),
+        symlink("../hidden/plugin.ts", join(repository, "plugins/plugin.ts")),
+        writeFile(
+          join(repository, "hidden/plugin.ts"),
+          "export default () => {};\n",
+        ),
+      ]);
+      initializeGitRepository(repository);
+      const root = join(temporaryRoot, "marketplaces");
+      const calls: string[][] = [];
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          return runGit(args, options);
+        },
+      });
+
+      await manager.add(pathToFileURL(repository).href, "entry-link");
+      expect(
+        calls.some(
+          (args) =>
+            args.includes("ls-tree") && args.includes("plugins/plugin.ts"),
+        ),
+      ).toBe(true);
+      expect(
+        calls.some(
+          (args) => args[2] === "sparse-checkout" && args[3] === "disable",
+        ),
+      ).toBe(true);
+      expect(
+        await readFile(join(root, "entry-link", "hidden/plugin.ts"), "utf8"),
+      ).toContain("export default");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports an absent manifest without cloning or expanding again", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-absent-");
+    try {
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "source.git",
+        { "README.md": "no manifest\n" },
+      );
+      const calls: string[][] = [];
+      const manager = new MarketplaceManager(
+        join(temporaryRoot, "marketplaces"),
+        {
+          prepare: async () => {},
+          runGit: async (args, options) => {
+            calls.push([...args]);
+            return runGit(args, options);
+          },
+        },
+      );
+
+      const error = await manager
+        .add(pathToFileURL(repository).href)
+        .catch((failure) => failure);
+      expect(error).toBeInstanceOf(MarketplaceManifestContentError);
+      expect(error.message).toBe("Missing .tx/config.json");
+      expect(calls.filter((args) => args[0] === "clone")).toHaveLength(1);
+      expect(
+        calls.some(
+          (args) => args[2] === "sparse-checkout" && args[3] === "disable",
+        ),
+      ).toBe(false);
+      const tree = calls.find((args) => args.includes("ls-tree"));
+      expect(tree?.slice(-3)).toEqual([
+        ".tx/config.json",
+        "tx.marketplace.json",
+        ".tx",
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports malformed manifest content without a path retry", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-content-");
+    try {
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "source.git",
+        { ".tx/config.json": "{" },
+      );
+      const calls: string[][] = [];
+      const manager = new MarketplaceManager(
+        join(temporaryRoot, "marketplaces"),
+        {
+          prepare: async () => {},
+          runGit: async (args, options) => {
+            calls.push([...args]);
+            return runGit(args, options);
+          },
+        },
+      );
+
+      await expect(manager.add(pathToFileURL(repository).href)).rejects.toThrow(
+        "Invalid .tx/config.json",
+      );
+      expect(calls.filter((args) => args[0] === "clone")).toHaveLength(1);
+      expect(calls.some((args) => args.includes("ls-tree"))).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("restarts with a full clone when the sparse mechanism fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-mechanism-");
+    try {
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "source.git",
+        {
+          ".tx/config.json": JSON.stringify({
+            plugins: [{ name: "plugin", entry: "plugin.ts" }],
+          }),
+          "plugin.ts": "export default () => {};\n",
+          "unused/data.txt": "complete tree\n",
+        },
+      );
+      const calls: string[][] = [];
+      let failed = false;
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          if (!failed && args[2] === "sparse-checkout" && args[3] === "set") {
+            failed = true;
+            throw new Error("sparse unavailable");
+          }
+          return runGit(args, options);
+        },
+      });
+
+      expect(
+        await manager.add(pathToFileURL(repository).href, "fallback"),
+      ).toEqual({ name: "fallback", source: pathToFileURL(repository).href });
+      const clones = calls.filter((args) => args[0] === "clone");
+      expect(clones).toHaveLength(2);
+      expect(clones[0]).toContain("--filter=blob:none");
+      expect(clones[1]).not.toContain("--filter=blob:none");
+      expect(clones[0]?.at(-2)).toBe(clones[1]?.at(-2));
+      expect(
+        await readFile(join(root, "fallback", "unused/data.txt"), "utf8"),
+      ).toBe("complete tree\n");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("advances to SSH only after the candidate's full clone fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-transport-");
+    try {
+      const clones: {
+        readonly candidate: string;
+        readonly reduced: boolean;
+      }[] = [];
+      const manager = new MarketplaceManager(
+        join(temporaryRoot, "marketplaces"),
+        {
+          prepare: async () => {},
+          runGit: async (args) => {
+            if (readsSshCommand(args)) unsetSshCommand();
+            if (args[0] !== "clone") throw new Error("Unexpected Git call");
+            const candidate = args.at(-2) as string;
+            const reduced = args.includes("--sparse");
+            clones.push({ candidate, reduced });
+            if (reduced || candidate.startsWith("https://")) {
+              throw new Error(reduced ? "reduced failed" : "HTTPS failed");
+            }
+            await writeFile(join(args.at(-1) as string, "clone.txt"), "clone");
+            return { stdout: "" };
+          },
+        },
+      );
+
+      expect(await manager.add("fx/tx", "transport")).toEqual({
+        name: "transport",
+        source: "fx/tx",
+      });
+      expect(clones).toEqual([
+        { candidate: "https://github.com/fx/tx.git", reduced: true },
+        { candidate: "https://github.com/fx/tx.git", reduced: false },
+        { candidate: "git@github.com:fx/tx.git", reduced: true },
+        { candidate: "git@github.com:fx/tx.git", reduced: false },
+      ]);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("full retrieval bypasses sparse Git while local sources remain references", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-full-");
+    try {
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "source.git",
+        { "unused/data.txt": "complete tree\n" },
+      );
+      const calls: string[][] = [];
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          calls.push([...args]);
+          return runGit(args, options);
+        },
+      });
+      await manager.add(pathToFileURL(repository).href, "full", { full: true });
+      expect(calls.filter((args) => args[0] === "clone")).toEqual([
+        [
+          "clone",
+          "--",
+          pathToFileURL(repository).href,
+          expect.stringContaining(".full-staging-"),
+        ],
+      ]);
+      expect(calls.some((args) => args.includes("sparse-checkout"))).toBe(
+        false,
+      );
+
+      const local = await createLocalSource(temporaryRoot, "local");
+      const localManager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        prepare: async () => {},
+        runGit: rejectGit,
+      });
+      expect(await localManager.add(local, "local", { full: true })).toEqual({
+        name: "local",
+        source: local,
+      });
+      expect(await readlink(join(root, "local"))).toBe(local);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("stages a requested ref before planning its manifest", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-reduced-ref-");
+    try {
+      const repository = await createGitRepository(
+        temporaryRoot,
+        "source.git",
+        {
+          ".tx/config.json": JSON.stringify({
+            plugins: [{ name: "old", entry: "old/plugin.ts" }],
+          }),
+          "old/plugin.ts": "export default () => {};\n",
+        },
+      );
+      fixtureGit(repository, ["tag", "v1"]);
+      await rm(join(repository, "old"), { recursive: true });
+      await commitFixtureFiles(
+        repository,
+        {
+          ".tx/config.json": JSON.stringify({
+            plugins: [{ name: "new", entry: "new/plugin.ts" }],
+          }),
+          "new/plugin.ts": "export default () => {};\n",
+        },
+        "new manifest",
+      );
+      const initialEnv = Object.freeze({ PATH: "/usr/bin:/bin" });
+      const calls: {
+        readonly args: readonly string[];
+        readonly env: Readonly<Record<string, string | undefined>>;
+      }[] = [];
+      const root = join(temporaryRoot, "marketplaces");
+      const manager = new MarketplaceManager(root, {
+        env: initialEnv,
+        prepare: async () => {},
+        runGit: async (args, options) => {
+          calls.push({ args: [...args], env: options.env });
+          return runGit(args, options);
+        },
+      });
+
+      expect(
+        await manager.add(`${pathToFileURL(repository).href}@v1`, "pinned"),
+      ).toEqual({
+        name: "pinned",
+        source: `${pathToFileURL(repository).href}@v1`,
+      });
+      const add = calls.find(
+        ({ args }) => args[2] === "sparse-checkout" && args[3] === "add",
+      )?.args;
+      expect(add?.at(-1)).toBe("old");
+      expect(add).not.toContain("new");
+      const nonInteractiveEnv = {
+        ...initialEnv,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+      };
+      expect(
+        calls
+          .filter(({ args }) => !readsSshCommand(args))
+          .every(({ env }) =>
+            Object.entries(nonInteractiveEnv).every(
+              ([name, value]) => env[name] === value,
+            ),
+          ),
+      ).toBe(true);
+      expect(
+        (await readMarketplaceManifest(join(root, "pinned"))).plugins[0]?.name,
+      ).toBe("old");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("marketplace clone transports", () => {
   test("retries a failed HTTPS clone over SSH and lists the SSH source", async () => {
     const temporaryRoot = await temporaryDirectory("tx-clone-ssh-");
@@ -1451,7 +2237,7 @@ describe("marketplace clone transports", () => {
         },
       });
 
-      expect(await manager.add("fx/tx")).toEqual({
+      expect(await manager.add("fx/tx", undefined, { full: true })).toEqual({
         name: "tx",
         source: "fx/tx",
       });
@@ -1496,7 +2282,7 @@ describe("marketplace clone transports", () => {
         },
       });
 
-      expect(await manager.add("fx/tx")).toEqual({
+      expect(await manager.add("fx/tx", undefined, { full: true })).toEqual({
         name: "tx",
         source: "fx/tx",
       });
@@ -1528,9 +2314,9 @@ describe("marketplace clone transports", () => {
 
       // The lone failure is reported exactly as Git reported it, since there
       // was no retry to describe.
-      await expect(manager.add(source, "single")).rejects.toThrow(
-        /^clone failed$/,
-      );
+      await expect(
+        manager.add(source, "single", { full: true }),
+      ).rejects.toThrow(/^clone failed$/);
       expect(cloned).toEqual([source]);
       expect(await readdir(root)).toEqual([]);
     } finally {
@@ -1555,7 +2341,7 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("fx/tx", "both")
+        .add("fx/tx", "both", { full: true })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1596,7 +2382,9 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("https://alice:ghp_SECRET@example.com/me/r.git", "secret")
+        .add("https://alice:ghp_SECRET@example.com/me/r.git", "secret", {
+          full: true,
+        })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1649,7 +2437,9 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("https://ghp_REALTOKEN@github.com/acme/private.git", "private")
+        .add("https://ghp_REALTOKEN@github.com/acme/private.git", "private", {
+          full: true,
+        })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1685,7 +2475,9 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("https://user:tools@github.com/acme/tools.git", "collide")
+        .add("https://user:tools@github.com/acme/tools.git", "collide", {
+          full: true,
+        })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1727,7 +2519,9 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("https://:ghp_SECRET@github.com/acme/tools.git", "emptyuser")
+        .add("https://:ghp_SECRET@github.com/acme/tools.git", "emptyuser", {
+          full: true,
+        })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1772,7 +2566,9 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("https://@github.com/acme/tools.git", "emptyuserinfo")
+        .add("https://@github.com/acme/tools.git", "emptyuserinfo", {
+          full: true,
+        })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1820,7 +2616,7 @@ describe("marketplace clone transports", () => {
         });
 
         const failure: unknown = await manager
-          .add(source, "escaped")
+          .add(source, "escaped", { full: true })
           .catch((error: unknown) => error);
 
         expect(failure).toBeInstanceOf(Error);
@@ -1860,7 +2656,7 @@ describe("marketplace clone transports", () => {
         });
 
         const failure: unknown = await manager
-          .add(source, "collide")
+          .add(source, "collide", { full: true })
           .catch((error: unknown) => error);
 
         expect(failure).toBeInstanceOf(Error);
@@ -1898,7 +2694,9 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("https://alice:ghp_LOOSE@example.com/me/r.git", "bare")
+        .add("https://alice:ghp_LOOSE@example.com/me/r.git", "bare", {
+          full: true,
+        })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1938,7 +2736,9 @@ describe("marketplace clone transports", () => {
       });
 
       const failure: unknown = await manager
-        .add("https://git:tok@github.com/acme/tools.git", "gituser")
+        .add("https://git:tok@github.com/acme/tools.git", "gituser", {
+          full: true,
+        })
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(Error);
@@ -1986,7 +2786,7 @@ describe("marketplace clone transports", () => {
         },
       });
 
-      expect(await manager.add("fx/tx", "fresh")).toEqual({
+      expect(await manager.add("fx/tx", "fresh", { full: true })).toEqual({
         name: "fresh",
         source: "fx/tx",
       });
@@ -2323,7 +3123,10 @@ function recordingManager(
       return { stdout: "" };
     },
   });
-  return { calls, add: (name) => manager.add("fx/tx", name) };
+  return {
+    calls,
+    add: (name) => manager.add("fx/tx", name, { full: true }),
+  };
 }
 
 const rejectGit: RunGit = async () => {
@@ -2376,24 +3179,41 @@ describe("local marketplace sources", () => {
       // here too, and stays reachable as a local source by a path.
       const colon = await createLocalSource(temporaryRoot, "host:path");
 
-      expect(await manager.add(source)).toEqual({ name: "tools", source });
-      expect(await manager.add("git@example.com:me/scp.git")).toEqual({
+      expect(await manager.add(source, undefined, { full: true })).toEqual({
+        name: "tools",
+        source,
+      });
+      expect(
+        await manager.add("git@example.com:me/scp.git", undefined, {
+          full: true,
+        }),
+      ).toEqual({
         name: "scp",
         source: "git@example.com:me/scp.git",
       });
-      expect(await manager.add("ssh://git@example.com/me/remote.git")).toEqual({
+      expect(
+        await manager.add("ssh://git@example.com/me/remote.git", undefined, {
+          full: true,
+        }),
+      ).toEqual({
         name: "remote",
         source: "ssh://example.com/me/remote.git",
       });
-      expect(await manager.add("owner/absent")).toEqual({
+      expect(
+        await manager.add("owner/absent", undefined, { full: true }),
+      ).toEqual({
         name: "absent",
         source: "owner/absent",
       });
-      expect(await manager.add("host:path", "colon-remote")).toEqual({
+      expect(
+        await manager.add("host:path", "colon-remote", { full: true }),
+      ).toEqual({
         name: "colon-remote",
         source: "host:path",
       });
-      expect(await manager.add("./host:path", "colon-local")).toEqual({
+      expect(
+        await manager.add("./host:path", "colon-local", { full: true }),
+      ).toEqual({
         name: "colon-local",
         source: colon,
       });
@@ -2484,7 +3304,9 @@ describe("local marketplace sources", () => {
 
       // The remote of the same spelling stays reachable by its full URL.
       expect(
-        await manager.add("https://github.com/owner/repository.git", "remote"),
+        await manager.add("https://github.com/owner/repository.git", "remote", {
+          full: true,
+        }),
       ).toEqual({
         name: "remote",
         source: "https://github.com/owner/repository.git",

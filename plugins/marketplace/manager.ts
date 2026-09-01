@@ -10,7 +10,7 @@ import {
   stat,
   symlink,
 } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import {
@@ -22,8 +22,13 @@ import {
   containedMarketplacePath,
   discoverInstalledMarketplaces,
   isMarketplaceReference,
+  MarketplaceManifestContentError,
+  type MarketplaceManifestPlan,
+  MarketplaceManifestRepositoryPathError,
   pathExists,
+  planMarketplaceManifest,
   prepareMarketplace,
+  validateMarketplaceManifest,
   validateMarketplaceName,
 } from "./storage.ts";
 
@@ -42,11 +47,19 @@ export interface ResolvedMarketplace {
 
 export interface MarketplaceOperations {
   resolve(source: string, requestedName?: string): Promise<ResolvedMarketplace>;
-  add(source: string, requestedName?: string): Promise<ResolvedMarketplace>;
+  add(
+    source: string,
+    requestedName?: string,
+    options?: MarketplaceAddOptions,
+  ): Promise<ResolvedMarketplace>;
   list(): Promise<readonly MarketplaceListing[]>;
   pin(name: string, ref: string): Promise<string>;
   remove(name: string): Promise<void>;
   unpin(name: string): Promise<void>;
+}
+
+export interface MarketplaceAddOptions {
+  readonly full?: boolean;
 }
 
 export interface GitResult {
@@ -1055,6 +1068,76 @@ async function listedColumn(
   }
 }
 
+function plannedMarketplaceDirectories(
+  plan: MarketplaceManifestPlan,
+): readonly string[] {
+  const directories = new Set<string>();
+  for (const plugin of plan.plugins) {
+    for (const path of [plugin.entry, plugin.package]) {
+      if (path === undefined) continue;
+      const directory = normalize(dirname(path));
+      // Root files are already materialized by `git clone --sparse`; `.tx`
+      // is selected explicitly before the manifest is planned.
+      if (directory === "." || directory === ".tx") continue;
+      directories.add(gitRepositoryPath(directory));
+    }
+  }
+  return Object.freeze([...directories]);
+}
+
+interface RepositoryPathProbe {
+  readonly ancestors: ReadonlySet<string>;
+  readonly leaves: ReadonlySet<string>;
+  readonly pathspecs: readonly string[];
+}
+
+/** Converts a host-normalized repository path to Git's `/` path syntax. */
+export function gitRepositoryPath(path: string, separator = sep): string {
+  return separator === "\\" ? path.replaceAll("\\", "/") : path;
+}
+
+function normalizeRepositoryPath(path: string): string {
+  return gitRepositoryPath(normalize(path));
+}
+
+/**
+ * Literal failed paths plus their proper ancestors. Git stores a symlinked
+ * parent as the ancestor entry rather than as the unresolved leaf below it, so
+ * the ancestor list is needed to distinguish that presence-dependent case
+ * from a genuinely absent leaf.
+ */
+function repositoryPathProbe(paths: readonly string[]): RepositoryPathProbe {
+  const leaves = new Set(paths.map(normalizeRepositoryPath));
+  const ancestors = new Set<string>();
+  for (const leaf of leaves) {
+    let ancestor = normalizeRepositoryPath(dirname(leaf));
+    while (ancestor !== ".") {
+      ancestors.add(ancestor);
+      ancestor = normalizeRepositoryPath(dirname(ancestor));
+    }
+  }
+  return {
+    ancestors,
+    leaves,
+    pathspecs: Object.freeze([...leaves, ...ancestors]),
+  };
+}
+
+function repositoryPathIsPresent(
+  stdout: string,
+  probe: RepositoryPathProbe,
+): boolean {
+  for (const record of stdout.split("\0")) {
+    if (record === "") continue;
+    const tab = record.indexOf("\t");
+    const mode = record.slice(0, record.indexOf(" "));
+    const path = record.slice(tab + 1);
+    if (probe.leaves.has(path)) return true;
+    if (mode === "120000" && probe.ancestors.has(path)) return true;
+  }
+  return false;
+}
+
 export class MarketplaceManager implements MarketplaceOperations {
   readonly #root: string;
   readonly #runGit: RunGit;
@@ -1084,6 +1167,7 @@ export class MarketplaceManager implements MarketplaceOperations {
   async add(
     source: string,
     requestedName?: string,
+    options: MarketplaceAddOptions = {},
   ): Promise<ResolvedMarketplace> {
     const resolved = await this.#resolve(source, requestedName);
     const target = containedMarketplacePath(this.#root, resolved.name);
@@ -1098,6 +1182,7 @@ export class MarketplaceManager implements MarketplaceOperations {
         resolved.name,
         target,
         resolved.ref,
+        options.full === true,
       );
     }
     return { name: resolved.name, source: resolved.source };
@@ -1232,6 +1317,8 @@ export class MarketplaceManager implements MarketplaceOperations {
     source: string,
     name: string,
     parent: string,
+    ref: string | undefined,
+    full: boolean,
   ): Promise<string> {
     const repository = normalizeMarketplaceRepository(source);
     const derived = deriveMarketplaceSshRepository(repository);
@@ -1255,16 +1342,164 @@ export class MarketplaceManager implements MarketplaceOperations {
     const failures: Error[] = [];
 
     for (const candidate of attempts) {
+      if (!full) {
+        const staging = await mkdtemp(join(parent, `.${name}-staging-`));
+        let reducedCloned = false;
+        try {
+          await this.#runGit(
+            [
+              "clone",
+              "--filter=blob:none",
+              "--sparse",
+              "--",
+              candidate,
+              staging,
+            ],
+            { env },
+          );
+          reducedCloned = true;
+        } catch {
+          await discardStaging(staging);
+          // The reduced clone itself is a mechanism probe. A fresh complete
+          // clone of the same transport is the authoritative attempt.
+        }
+
+        if (reducedCloned) {
+          // A requested ref selects which manifest is planned. Resolving and
+          // staging it is not a transport retry boundary: once the clone
+          // succeeded, a bad ref is the answer for this repository.
+          try {
+            if (ref !== undefined) await this.#stageVersion(staging, ref, env);
+          } catch (error) {
+            await discardStaging(staging);
+            throw error;
+          }
+
+          try {
+            await this.#runGit(
+              [
+                "-C",
+                staging,
+                "sparse-checkout",
+                "set",
+                "--cone",
+                "--skip-checks",
+                "--",
+                ".tx",
+              ],
+              { env },
+            );
+            await this.#validateReducedCheckout(staging, env);
+            return staging;
+          } catch (error) {
+            await discardStaging(staging);
+            if (
+              error instanceof MarketplaceManifestContentError ||
+              error instanceof MarketplaceManifestRepositoryPathError
+            ) {
+              throw error;
+            }
+            // A Git/sparse mechanism failure gets one fresh complete clone of
+            // this candidate. Its failure alone decides whether SSH follows.
+          }
+        }
+        await discardStaging(staging);
+      }
+
       const staging = await mkdtemp(join(parent, `.${name}-staging-`));
       try {
         await this.#runGit(["clone", "--", candidate, staging], { env });
-        return staging;
       } catch (error) {
         failures.push(error as Error);
         await discardStaging(staging);
+        continue;
+      }
+      try {
+        if (ref !== undefined) await this.#stageVersion(staging, ref, env);
+        return staging;
+      } catch (error) {
+        await discardStaging(staging);
+        throw error;
       }
     }
     throw cloneFailure(labels, failures, redactions);
+  }
+
+  /**
+   * Completes and validates a sparse checkout. Manifest and lexical failures
+   * are terminal. A repository-path failure is expanded only when HEAD really
+   * carries one of its literal paths; otherwise the same failure is final.
+   */
+  async #validateReducedCheckout(
+    staging: string,
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<void> {
+    let plan: MarketplaceManifestPlan;
+    try {
+      plan = await planMarketplaceManifest(staging);
+    } catch (error) {
+      await this.#resolveReducedValidationFailure(staging, error, env);
+      return;
+    }
+
+    const directories = plannedMarketplaceDirectories(plan);
+    if (directories.length > 0) {
+      await this.#runGit(
+        [
+          "-C",
+          staging,
+          "sparse-checkout",
+          "add",
+          "--skip-checks",
+          "--",
+          ...directories,
+        ],
+        { env },
+      );
+    }
+
+    try {
+      await validateMarketplaceManifest(staging);
+    } catch (error) {
+      await this.#resolveReducedValidationFailure(staging, error, env);
+    }
+  }
+
+  async #resolveReducedValidationFailure(
+    staging: string,
+    error: unknown,
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<void> {
+    if (error instanceof MarketplaceManifestContentError) throw error;
+    if (!(error instanceof MarketplaceManifestRepositoryPathError)) {
+      throw error;
+    }
+
+    const probe = repositoryPathProbe(error.paths);
+    const { stdout } = await this.#runGit(
+      [
+        "-C",
+        staging,
+        "--literal-pathspecs",
+        "ls-tree",
+        "-z",
+        "HEAD",
+        "--",
+        ...probe.pathspecs,
+      ],
+      { env },
+    );
+    if (!repositoryPathIsPresent(stdout, probe)) {
+      throw new MarketplaceManifestContentError(error.message, {
+        ...(error.cause === undefined ? {} : { cause: error.cause }),
+        ...(error.code === undefined ? {} : { code: error.code }),
+      });
+    }
+
+    await this.#runGit(["-C", staging, "sparse-checkout", "disable"], {
+      env,
+    });
+    await validateMarketplaceManifest(staging);
   }
 
   /**
@@ -1277,10 +1512,16 @@ export class MarketplaceManager implements MarketplaceOperations {
     name: string,
     target: string,
     ref?: string,
+    full = false,
   ): Promise<void> {
-    const staging = await this.#cloneStaging(source, name, dirname(target));
+    const staging = await this.#cloneStaging(
+      source,
+      name,
+      dirname(target),
+      ref,
+      full,
+    );
     try {
-      if (ref !== undefined) await this.#stageVersion(staging, ref);
       await this.#prepareCheckout(staging);
       await publishStaging(staging, target, name);
     } finally {
@@ -1298,14 +1539,15 @@ export class MarketplaceManager implements MarketplaceOperations {
    * afterwards differs; a ref that resolves nowhere fails the addition, and
    * staging is discarded exactly as it is for any other publication failure.
    */
-  async #stageVersion(staging: string, ref: string): Promise<void> {
-    const { commit } = await resolveMarketplaceRef(
-      staging,
-      ref,
-      this.#execution,
-    );
-    await moveCheckout(staging, commit, this.#execution);
-    await writeMarketplacePin(staging, ref, this.#execution);
+  async #stageVersion(
+    staging: string,
+    ref: string,
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<void> {
+    const execution = { runGit: this.#runGit, env };
+    const { commit } = await resolveMarketplaceRef(staging, ref, execution);
+    await moveCheckout(staging, commit, execution);
+    await writeMarketplacePin(staging, ref, execution);
   }
 
   async #prepareCheckout(checkout: string): Promise<void> {

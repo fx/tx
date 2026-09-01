@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import type { PluginDefinition } from "@fx/tx/plugin";
 import {
   createMarketplacePlugin,
+  type MarketplaceAddOptions,
   type MarketplaceOperations,
 } from "../plugins/marketplace/index.ts";
 import { MarketplaceAlreadyInstalledError } from "../plugins/marketplace/manager.ts";
@@ -66,8 +67,17 @@ class RecordingManager implements MarketplaceOperations {
     };
   }
 
-  async add(repository: string, name?: string) {
-    this.calls.push(["add", repository, name]);
+  async add(
+    repository: string,
+    name?: string,
+    options?: MarketplaceAddOptions,
+  ) {
+    this.calls.push([
+      "add",
+      repository,
+      name,
+      ...(options === undefined ? [] : [options]),
+    ]);
     const failure = this.addFailures.get(repository);
     if (failure !== undefined) throw failure;
     return {
@@ -199,6 +209,7 @@ describe("first-party marketplace plugin", () => {
       "Usage: tx marketplace add [options] <source>",
     );
     expect(addHelp.stdoutText()).toContain("--name <name>");
+    expect(addHelp.stdoutText()).toContain("--full");
     expect(addHelp.stderrText()).toBe("");
   });
 
@@ -213,6 +224,11 @@ describe("first-party marketplace plugin", () => {
       "an explicit name after the repository",
       ["repository", "--name", "personal"],
       ["add", "repository", "personal"],
+    ],
+    [
+      "a full-tree request",
+      ["repository", "--full"],
+      ["add", "repository", undefined, { full: true }],
     ],
   ])("adds with %s", async (_label, args, call) => {
     const context = captureContext();
