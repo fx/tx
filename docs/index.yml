@@ -12,7 +12,7 @@ specs:
     status: active
   - name: dialogs
     path: specs/dialogs/
-    description: Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection and text input composed through user-provided options.
+    description: Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, text input composed through user-provided options, and a greyscale Norton Commander presentation.
     status: active
   - name: updates
     path: specs/updates/
@@ -172,3 +172,19 @@ changes:
     spec: plugin-system
     status: complete
     depends_on: []
+  - id: "0020"
+    name: add-select-filter-and-viewport
+    path: changes/0020-add-select-filter-and-viewport.md
+    description: Add a type-to-filter input to the select dialog, enabled per request or automatically for long lists, and bound the option list to a scrolling viewport with Home, End, and Page navigation.
+    spec: dialogs
+    status: draft
+    depends_on:
+      - "0017"
+  - id: "0021"
+    name: restyle-dialogs-as-norton-commander
+    path: changes/0021-restyle-dialogs-as-norton-commander.md
+    description: Restyle the dialogs in greyscale Norton Commander fashion with framed titled panels, an inverted cursor bar, key hints, truncation, and bounded caret, pulse, and confirmation animations.
+    spec: dialogs
+    status: draft
+    depends_on:
+      - "0020"
