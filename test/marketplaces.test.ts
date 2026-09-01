@@ -1626,6 +1626,7 @@ describe("marketplace reduced retrieval", () => {
         expect.stringContaining(".canonical-staging-"),
         "sparse-checkout",
         "add",
+        "--skip-checks",
         "--",
         "plugins/nested",
         "plugins",
@@ -1717,6 +1718,135 @@ describe("marketplace reduced retrieval", () => {
     }
   });
 
+  test.each([
+    [
+      "manifest",
+      async (repository: string) => {
+        await Promise.all([
+          mkdir(join(repository, "meta"), { recursive: true }),
+          mkdir(join(repository, "plugins"), { recursive: true }),
+        ]);
+        await Promise.all([
+          symlink("meta", join(repository, ".tx")),
+          writeFile(
+            join(repository, "meta/config.json"),
+            JSON.stringify({
+              plugins: [{ name: "plugin", entry: "plugins/plugin.ts" }],
+            }),
+          ),
+          writeFile(
+            join(repository, "plugins/plugin.ts"),
+            "export default () => {};\n",
+          ),
+        ]);
+      },
+      ".tx/config.json",
+      ".tx",
+      "meta/config.json",
+    ],
+    [
+      "entry",
+      async (repository: string) => {
+        await Promise.all([
+          mkdir(join(repository, ".tx"), { recursive: true }),
+          mkdir(join(repository, "plugins"), { recursive: true }),
+          mkdir(join(repository, "hidden"), { recursive: true }),
+        ]);
+        await Promise.all([
+          writeFile(
+            join(repository, ".tx/config.json"),
+            JSON.stringify({
+              plugins: [{ name: "plugin", entry: "plugins/link/plugin.ts" }],
+            }),
+          ),
+          symlink("../hidden", join(repository, "plugins/link")),
+          writeFile(
+            join(repository, "hidden/plugin.ts"),
+            "export default () => {};\n",
+          ),
+        ]);
+      },
+      "plugins/link/plugin.ts",
+      "plugins/link",
+      "hidden/plugin.ts",
+    ],
+    [
+      "package",
+      async (repository: string) => {
+        await Promise.all([
+          mkdir(join(repository, ".tx"), { recursive: true }),
+          mkdir(join(repository, "plugins"), { recursive: true }),
+          mkdir(join(repository, "packages"), { recursive: true }),
+          mkdir(join(repository, "hidden"), { recursive: true }),
+        ]);
+        await Promise.all([
+          writeFile(
+            join(repository, ".tx/config.json"),
+            JSON.stringify({
+              plugins: [
+                {
+                  name: "plugin",
+                  entry: "plugins/plugin.ts",
+                  package: "packages/link/package.json",
+                },
+              ],
+            }),
+          ),
+          writeFile(
+            join(repository, "plugins/plugin.ts"),
+            "export default () => {};\n",
+          ),
+          symlink("../hidden", join(repository, "packages/link")),
+          writeFile(join(repository, "hidden/package.json"), "{}\n"),
+        ]);
+      },
+      "packages/link/package.json",
+      "packages/link",
+      "hidden/package.json",
+    ],
+  ])(
+    "expands a symlinked %s parent in the same checkout",
+    async (kind, populate, failedPath, symlinkPath, resolvedPath) => {
+      const temporaryRoot = await temporaryDirectory(
+        `tx-reduced-${kind}-parent-link-`,
+      );
+      try {
+        const repository = join(temporaryRoot, "source.git");
+        await populate(repository);
+        initializeGitRepository(repository);
+        const calls: string[][] = [];
+        const root = join(temporaryRoot, "marketplaces");
+        const manager = new MarketplaceManager(root, {
+          prepare: async () => {},
+          runGit: async (args, options) => {
+            calls.push([...args]);
+            return runGit(args, options);
+          },
+        });
+        const source = pathToFileURL(repository).href;
+
+        expect(await manager.add(source, kind)).toEqual({
+          name: kind,
+          source,
+        });
+        const clone = calls.find((args) => args[0] === "clone");
+        const tree = calls.find((args) => args.includes("ls-tree"));
+        const disabled = calls.find(
+          (args) => args[2] === "sparse-checkout" && args[3] === "disable",
+        );
+        expect(calls.filter((args) => args[0] === "clone")).toHaveLength(1);
+        expect(tree).toContain(failedPath);
+        expect(tree).toContain(symlinkPath);
+        expect(disabled?.[1]).toBe(clone?.at(-1));
+        expect(await readFile(join(root, kind, resolvedPath), "utf8")).not.toBe(
+          "",
+        );
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("expands an entry symlink whose target was not materialized", async () => {
     const temporaryRoot = await temporaryDirectory("tx-reduced-entry-link-");
     try {
@@ -1802,9 +1932,10 @@ describe("marketplace reduced retrieval", () => {
         ),
       ).toBe(false);
       const tree = calls.find((args) => args.includes("ls-tree"));
-      expect(tree?.slice(-2)).toEqual([
+      expect(tree?.slice(-3)).toEqual([
         ".tx/config.json",
         "tx.marketplace.json",
+        ".tx",
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

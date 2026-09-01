@@ -10,7 +10,7 @@ import {
   stat,
   symlink,
 } from "node:fs/promises";
-import { basename, dirname, join, normalize, resolve } from "node:path";
+import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import {
@@ -1085,6 +1085,55 @@ function plannedMarketplaceDirectories(
   return Object.freeze([...directories]);
 }
 
+interface RepositoryPathProbe {
+  readonly ancestors: ReadonlySet<string>;
+  readonly leaves: ReadonlySet<string>;
+  readonly pathspecs: readonly string[];
+}
+
+function normalizeRepositoryPath(path: string): string {
+  const normalized = normalize(path);
+  return sep === "\\" ? normalized.replaceAll("\\", "/") : normalized;
+}
+
+/**
+ * Literal failed paths plus their proper ancestors. Git stores a symlinked
+ * parent as the ancestor entry rather than as the unresolved leaf below it, so
+ * the ancestor list is needed to distinguish that presence-dependent case
+ * from a genuinely absent leaf.
+ */
+function repositoryPathProbe(paths: readonly string[]): RepositoryPathProbe {
+  const leaves = new Set(paths.map(normalizeRepositoryPath));
+  const ancestors = new Set<string>();
+  for (const leaf of leaves) {
+    let ancestor = normalizeRepositoryPath(dirname(leaf));
+    while (ancestor !== ".") {
+      ancestors.add(ancestor);
+      ancestor = normalizeRepositoryPath(dirname(ancestor));
+    }
+  }
+  return {
+    ancestors,
+    leaves,
+    pathspecs: Object.freeze([...leaves, ...ancestors]),
+  };
+}
+
+function repositoryPathIsPresent(
+  stdout: string,
+  probe: RepositoryPathProbe,
+): boolean {
+  for (const record of stdout.split("\0")) {
+    if (record === "") continue;
+    const tab = record.indexOf("\t");
+    const mode = record.slice(0, record.indexOf(" "));
+    const path = record.slice(tab + 1);
+    if (probe.leaves.has(path)) return true;
+    if (mode === "120000" && probe.ancestors.has(path)) return true;
+  }
+  return false;
+}
+
 export class MarketplaceManager implements MarketplaceOperations {
   readonly #root: string;
   readonly #runGit: RunGit;
@@ -1392,7 +1441,15 @@ export class MarketplaceManager implements MarketplaceOperations {
     const directories = plannedMarketplaceDirectories(plan);
     if (directories.length > 0) {
       await this.#runGit(
-        ["-C", staging, "sparse-checkout", "add", "--", ...directories],
+        [
+          "-C",
+          staging,
+          "sparse-checkout",
+          "add",
+          "--skip-checks",
+          "--",
+          ...directories,
+        ],
         { env },
       );
     }
@@ -1414,6 +1471,7 @@ export class MarketplaceManager implements MarketplaceOperations {
       throw error;
     }
 
+    const probe = repositoryPathProbe(error.paths);
     const { stdout } = await this.#runGit(
       [
         "-C",
@@ -1423,11 +1481,11 @@ export class MarketplaceManager implements MarketplaceOperations {
         "-z",
         "HEAD",
         "--",
-        ...error.paths,
+        ...probe.pathspecs,
       ],
       { env },
     );
-    if (stdout === "") {
+    if (!repositoryPathIsPresent(stdout, probe)) {
       throw new MarketplaceManifestContentError(error.message, {
         ...(error.cause === undefined ? {} : { cause: error.cause }),
         ...(error.code === undefined ? {} : { code: error.code }),
