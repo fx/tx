@@ -15,6 +15,7 @@ import {
   deriveMarketplaceName,
   deriveMarketplaceSshRepository,
   discardStaging,
+  MarketplaceAlreadyInstalledError,
   MarketplaceManager,
   normalizeMarketplaceRepository,
   type RunGit,
@@ -833,6 +834,63 @@ function unsetSshCommand(): never {
 }
 
 describe("MarketplaceManager", () => {
+  test("resolves safe Git and canonical local sources without installing", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-resolve-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      const local = await createLocalSource(temporaryRoot, "tools@2");
+      let gitCalls = 0;
+      let preparations = 0;
+      const manager = new MarketplaceManager(root, {
+        cwd: temporaryRoot,
+        runGit: async () => {
+          gitCalls++;
+          throw new Error("Git must not run while resolving");
+        },
+        prepare: async () => {
+          preparations++;
+        },
+      });
+
+      expect(
+        await manager.resolve(
+          "https://user:secret@example.com/acme/tools.git@v1.2.3",
+        ),
+      ).toEqual({
+        name: "tools",
+        source: "https://example.com/acme/tools.git@v1.2.3",
+      });
+      expect(await manager.resolve("./tools@2")).toEqual({
+        name: "tools@2",
+        source: local,
+      });
+      expect(await manager.resolve("owner/repository", "chosen")).toEqual({
+        name: "chosen",
+        source: "owner/repository",
+      });
+      expect(gitCalls).toBe(0);
+      expect(preparations).toBe(0);
+      await expect(lstat(root)).rejects.toHaveProperty("code", "ENOENT");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("uses a typed already-installed error before and after preparation", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-marketplace-taken-");
+    try {
+      const root = join(temporaryRoot, "marketplaces");
+      await mkdir(join(root, "taken"), { recursive: true });
+      const manager = new MarketplaceManager(root, { prepare: async () => {} });
+
+      await expect(manager.add("source", "taken")).rejects.toBeInstanceOf(
+        MarketplaceAlreadyInstalledError,
+      );
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("directs callers to provide a name when one cannot be derived", async () => {
     const manager = new MarketplaceManager("/unused", {
       runGit: async () => {
@@ -868,7 +926,7 @@ describe("MarketplaceManager", () => {
         },
       });
 
-      expect(await manager.add(source)).toBe("source");
+      expect(await manager.add(source)).toEqual({ name: "source", source });
       expect(prepared).toBe(true);
       expect(await manager.list()).toEqual([
         // No tag is published, so the label is the abbreviated commit.
@@ -940,7 +998,10 @@ describe("MarketplaceManager", () => {
           }),
       });
 
-      expect(await manager.add("repository", "prepared")).toBe("prepared");
+      expect(await manager.add("repository", "prepared")).toEqual({
+        name: "prepared",
+        source: "repository",
+      });
       expect(await readFile(join(target, "installed.txt"), "utf8")).toBe(
         "ready",
       );
@@ -1304,7 +1365,10 @@ describe("marketplace clone transports", () => {
         },
       });
 
-      expect(await manager.add("fx/tx")).toBe("tx");
+      expect(await manager.add("fx/tx")).toEqual({
+        name: "tx",
+        source: "fx/tx",
+      });
       expect(cloned).toEqual([
         "https://github.com/fx/tx.git",
         "git@github.com:fx/tx.git",
@@ -1346,7 +1410,10 @@ describe("marketplace clone transports", () => {
         },
       });
 
-      expect(await manager.add("fx/tx")).toBe("tx");
+      expect(await manager.add("fx/tx")).toEqual({
+        name: "tx",
+        source: "fx/tx",
+      });
       expect(cloned).toEqual(["https://github.com/fx/tx.git"]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -1833,7 +1900,10 @@ describe("marketplace clone transports", () => {
         },
       });
 
-      expect(await manager.add("fx/tx", "fresh")).toBe("fresh");
+      expect(await manager.add("fx/tx", "fresh")).toEqual({
+        name: "fresh",
+        source: "fx/tx",
+      });
       expect(stagings).toHaveLength(2);
       expect(await readdir(root)).toEqual(["fresh"]);
     } finally {
@@ -1871,7 +1941,7 @@ describe("marketplace clone transports", () => {
         GIT_SSH_COMMAND: "ssh -i /keys/id",
       });
 
-      expect(await add("keyed")).toBe("keyed");
+      expect(await add("keyed")).toEqual({ name: "keyed", source: "fx/tx" });
       expect(calls.map(({ args }) => args[0])).toEqual(["clone", "clone"]);
       expect(calls.map(({ env }) => env)).toEqual([
         { GIT_SSH_COMMAND: "ssh -i /keys/id", GIT_TERMINAL_PROMPT: "0" },
@@ -1889,7 +1959,10 @@ describe("marketplace clone transports", () => {
         GIT_SSH: "/usr/local/bin/ssh-wrapper",
       });
 
-      expect(await add("wrapped")).toBe("wrapped");
+      expect(await add("wrapped")).toEqual({
+        name: "wrapped",
+        source: "fx/tx",
+      });
       expect(calls.map(({ args }) => args[0])).toEqual(["clone", "clone"]);
       expect(calls.map(({ env }) => env)).toEqual([
         { GIT_SSH: "/usr/local/bin/ssh-wrapper", GIT_TERMINAL_PROMPT: "0" },
@@ -1919,7 +1992,10 @@ describe("marketplace clone transports", () => {
               : { stdout: "" },
         );
 
-        expect(await add("deployed")).toBe("deployed");
+        expect(await add("deployed")).toEqual({
+          name: "deployed",
+          source: "fx/tx",
+        });
         // `--local` is deliberately absent: `git clone` never applies the
         // configuration of the repository the caller is standing in, so
         // reading it would suppress batch mode for a command the clone
@@ -1964,7 +2040,10 @@ describe("marketplace clone transports", () => {
           probe,
         );
 
-        expect(await add("batched")).toBe("batched");
+        expect(await add("batched")).toEqual({
+          name: "batched",
+          source: "fx/tx",
+        });
         // The first attempt is in batch mode too. An `insteadOf` rule can
         // rewrite its HTTP(S) source to SSH before Git dials, and ssh(1)
         // prompts for an unknown host key on `/dev/tty` whatever
@@ -2016,7 +2095,10 @@ describe("marketplace clone transports", () => {
         const env = { PATH: "/test/bin", ...configured };
         const { calls, add } = recordingManager(temporaryRoot, env);
 
-        expect(await add("commanded")).toBe("commanded");
+        expect(await add("commanded")).toEqual({
+          name: "commanded",
+          source: "fx/tx",
+        });
         // Command scope is the one scope beyond the global and system files
         // that a clone applies, and it outranks both, so nothing is probed
         // and nothing is injected over it.
@@ -2088,7 +2170,10 @@ describe("marketplace clone transports", () => {
         const env = { PATH: "/test/bin", ...configured };
         const { calls, add } = recordingManager(temporaryRoot, env);
 
-        expect(await add("batched")).toBe("batched");
+        expect(await add("batched")).toEqual({
+          name: "batched",
+          source: "fx/tx",
+        });
         // Nothing is configured, so the two scoped files are still asked.
         expect(calls.map(({ args }) => args[0])).toEqual([
           "config",
@@ -2133,7 +2218,7 @@ function recordingManager(
     readonly args: readonly string[];
     readonly env: Readonly<Record<string, string | undefined>>;
   }[];
-  readonly add: (name: string) => Promise<string>;
+  readonly add: (name: string) => ReturnType<MarketplaceManager["add"]>;
 } {
   const calls: {
     readonly args: readonly string[];
@@ -2205,18 +2290,27 @@ describe("local marketplace sources", () => {
       // here too, and stays reachable as a local source by a path.
       const colon = await createLocalSource(temporaryRoot, "host:path");
 
-      expect(await manager.add(source)).toBe("tools");
-      expect(await manager.add("git@example.com:me/scp.git")).toBe("scp");
-      expect(await manager.add("ssh://git@example.com/me/remote.git")).toBe(
-        "remote",
-      );
-      expect(await manager.add("owner/absent")).toBe("absent");
-      expect(await manager.add("host:path", "colon-remote")).toBe(
-        "colon-remote",
-      );
-      expect(await manager.add("./host:path", "colon-local")).toBe(
-        "colon-local",
-      );
+      expect(await manager.add(source)).toEqual({ name: "tools", source });
+      expect(await manager.add("git@example.com:me/scp.git")).toEqual({
+        name: "scp",
+        source: "git@example.com:me/scp.git",
+      });
+      expect(await manager.add("ssh://git@example.com/me/remote.git")).toEqual({
+        name: "remote",
+        source: "ssh://example.com/me/remote.git",
+      });
+      expect(await manager.add("owner/absent")).toEqual({
+        name: "absent",
+        source: "owner/absent",
+      });
+      expect(await manager.add("host:path", "colon-remote")).toEqual({
+        name: "colon-remote",
+        source: "host:path",
+      });
+      expect(await manager.add("./host:path", "colon-local")).toEqual({
+        name: "colon-local",
+        source: colon,
+      });
 
       expect(cloned).toEqual([
         source,
@@ -2248,7 +2342,7 @@ describe("local marketplace sources", () => {
         },
       });
 
-      expect(await manager.add("tools")).toBe("tools");
+      expect(await manager.add("tools")).toEqual({ name: "tools", source });
       expect(prepared).toEqual([source]);
       const target = join(root, "tools");
       expect((await lstat(target)).isSymbolicLink()).toBe(true);
@@ -2295,14 +2389,20 @@ describe("local marketplace sources", () => {
         },
       });
 
-      expect(await manager.add("owner/repository")).toBe("repository");
+      expect(await manager.add("owner/repository")).toEqual({
+        name: "repository",
+        source,
+      });
       expect(await readlink(join(root, "repository"))).toBe(source);
       expect(cloned).toEqual([]);
 
       // The remote of the same spelling stays reachable by its full URL.
       expect(
         await manager.add("https://github.com/owner/repository.git", "remote"),
-      ).toBe("remote");
+      ).toEqual({
+        name: "remote",
+        source: "https://github.com/owner/repository.git",
+      });
       expect(cloned).toEqual(["https://github.com/owner/repository.git"]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -2325,15 +2425,20 @@ describe("local marketplace sources", () => {
           prepare: async () => {},
         });
 
-      expect(await managerIn(join(temporaryRoot, "tools")).add(".")).toBe(
-        "tools",
-      );
+      expect(await managerIn(join(temporaryRoot, "tools")).add(".")).toEqual({
+        name: "tools",
+        source: join(temporaryRoot, "tools"),
+      });
       await managerIn(temporaryRoot).remove("tools");
-      expect(await managerIn(temporaryRoot).add("tools/")).toBe("tools");
+      expect(await managerIn(temporaryRoot).add("tools/")).toEqual({
+        name: "tools",
+        source: join(temporaryRoot, "tools"),
+      });
       // A directory named tools.git is called that; only a Git URL drops it.
-      expect(await managerIn(temporaryRoot).add("legacy.git")).toBe(
-        "legacy.git",
-      );
+      expect(await managerIn(temporaryRoot).add("legacy.git")).toEqual({
+        name: "legacy.git",
+        source: join(temporaryRoot, "legacy.git"),
+      });
       await expect(managerIn(temporaryRoot).add("-unsafe")).rejects.toThrow(
         'Cannot derive a safe marketplace name from "-unsafe"; pass --name <name>',
       );
@@ -2359,7 +2464,7 @@ describe("local marketplace sources", () => {
         },
       });
 
-      expect(await manager.add("tools")).toBe("tools");
+      expect(await manager.add("tools")).toEqual({ name: "tools", source });
       await expect(manager.add("tools")).rejects.toThrow(
         'Marketplace "tools" is already installed',
       );
@@ -2446,7 +2551,10 @@ describe("local marketplace sources", () => {
       });
       await symlink(join(temporaryRoot, "first"), current);
 
-      expect(await manager.add("current/repo", "pinned")).toBe("pinned");
+      expect(await manager.add("current/repo", "pinned")).toEqual({
+        name: "pinned",
+        source: first,
+      });
       await rm(current);
       await symlink(join(temporaryRoot, "second"), current);
 

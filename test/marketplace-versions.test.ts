@@ -197,7 +197,10 @@ describe("adding a pinned marketplace", () => {
       const root = join(temporaryRoot, "marketplaces");
       const source = `${pathToFileURL(remote).href}@v1.0.0`;
 
-      expect(await manager(root, temporaryRoot).add(source)).toBe("tools");
+      expect(await manager(root, temporaryRoot).add(source)).toEqual({
+        name: "tools",
+        source,
+      });
 
       const checkout = join(root, "tools");
       expect(fixtureGit(checkout, ["rev-parse", "HEAD"])).toBe(first);
@@ -432,7 +435,10 @@ describe("adding a pinned marketplace", () => {
 
       // Classification runs first and on the argument as typed, so no ref is
       // parsed and no Git command runs at all.
-      expect(await rejecting.add("./tools@2")).toBe("tools@2");
+      expect(await rejecting.add("./tools@2")).toEqual({
+        name: "tools@2",
+        source,
+      });
       expect((await lstat(join(root, "tools@2"))).isSymbolicLink()).toBe(true);
       expect(await rejecting.list()).toEqual([
         { name: "tools@2", source, version: "live" },

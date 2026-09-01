@@ -5,7 +5,7 @@
 Add a bundled config plugin that lets any plugin persist a validated JSON value per user, on top of the existing generic registry, then use it to let a user seed a list of marketplaces and install every configured-but-missing one with a single explicit command. [Config](../specs/config/) owns the capability's observable behavior, and [Plugin System: Configured Marketplaces](../specs/plugin-system/index.md#configured-marketplaces) owns the marketplace plugin's use of it.
 
 **Specs:** [Config](../specs/config/), [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0016
 
 ## Motivation
@@ -129,15 +129,15 @@ The marketplace plugin's `add`, `remove`, and new `install` command actions each
   - [x] Update `docs/manual/plugins.md` with the implemented config contract
   - [x] Verify 100% coverage and `bun run check`
 
-- [ ] Consume the config capability in the marketplace plugin
-  - [ ] Define the `marketplace` config key with a type guard for an ordered list of `{ source, name }` entries that rejects a list containing two entries with the same explicit name
-  - [ ] Write back the resolved name from `marketplace add`, with a credential-free source for a Git source (preserving a version-pin suffix once Change 0014 adds one) or the fully resolved real path for a local source, replacing any existing entry whose name — explicit or derived — matches; delete the same way in `marketplace remove`, deriving a name-less entry's name rather than comparing only the literal property
-  - [ ] Report a write-back failure separately from, and without undoing, the install or removal that already succeeded
-  - [ ] Add `marketplace install`: resolve every entry's name (explicit, or derived exactly as `add` derives one), reject the whole list on any collision, otherwise install every persisted entry not currently installed and leave already-installed entries unchanged
-  - [ ] Ensure one entry's install failure is reported without stopping the remaining entries
-  - [ ] Cover write-back on add and remove, removing a name-less hand-seeded entry by its derived name, credential-free write-back for an HTTP(S) source with userinfo, resolved-real-path write-back for a local source given as a relative path, write-back failure after a successful install or removal, install of missing entries including a hand-seeded entry, no-op on already-installed entries, explicit- and derived-name collision rejection, and per-entry failure isolation in tests
-  - [ ] Update `docs/manual/plugins.md` and any `marketplace` command help text for the new command
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Consume the config capability in the marketplace plugin
+  - [x] Define the `marketplace` config key with a type guard for an ordered list of `{ source, name }` entries that rejects a list containing two entries with the same explicit name
+  - [x] Write back the resolved name from `marketplace add`, with a credential-free source for a Git source (preserving a version-pin suffix once Change 0014 adds one) or the fully resolved real path for a local source, replacing any existing entry whose name — explicit or derived — matches; delete the same way in `marketplace remove`, deriving a name-less entry's name rather than comparing only the literal property
+  - [x] Report a write-back failure separately from, and without undoing, the install or removal that already succeeded
+  - [x] Add `marketplace install`: resolve every entry's name (explicit, or derived exactly as `add` derives one), reject the whole list on any collision, otherwise install every persisted entry not currently installed and leave already-installed entries unchanged
+  - [x] Ensure one entry's install failure is reported without stopping the remaining entries
+  - [x] Cover write-back on add and remove, removing a name-less hand-seeded entry by its derived name, credential-free write-back for an HTTP(S) source with userinfo, resolved-real-path write-back for a local source given as a relative path, write-back failure after a successful install or removal, install of missing entries including a hand-seeded entry, no-op on already-installed entries, explicit- and derived-name collision rejection, and per-entry failure isolation in tests
+  - [x] Update `docs/manual/plugins.md` and any `marketplace` command help text for the new command
+  - [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 

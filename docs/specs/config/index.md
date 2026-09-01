@@ -4,7 +4,7 @@
 
 `tx` provides a bundled config plugin that lets any plugin persist a small JSON value across invocations, scoped to the current user rather than the current working directory. The plugin MUST expose that capability through the generic registry rather than through core vocabulary, and its contract MUST let a plugin declare the shape it expects under its own key before reading or writing it, so a corrupt or foreign value is rejected rather than silently trusted. The persisted document lives at a fixed, documented location rather than an internal implementation detail, so a user MAY hand-edit or pre-seed it directly; no `tx` command is required to create or populate it.
 
-[Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) specifies the config capability and its first consumer, the marketplace plugin's configured-marketplace list. The bundled provider is implemented under `plugins/config/` and composed only in `cli.ts`; marketplace consumption remains pending. The config requirements below describe current behavior, while the configured-marketplace requirements linked from this document remain desired behavior until that consumer lands.
+[Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) specifies the config capability and its first consumer, the marketplace plugin's configured-marketplace list. The bundled provider is implemented under `plugins/config/` and composed only in `cli.ts`; the marketplace plugin consumes it at command time for explicit configured installs and add/remove write-back. The requirements below describe current behavior.
 
 ## Background
 

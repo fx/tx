@@ -36,8 +36,14 @@ export interface MarketplaceListing {
   readonly version: string;
 }
 
+export interface ResolvedMarketplace {
+  readonly name: string;
+  readonly source: string;
+}
+
 export interface MarketplaceOperations {
-  add(source: string, requestedName?: string): Promise<string>;
+  resolve(source: string, requestedName?: string): Promise<ResolvedMarketplace>;
+  add(source: string, requestedName?: string): Promise<ResolvedMarketplace>;
   list(): Promise<readonly MarketplaceListing[]>;
   pin(name: string, ref: string): Promise<string>;
   remove(name: string): Promise<void>;
@@ -79,6 +85,14 @@ export class MarketplaceRefNotPublishedError extends Error {
   constructor(ref: string) {
     super(`Version "${ref}" is not published by the remote`);
     this.name = "MarketplaceRefNotPublishedError";
+  }
+}
+
+/** The expected race when another process publishes the same name first. */
+export class MarketplaceAlreadyInstalledError extends Error {
+  constructor(name: string) {
+    super(`Marketplace "${name}" is already installed`);
+    this.name = "MarketplaceAlreadyInstalledError";
   }
 }
 
@@ -235,7 +249,7 @@ function derivedName(source: string, derive: () => string): string {
  * the text around it — `git`, `me` and `com` are all real HTTP(S) usernames
  * and all occur in the hosts and paths a user needs to read back.
  */
-function credentialFreeSource(repository: string): string {
+export function credentialFreeSource(repository: string): string {
   let url: URL;
   try {
     url = new URL(repository);
@@ -1033,7 +1047,51 @@ export class MarketplaceManager implements MarketplaceOperations {
     this.#execution = { runGit: this.#runGit, env: this.#env };
   }
 
-  async add(source: string, requestedName?: string): Promise<string> {
+  async resolve(
+    source: string,
+    requestedName?: string,
+  ): Promise<ResolvedMarketplace> {
+    const resolved = await this.#resolve(source, requestedName);
+    return { name: resolved.name, source: resolved.source };
+  }
+
+  async add(
+    source: string,
+    requestedName?: string,
+  ): Promise<ResolvedMarketplace> {
+    const resolved = await this.#resolve(source, requestedName);
+    const target = containedMarketplacePath(this.#root, resolved.name);
+    await mkdir(this.#root, { recursive: true });
+    await this.#requireAvailable(resolved.name, target);
+
+    if (resolved.local !== undefined) {
+      await this.#reference(resolved.local, resolved.name, target);
+    } else {
+      await this.#clone(
+        resolved.repository,
+        resolved.name,
+        target,
+        resolved.ref,
+      );
+    }
+    return { name: resolved.name, source: resolved.source };
+  }
+
+  async #resolve(
+    source: string,
+    requestedName?: string,
+  ): Promise<
+    | (ResolvedMarketplace & {
+        readonly local: string;
+        readonly repository?: never;
+        readonly ref?: never;
+      })
+    | (ResolvedMarketplace & {
+        readonly local?: never;
+        readonly repository: string;
+        readonly ref?: string;
+      })
+  > {
     // Rejected before anything is resolved: resolving an empty source yields
     // the working directory, which would install into wherever the user
     // happens to be standing.
@@ -1051,18 +1109,22 @@ export class MarketplaceManager implements MarketplaceOperations {
       await this.#requireVersionableSource(repository, ref);
 
     const name =
-      requestedName ??
+      (requestedName === undefined
+        ? undefined
+        : validateMarketplaceName(requestedName)) ??
       derivedName(source, () =>
         local === undefined
           ? deriveMarketplaceName(repository)
           : deriveLocalMarketplaceName(local),
       );
-    const target = containedMarketplacePath(this.#root, name);
-    await mkdir(this.#root, { recursive: true });
-    await this.#requireAvailable(name, target);
-
-    if (local !== undefined) return this.#reference(local, name, target);
-    return this.#clone(repository, name, target, ref);
+    if (local !== undefined) return { local, name, source: local };
+    const safeRepository = credentialFreeSource(repository);
+    return {
+      name,
+      repository,
+      ...(ref === undefined ? {} : { ref }),
+      source: `${safeRepository}${ref === undefined ? "" : `@${ref}`}`,
+    };
   }
 
   /**
@@ -1116,11 +1178,10 @@ export class MarketplaceManager implements MarketplaceOperations {
     source: string,
     name: string,
     target: string,
-  ): Promise<string> {
+  ): Promise<void> {
     await this.#prepareCheckout(source);
     await this.#requireAvailable(name, target);
     await symlink(source, target);
-    return name;
   }
 
   /**
@@ -1183,14 +1244,13 @@ export class MarketplaceManager implements MarketplaceOperations {
     name: string,
     target: string,
     ref?: string,
-  ): Promise<string> {
+  ): Promise<void> {
     const staging = await this.#cloneStaging(source, name, dirname(target));
     try {
       if (ref !== undefined) await this.#stageVersion(staging, ref);
       await this.#prepareCheckout(staging);
       await this.#requireAvailable(name, target);
       await rename(staging, target);
-      return name;
     } finally {
       // Through the helper rather than `rm` directly: preparation and the name
       // check both throw failures the user needs to read, and a removal the
@@ -1223,7 +1283,7 @@ export class MarketplaceManager implements MarketplaceOperations {
 
   async #requireAvailable(name: string, target: string): Promise<void> {
     if (await pathExists(target)) {
-      throw new Error(`Marketplace "${name}" is already installed`);
+      throw new MarketplaceAlreadyInstalledError(name);
     }
   }
 

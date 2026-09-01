@@ -1,6 +1,17 @@
 import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
 
-import { MarketplaceManager, type MarketplaceOperations } from "./manager.ts";
+import {
+  forgetConfiguredMarketplace,
+  readConfiguredMarketplaces,
+  recordConfiguredMarketplace,
+  requireConfigCapability,
+  resolveConfiguredMarketplaces,
+} from "./configured.ts";
+import {
+  MarketplaceAlreadyInstalledError,
+  MarketplaceManager,
+  type MarketplaceOperations,
+} from "./manager.ts";
 import { importPluginEntry } from "./module.ts";
 import {
   discoverInstalledMarketplaces,
@@ -139,7 +150,7 @@ export function createMarketplacePlugin(
   return Object.freeze({
     identity,
     load(): Plugin {
-      return ({ command, context, env, plugin, update }) => {
+      return ({ command, context, env, plugin, registrations, update }) => {
         const root = options.root ?? resolveMarketplaceDirectory({ env });
         const manager =
           options.manager ??
@@ -166,8 +177,62 @@ export function createMarketplacePlugin(
                 flags.name === undefined
                   ? undefined
                   : validateMarketplaceName(flags.name);
-              const name = await manager.add(source, requested);
-              context.stdout.write(`Added marketplace "${name}".\n`);
+              const added = await manager.add(source, requested);
+              context.stdout.write(`Added marketplace "${added.name}".\n`);
+              try {
+                await recordConfiguredMarketplace(
+                  requireConfigCapability(registrations),
+                  manager,
+                  added,
+                );
+              } catch (error) {
+                context.stderr.write(
+                  `Marketplace "${added.name}" was added, but config synchronization failed: ${errorMessage(error)}\n`,
+                );
+              }
+            });
+
+          namespace
+            .command("install")
+            .description(
+              "Install every configured marketplace not yet installed",
+            )
+            .action(async () => {
+              const configured = await readConfiguredMarketplaces(
+                requireConfigCapability(registrations),
+              );
+              const resolved = await resolveConfiguredMarketplaces(
+                configured,
+                manager,
+              );
+              const installed = new Set(
+                (await discoverInstalledMarketplaces(root)).map(
+                  (marketplace) => marketplace.name,
+                ),
+              );
+              let failed = false;
+
+              for (const [index, marketplace] of resolved.entries()) {
+                if (installed.has(marketplace.name)) continue;
+                const entry = configured[index] as (typeof configured)[number];
+                try {
+                  const added = await manager.add(entry.source, entry.name);
+                  context.stdout.write(`Added marketplace "${added.name}".\n`);
+                } catch (error) {
+                  if (error instanceof MarketplaceAlreadyInstalledError) {
+                    continue;
+                  }
+                  failed = true;
+                  context.stderr.write(
+                    `Failed to install configured marketplace "${marketplace.name}": ${errorMessage(error)}\n`,
+                  );
+                }
+              }
+              if (failed) {
+                throw new Error(
+                  "One or more configured marketplaces failed to install",
+                );
+              }
             });
 
           namespace
@@ -218,8 +283,20 @@ export function createMarketplacePlugin(
             .description("Remove an installed marketplace")
             .argument("<name>", "Local marketplace name")
             .action(async (name: string) => {
-              await manager.remove(validateMarketplaceName(name));
-              context.stdout.write(`Removed marketplace "${name}".\n`);
+              const validated = validateMarketplaceName(name);
+              await manager.remove(validated);
+              context.stdout.write(`Removed marketplace "${validated}".\n`);
+              try {
+                await forgetConfiguredMarketplace(
+                  requireConfigCapability(registrations),
+                  manager,
+                  validated,
+                );
+              } catch (error) {
+                context.stderr.write(
+                  `Marketplace "${validated}" was removed, but config synchronization failed: ${errorMessage(error)}\n`,
+                );
+              }
             });
         });
 

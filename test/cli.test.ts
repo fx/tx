@@ -1,5 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultPlugins } from "../cli.ts";
@@ -153,6 +161,63 @@ describe("main", () => {
       "config",
       "executable",
     ]);
+  });
+
+  test("installs and removes a hand-seeded local marketplace through the real composition", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-cli-configured-");
+    try {
+      const dataHome = join(temporaryRoot, "data");
+      const source = join(temporaryRoot, "source");
+      const configPath = join(dataHome, "tx", "config.json");
+      await Promise.all([
+        mkdir(join(source, ".tx"), { recursive: true }),
+        mkdir(join(dataHome, "tx"), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          join(source, ".tx/config.json"),
+          '{"plugins":[{"name":"fixture","entry":"plugin.ts"}]}',
+        ),
+        writeFile(join(source, "plugin.ts"), "export default () => {};\n"),
+        writeFile(
+          configPath,
+          JSON.stringify({ marketplace: [{ source: "./source" }] }),
+        ),
+      ]);
+      const installContext = {
+        ...captureContext({ ...process.env, XDG_DATA_HOME: dataHome }),
+        cwd: temporaryRoot,
+      };
+
+      expect(
+        await main(["marketplace", "install"], defaultPlugins, installContext),
+      ).toBe(0);
+      const installed = join(dataHome, "tx", "marketplaces", "source");
+      expect((await lstat(installed)).isSymbolicLink()).toBe(true);
+      expect(await readlink(installed)).toBe(source);
+      expect(installContext.stdoutText()).toBe('Added marketplace "source".\n');
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+        marketplace: [{ source: "./source" }],
+      });
+
+      const removeContext = {
+        ...captureContext({ ...process.env, XDG_DATA_HOME: dataHome }),
+        cwd: temporaryRoot,
+      };
+      expect(
+        await main(
+          ["marketplace", "remove", "source"],
+          defaultPlugins,
+          removeContext,
+        ),
+      ).toBe(0);
+      expect(await Bun.file(installed).exists()).toBe(false);
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+        marketplace: [],
+      });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
   });
 
   // The bundled plugin keeps the parser's implicit help subcommand, so these
