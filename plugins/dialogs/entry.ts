@@ -6,6 +6,20 @@ import { displayWidth, type FrameComponent, panelWidth } from "./frame.ts";
  * a different prompt. */
 export const caretGlyph = "█";
 
+/** What stands in the caret's cell while it is on its hidden phase. */
+const hiddenCaret = " ";
+
+/**
+ * Text with the caret after it, drawn or blanked according to the phase it is
+ * on. The cell is kept either way, which is what stops a blinking caret from
+ * resizing the panel it sits in twice a second and shifting the text under the
+ * reader; every row that draws a caret goes through here, so that rule holds in
+ * one place rather than wherever text is entered.
+ */
+export function withCaret(text: string, shown: boolean): string {
+  return `${text}${shown ? caretGlyph : hiddenCaret}`;
+}
+
 /** The key hint line under a standalone input and under a field: the two keys
  * an entry answers to. */
 const entryHint = "Enter submit · Esc cancel";
@@ -63,6 +77,14 @@ export function editedText(
 type EntryProps = {
   readonly message: string;
   readonly initialValue: string | undefined;
+  /** Whether the caret is on its visible phase this frame. Passed in rather
+   * than subscribed to here: a dialog animates on one subscription, and a field
+   * collected under a select rides the select's. */
+  readonly caret: boolean;
+  /** Called once a keystroke has changed the text, so the dialog can put the
+   * caret back on its visible phase. A caret that happened to be hidden under
+   * the character just typed would read as a dropped keystroke. */
+  readonly onEdit: () => void;
   readonly onSubmit: (value: string) => void;
   readonly onCancel: () => void;
 };
@@ -81,6 +103,8 @@ export function createEntry(
   return function Entry({
     message,
     initialValue,
+    caret,
+    onEdit,
     onSubmit,
     onCancel,
   }: EntryProps) {
@@ -97,13 +121,14 @@ export function createEntry(
         if (edited !== entered.current) {
           entered.current = edited;
           setValue(edited);
+          onEdit();
         }
       }
     });
 
     // The caret rides with the value in one text, so start truncation keeps
     // the tail of a long value and the caret itself in view together.
-    const entry = `${value}${caretGlyph}`;
+    const entry = withCaret(value, caret);
     const width = panelWidth(message, displayWidth(entry), columns);
     return react.createElement(
       Frame,

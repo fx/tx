@@ -6,7 +6,7 @@
 
 [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) implements the generic registry that carries the internal capability and the namespace-free bundled provider that supplies `select`. [Change 0017](../../changes/0017-add-dialog-text-input-and-composition.md) implements the text `input` dialog and the user-provided option that composes the two. Those requirements are implemented.
 
-[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation); that section, and the confirmation wording added to [Selection](#selection), describe desired behavior and are not yet implemented; a select today renders its rows as plain text, unframed and unstyled.
+[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented.
 
 ## Background
 
@@ -331,7 +331,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 
 The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled; the input hint line reads `Enter submit · Esc cancel`.
 
-Reference rendering of a filter-enabled select in a terminal of 80 columns and 9 rows, greyscale omitted; the [viewport](#viewport) leaves three option rows because the dialog's other six rows must stay under the terminal height:
+Reference rendering of a filter-enabled select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves three option rows because the dialog's other six rows — the two frame edges, the filter prompt, both overflow indicators, and the hint line — must fit alongside them and still stay strictly under the terminal height. Only one indicator has anything to count here, so the frame drawn is eight rows of the ten:
 
 ```text
 ╔═ Which branch? ═══════════════════════╗
@@ -480,3 +480,4 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-01 | Desired select filter with its `filter` request setting, term matching, pinned user-provided options, and the bounded viewport with Home, End, and Page navigation | [0020-add-select-filter-and-viewport](../../changes/0020-add-select-filter-and-viewport.md) |
 | 2026-09-01 | Desired Norton Commander presentation: framed dialogs with titles, greyscale palette, inverted cursor bar, key hints, truncation, and bounded animations | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |
 | 2026-09-02 | Implemented the select filter with its `filter` request setting, term matching, and pinned user-provided options, and the bounded viewport with its overflow indicators and Home, End, and Page navigation | [0020-add-select-filter-and-viewport](../../changes/0020-add-select-filter-and-viewport.md) |
+| 2026-09-02 | Implemented the Norton Commander presentation: greyscale framed panels with their message set into the top edge, the inverted cursor bar, dimmed chrome and key hints, width-aware truncation, and the bounded caret blink, indicator pulse, and confirmation flash | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |

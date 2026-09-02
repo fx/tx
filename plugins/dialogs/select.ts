@@ -1,5 +1,16 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
-import { caretGlyph, type EntryComponent, editedText } from "./entry.ts";
+import {
+  animationInterval,
+  flashDuration,
+  flashInterval,
+  onPhase,
+} from "./animation.ts";
+import {
+  caretGlyph,
+  type EntryComponent,
+  editedText,
+  withCaret,
+} from "./entry.ts";
 import { visibleOptionIndices } from "./filter.ts";
 import {
   displayWidth,
@@ -154,8 +165,86 @@ export function createSelectView<T>(
     );
     const field = react.useRef(0);
     const [fieldIndex, setFieldIndex] = react.useState(-1);
+    /** The result a confirmed plain option is holding while the cursor bar
+     * flashes it. The ref is what the input handler reads, because a chunk
+     * carrying several keys is handled before any of them has re-rendered, and
+     * its presence is what makes every one of those keys too late. */
+    const confirmed = react.useRef<SelectResult<T> | undefined>(undefined);
+    const [flashing, setFlashing] = react.useState(false);
+
+    const collectingField = fieldIndex >= 0;
+    // Kept across frames rather than recomputed on each: the animation
+    // re-renders the view several times a second, and neither the matching nor
+    // the width scan below it can change without the filter text changing.
+    // Lowercasing every label on a timer is exactly the kind of cost the
+    // animations are not allowed to add.
+    const visible = react.useMemo(
+      () => visibleOptionIndices(options, filterText),
+      [filterText],
+    );
+    /** The widest visible label, in terminal columns.
+     *
+     * Kept as a running maximum rather than an array spread into `Math.max`:
+     * measuring every visible option makes the argument count the length of the
+     * list rather than the height of the window, and a spread that long throws
+     * `RangeError` on a list a select can plausibly be given — a branch,
+     * plugin, or version list. One pass over the same strings, no intermediate
+     * array, and only when the filter has changed what is visible. */
+    const widestLabel = react.useMemo(() => {
+      let widest = 0;
+      for (const index of visible) {
+        const { label } = options[index] as SelectOption<T>;
+        widest = Math.max(widest, displayWidth(label));
+      }
+      return widest;
+    }, [visible]);
+    // Derived while rendering, and remembered only so the next frame can move
+    // it as little as possible; the window is never state of its own. Deriving
+    // it against the state the frame is actually in is what lets the window
+    // give back rows to the field's panel the moment collection begins.
+    const viewport = optionWindow(
+      visible.length,
+      activeIndex,
+      windowStart.current,
+      rows,
+      collectingField,
+    );
+    // The remembered start, not the rendered one: a terminal too short to draw
+    // the window collapses it to nothing and renders from the top, and storing
+    // that would lose the place the user scrolled to the moment the terminal
+    // grew back.
+    windowStart.current = viewport.rememberedStart;
+    /** Visible options the window has no room for, whichever side of it they
+     * fall on: an indicator is on screen exactly while this is positive, and it
+     * is also the largest count either indicator can ever carry. */
+    const hidden = visible.length - viewport.count;
+
+    // The dialog's one animation subscription, driving the caret, the overflow
+    // pulse, and the confirmation flash together. It is active exactly while
+    // one of them is on screen, so a select with no caret, no hidden row, and
+    // no flash running runs no timer and writes nothing while it idles. A
+    // second subscription would keep its own start time, drift out of phase
+    // with this one, and wake the renderer's shared timer twice an interval.
+    const { time, reset } = ink.useAnimation({
+      interval: flashing ? flashInterval : animationInterval,
+      isActive: filtering || collectingField || flashing || hidden > 0,
+    });
+    /** The flash ends on elapsed time reaching its duration, never on a frame
+     * number: a tick landing inside the renderer's render throttle is dropped
+     * rather than delivered, so waiting for one particular frame would leave
+     * the dialog running with every key ignored. */
+    const flashOver = flashing && time >= flashDuration;
+    react.useEffect(() => {
+      const outcome = confirmed.current;
+      if (!flashOver || outcome === undefined) return;
+      settle({ type: "completed", value: outcome });
+    }, [flashOver, settle]);
 
     ink.useInput((value, key) => {
+      // The choice is made and the flash is running it out. Every key is too
+      // late to change it, Escape and Ctrl-C included: cancelling a choice
+      // already taken is exactly what the flash exists to rule out.
+      if (confirmed.current) return;
       if (key.escape || (key.ctrl && value === "c")) {
         cancel();
         return;
@@ -178,10 +267,23 @@ export function createSelectView<T>(
           collecting.current = { value: option.value, fields: option.fields };
           setFieldIndex(0);
         } else {
-          settle({
-            type: "completed",
-            value: { value: option.value, values: {} },
-          });
+          const outcome: SelectResult<T> = { value: option.value, values: {} };
+          // A terminal too short for one option row leaves no cursor bar to
+          // flash, and a flash nobody can see is only dead time with every key
+          // ignored. The outcome is still fixed by the key that chose it, so
+          // the settlement rule the flash exists to protect is unaffected.
+          if (viewport.count === 0) {
+            settle({ type: "completed", value: outcome });
+            return;
+          }
+          // Recorded before the flash rather than after it, so the outcome is
+          // fixed by the key that chose it and no later key can reach it. The
+          // reset is explicit rather than left to the interval change, so the
+          // flash starts from its first phase however the renderer decides to
+          // treat a subscription whose interval moved.
+          confirmed.current = outcome;
+          reset();
+          setFlashing(true);
         }
         return;
       }
@@ -194,6 +296,10 @@ export function createSelectView<T>(
         if (edited === entered.current) return;
         entered.current = edited;
         setFilterText(edited);
+        // The caret goes back to its visible phase on the frame the typed
+        // character lands in, so no keystroke is ever answered by a row that
+        // looks like it lost its caret.
+        reset();
         // The point of typing is to narrow to the thing you want and press
         // Enter, so the first match becomes the target rather than whatever
         // row happened to be active before.
@@ -226,31 +332,30 @@ export function createSelectView<T>(
       }
     };
 
-    const collectingField = fieldIndex >= 0;
-    const visible = visibleOptionIndices(options, filterText);
-    // Derived while rendering, and remembered only so the next frame can move
-    // it as little as possible; the window is never state of its own. Deriving
-    // it against the state the frame is actually in is what lets the window
-    // give back rows to the field's panel the moment collection begins.
-    const viewport = optionWindow(
-      visible.length,
-      activeIndex,
-      windowStart.current,
-      rows,
-      collectingField,
-    );
-    // The remembered start, not the rendered one: a terminal too short to draw
-    // the window collapses it to nothing and renders from the top, and storing
-    // that would lose the place the user scrolled to the moment the terminal
-    // grew back.
-    windowStart.current = viewport.rememberedStart;
+    /** The phase the caret and the overflow indicator show themselves on: the
+     * caret visible, the indicator dimmed. A flash restarts elapsed time and
+     * never runs a caret interval long, so both simply hold this phase for the
+     * whole of it and the bar is the only thing moving while a choice is
+     * confirmed. */
+    const showPhase = onPhase(time, animationInterval);
+    /** The filter stops accepting input the moment a field is collected, so its
+     * row stops carrying a caret then. A caret blinking on a row whose
+     * keystrokes are declined advertises an editable row that is not one — the
+     * more so because typing into the field resets the shared phase, which
+     * would blink the dead caret in lockstep with the live one. The cell stays
+     * blank rather than disappearing, so the panel keeps its width. */
+    const filterCaret = showPhase && !collectingField;
+    /** The bar blinks off on the flash's off phases and is restored on the
+     * frame the flash settles on, so the last thing left on screen is the
+     * option that was taken rather than the gap where it was. */
+    const barInverted = !flashing || flashOver || onPhase(time, flashInterval);
 
     const panelRows: PanelRow[] = [];
     if (filtering) {
       panelRows.push({
         key: "filter",
         prefix: `${filterPrompt} `,
-        text: `${filterText}${caretGlyph}`,
+        text: withCaret(filterText, filterCaret),
         tail: true,
       });
     }
@@ -261,7 +366,10 @@ export function createSelectView<T>(
         panelRows.push({
           key: "hidden-above",
           text: `${hiddenAboveGlyph} ${viewport.hiddenAbove} more`,
-          dim: true,
+          // Pulsed between dimmed and normal on the caret's own phase, so an
+          // indicator says "there is more" without a second timer and without
+          // ever being on screen when nothing is hidden.
+          dim: showPhase,
         });
       }
       const windowed = visible.slice(
@@ -274,41 +382,34 @@ export function createSelectView<T>(
         panelRows.push({
           key: `option-${index}`,
           text: option.label,
-          inverse: position === activeIndex,
+          inverse: position === activeIndex && barInverted,
         });
       }
       if (viewport.hiddenBelow > 0) {
         panelRows.push({
           key: "hidden-below",
           text: `${hiddenBelowGlyph} ${viewport.hiddenBelow} more`,
-          dim: true,
+          dim: showPhase,
         });
       }
     }
 
-    // Measured over every visible option and over an indicator carrying the
-    // largest count it can ever carry — not over the rows this frame happens to
-    // draw — so scrolling the window does not resize the panel under the cursor
-    // bar. Whatever the window's position, one side or the other hides exactly
-    // the options the window has no room for, so that total is the widest
-    // either indicator ever gets.
-    //
-    // Kept as a running maximum rather than an array spread into `Math.max`.
-    // Measuring every visible option makes the argument count the length of the
-    // list rather than the height of the window, and a spread that long throws
-    // `RangeError` on a list a select can plausibly be given — a branch, plugin,
-    // or version list. One pass over the same strings, no intermediate array.
-    let content = 0;
+    // The panel is measured over every visible option and over an indicator
+    // carrying the largest count it can ever carry — not over the rows this
+    // frame happens to draw — so scrolling the window does not resize the panel
+    // under the cursor bar. Whatever the window's position, one side or the
+    // other hides exactly the options the window has no room for, so that total
+    // is the widest either indicator ever gets.
+    let content = widestLabel;
     const measure = (text: string) => {
       content = Math.max(content, displayWidth(text));
     };
+    // Measured with the caret's own glyph whatever phase it is on, because the
+    // blank standing in for it is exactly as wide: the panel is sized once for
+    // both.
     if (filtering) measure(`${filterPrompt} ${filterText}${caretGlyph}`);
     if (visible.length === 0) measure(noMatch);
-    for (const index of visible) {
-      measure((options[index] as SelectOption<T>).label);
-    }
-    const hidable = visible.length - viewport.count;
-    if (hidable > 0) measure(`${hiddenAboveGlyph} ${hidable} more`);
+    if (hidden > 0) measure(`${hiddenAboveGlyph} ${hidden} more`);
     const width = panelWidth(message, content, columns);
     const inner = innerWidth(width);
     const children: DialogElement[] = panelRows.map((panelRow) =>
@@ -366,6 +467,8 @@ export function createSelectView<T>(
         key: `field-${fieldIndex}`,
         message: pending.message,
         initialValue: pending.initialValue,
+        caret: showPhase,
+        onEdit: reset,
         onSubmit: (value: string) => submitField(fieldIndex, value),
         onCancel: cancel,
       });

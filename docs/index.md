@@ -34,4 +34,4 @@
 | 0018 | [Add Config Store and Marketplace Installs](changes/0018-add-config-store-and-marketplace-installs.md) | [Config](specs/config/) | complete | 0016 |
 | 0019 | [Reduce Marketplace Clone Footprint](changes/0019-reduce-marketplace-clone-footprint.md) | [Plugin System](specs/plugin-system/) | complete | — |
 | 0020 | [Add Select Filter and Viewport](changes/0020-add-select-filter-and-viewport.md) | [Dialogs](specs/dialogs/) | complete | 0017 |
-| 0021 | [Restyle Dialogs as Norton Commander](changes/0021-restyle-dialogs-as-norton-commander.md) | [Dialogs](specs/dialogs/) | draft | 0020 |
+| 0021 | [Restyle Dialogs as Norton Commander](changes/0021-restyle-dialogs-as-norton-commander.md) | [Dialogs](specs/dialogs/) | complete | 0020 |

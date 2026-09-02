@@ -125,14 +125,11 @@ describe("select viewport height", () => {
    * including a roomy one where the old bug was most visible.
    */
   test("shows no option rows when nothing is visible", () => {
-    for (const rows of [
-      0,
-      1,
-      selectChromeHeight + 1,
-      selectChromeHeight + 2,
-      ROOMY,
-      500,
-    ]) {
+    // The two rows either side of the choosing chrome are literals rather
+    // than the constant plus an offset: a bound written in terms of the number
+    // under test moves with it, which is how a chrome three rows too large
+    // once passed a green suite.
+    for (const rows of [0, 1, 7, 8, ROOMY, 500]) {
       expect(optionRowCount(0, rows, false)).toBe(0);
     }
   });
@@ -228,7 +225,10 @@ describe("select option window", () => {
    * the frame to the terminal's own height in exactly the terminals that have
    * no rows to spare. */
   test("renders no rows and counts the whole list as hidden below", () => {
-    const boundary = selectChromeHeight + 1;
+    // A literal, for the same reason, and the more carefully because no
+    // absolute row count above it pins this one down: seven rows is one short
+    // of the eight a choosing select needs for its first option row.
+    const boundary = 7;
     expect(optionWindow(30, 0, 0, boundary, false)).toEqual({
       renderedStart: 0,
       count: 0,

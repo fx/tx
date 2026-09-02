@@ -5,7 +5,7 @@
 Give the bundled dialogs a Norton Commander look in greyscale: framed panels with the message set into the frame as a title, an inverted full-width cursor bar, dimmed chrome and key hints, width-aware truncation, and three bounded animations — a blinking caret, a pulsing overflow indicator, and a flash on confirmation — none of which may slow a keystroke. [Dialogs](../specs/dialogs/) owns the observable behavior.
 
 **Specs:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** [0020](./0020-add-select-filter-and-viewport.md)
 
 ## Motivation
@@ -60,7 +60,7 @@ A frame module under `plugins/dialogs/` renders one framed panel: a bordered box
 
 The panel's width is the widest of the title and its content, plus padding, capped at the terminal width from the renderer's window-size hook (which reads the injected output adapter's `columns` and re-renders on the forwarded `resize` event, both already in place). Labels and the title use end truncation with the renderer's ellipsis; the filter text and an entry value use start truncation so their tail and the caret stay visible.
 
-Animation is one subscription per dialog, not one per element: the dialog view calls the renderer's animation hook once, with the shared interval constant and `isActive` true exactly when a caret, an overflow indicator, or a flash is on screen, and passes the resulting frame down. Each hook call keeps its own start time, so two subscribers mounted at different moments drift out of phase and wake the shared timer twice per interval, each wake a full-frame rewrite; a single subscription keeps the caret and the indicator on one phase and halves the idle wakes. The caret shows on even frames and hides on odd; the indicator is dim on even frames and normal on odd; a select with neither, and no flash in progress, passes `isActive: false`, so no timer runs and nothing is written while it idles. The confirmation flash is a one-shot: Enter on a plain option records the outcome, resets the hook, and marks the flash active; the bar inverts on even frames and un-inverts on odd using a flash interval no shorter than the renderer's render throttle (about 34 ms, so 60 ms), input is ignored while the outcome is recorded, and the outcome settles as soon as the hook's elapsed time reaches the flash duration (180 ms), which keeps it under the 250 ms budget the spec sets even with a late tick. Unmount stops the shared timer, so the existing cleanup path needs no new step.
+Animation is one subscription per dialog, not one per element: the dialog view calls the renderer's animation hook once, with the shared interval constant and `isActive` true exactly when a caret, an overflow indicator, or a flash is on screen, and passes the resulting frame down. Each hook call keeps its own start time, so two subscribers mounted at different moments drift out of phase and wake the shared timer twice per interval, each wake a full-frame rewrite; a single subscription keeps the caret and the indicator on one phase and halves the idle wakes. Each element's phase is read from the hook's elapsed time and its own interval — shown while `floor(elapsed / interval)` is even, hidden while it is odd — rather than from the hook's frame counter, because the one subscription runs faster while a flash lasts and a frame counter would carry that faster rate to the caret and the indicator as a side effect. So the caret is visible on the even phase and hidden on the odd; the indicator is dim on the even phase and normal on the odd; and a select with neither, and no flash in progress, passes `isActive: false`, so no timer runs and nothing is written while it idles. The confirmation flash is a one-shot: Enter on a plain option records the outcome, resets the hook, and marks the flash active; the bar inverts on the flash's even phase and un-inverts on its odd, using a flash interval no shorter than the renderer's render throttle (about 34 ms, so 60 ms), input is ignored while the outcome is recorded, and the outcome settles as soon as the hook's elapsed time reaches the flash duration (120 ms), which keeps the settlement under the 250 ms budget the spec sets with room for the unmount and terminal restore behind it and for a tick coalesced inside the render throttle. Elapsed time restarts with the flash and never reaches one caret interval inside it, so the caret and the indicator simply hold their opening phase for its duration and neither needs a rule of its own saying so. A confirmation with no option row on screen has no bar to flash, so it settles at once rather than spending the duration ignoring input over an unchanged frame. Unmount stops the shared timer, so the existing cleanup path needs no new step.
 
 Tests strip escape sequences with the runtime's built-in stripper before matching text, so they assert on what the user reads, and identify the active option through a helper that returns the row wrapped in the inverse sequence. Dimming is asserted by the presence of its sequence around the expected text in the raw output, in the one test that exists to prove it, and nowhere else. Both depend on the preload that forces styling on.
 
@@ -114,13 +114,13 @@ Tests strip escape sequences with the runtime's built-in stripper before matchin
   - [x] Document the look in `docs/manual/plugins.md`
   - [x] Verify 100% coverage and `bun run check`
 
-- [ ] Animations
-  - [ ] Add the shared interval, flash interval, and flash-duration constants and the single per-dialog animation subscription, active only while a caret, an indicator, or a flash is on screen, with the caret blinking on its frame parity wherever text entry or the filter is on screen
-  - [ ] Pulse the overflow indicator between dim and normal on the same frame parity, only while rows are hidden
-  - [ ] Flash the cursor bar on a plain-option Enter, ignore every key including Escape and Ctrl-C during the flash, and settle on elapsed time within the 250 ms budget
-  - [ ] Add Bun tests for the caret toggling, a keystroke reflected in the next render during the hidden phase, the pulse present only with hidden rows, the flash settling within budget with Escape ignored, a static select writing nothing while idle, and no timer outliving unmount on completion, cancellation, and failure
-  - [ ] Document the animations and idle quiescence in `docs/manual/plugins.md`
-  - [ ] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
+- [x] Animations
+  - [x] Add the shared interval, flash interval, and flash-duration constants and the single per-dialog animation subscription, active only while a caret, an indicator, or a flash is on screen, with the caret blinking on its elapsed-time phase wherever text entry is on screen, and wherever the filter is and still answering keystrokes
+  - [x] Pulse the overflow indicator between dim and normal on the same phase, only while rows are hidden
+  - [x] Flash the cursor bar on a plain-option Enter, ignore every key including Escape and Ctrl-C during the flash, and settle on elapsed time within the 250 ms budget
+  - [x] Add Bun tests for the caret toggling, a keystroke reflected in the next render during the hidden phase, the pulse present only with hidden rows, the flash settling within budget with Escape ignored, a static select writing nothing while idle, and no timer outliving unmount on completion, cancellation, and failure
+  - [x] Document the animations and idle quiescence in `docs/manual/plugins.md`
+  - [x] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
 
 ## Open Questions
 

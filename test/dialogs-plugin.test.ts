@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import {
+  animationInterval,
+  flashDuration,
+  flashInterval,
+} from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
 import {
   collectingChromeHeight,
@@ -50,6 +55,8 @@ const BACKSPACE = String.fromCharCode(127);
 const CTRL_A = String.fromCharCode(1);
 const CTRL_C = String.fromCharCode(3);
 const CARRIAGE_RETURN = "\r";
+const UP = `${ESCAPE}[A`;
+const DOWN = `${ESCAPE}[B`;
 const NEXT_LINE = String.fromCharCode(0x85);
 const GRINNING_FACE = String.fromCodePoint(0x1f600);
 
@@ -243,12 +250,38 @@ function consumer(
   };
 }
 
-async function until(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+/**
+ * How long `until` waits by default: for a dialog to open, to put its first
+ * frame on screen, or to settle behind a flash.
+ *
+ * Deliberately generous, because none of those is an animation. A runner with
+ * twenty test files in flight can be slow to produce a first frame long after
+ * the dialogs themselves are correct, and this loop previously counted
+ * iterations rather than milliseconds, so it had no wall-clock bound at all.
+ * Bounding it tightly would trade a hang for a flake. It is still written in
+ * the constant the dialogs animate on rather than as a bare number, so it can
+ * never come to race the animation it is waiting behind.
+ */
+const DIALOG_BUDGET = animationInterval * 20;
+
+/** The budget a wait on the caret's or the indicator's own phase gets: two full
+ * phases plus the room to observe the second. Tight on purpose, unlike the
+ * default — a phase that never arrives is exactly the defect these tests exist
+ * to catch, so this one has to fail rather than keep waiting. */
+const PHASE_BUDGET = animationInterval * 3;
+
+async function until(
+  predicate: () => boolean,
+  budget = DIALOG_BUDGET,
+): Promise<void> {
+  const deadline = performance.now() + budget;
+  for (;;) {
     if (predicate()) return;
+    if (performance.now() >= deadline) {
+      throw new Error("timed out waiting for dialog state");
+    }
     await new Promise<void>((resolve) => setTimeout(resolve, 1));
   }
-  throw new Error("timed out waiting for dialog state");
 }
 
 /** The message every `runSelection` dialog carries, and so the row every one of
@@ -303,6 +336,11 @@ function frameRows(
   return rows;
 }
 
+/** The sequences the renderer wraps a dimmed run in, which is how a test tells
+ * chrome from content and a pulsing indicator from a resting one. */
+const DIM_OPEN = `${ESCAPE}[2m`;
+const DIM_CLOSE = `${ESCAPE}[22m`;
+
 /** The sequences the renderer wraps an inverted run in. The active option is
  * the only inverted element a dialog draws, so they are how a test tells which
  * row the cursor bar is on now that no marker character says so. */
@@ -334,6 +372,15 @@ function activeRow(stderr: CapturedOutput, anchor = SELECT_MESSAGE): string {
   return rows[0] as string;
 }
 
+/** Labels are numbered from `01`, so no label is a substring of another and
+ * an assertion that one row is absent means it. */
+function listed(count: number): readonly SelectOption<number>[] {
+  return Array.from({ length: count }, (_, index) => ({
+    label: `Option ${String(index + 1).padStart(2, "0")}`,
+    value: index + 1,
+  }));
+}
+
 /** A terminal double of a chosen height, for the dialogs whose behavior depends
  * on how many rows they have to work with. */
 function terminalOfRows(rows: number): CapturedOutput {
@@ -351,15 +398,16 @@ function terminalOfColumns(columns: number): CapturedOutput {
 }
 
 /** One step a running dialog takes: a chunk written to its input, or something
- * done to the terminal it renders on — a resize, or reading the frame that is
- * on screen while the dialog is still open. */
-type SelectionStep =
+ * done to the terminal it renders on — a resize, reading the frame that is on
+ * screen while the dialog is still open, or timing a keystroke the step writes
+ * itself, which is what an animation has to be measured against. */
+type DialogStep =
   | string
-  | ((stderr: CapturedOutput) => void | Promise<void>);
+  | ((stderr: CapturedOutput, stdin: TerminalInput) => void | Promise<void>);
 
 async function runSelection<T>(
   options: readonly SelectOption<T>[],
-  input: string | readonly SelectionStep[],
+  input: string | readonly DialogStep[],
   filter?: boolean | "auto",
   stderr: CapturedOutput = new CapturedOutput(),
   message: string = SELECT_MESSAGE,
@@ -392,7 +440,7 @@ async function runSelection<T>(
   await until(() => stdin.rawModes.includes(true));
   for (const step of typeof input === "string" ? [input] : input) {
     if (typeof step === "string") stdin.write(step);
-    else await step(stderr);
+    else await step(stderr, stdin);
     await new Promise<void>((resolve) => setTimeout(resolve, 1));
   }
   const exitCode = await running;
@@ -408,7 +456,7 @@ async function runSelection<T>(
 
 async function runEntry(
   request: InputRequest,
-  input: readonly string[],
+  input: readonly DialogStep[],
   stdin = new TerminalInput(),
   stderr = new CapturedOutput(),
 ): Promise<{
@@ -439,8 +487,9 @@ async function runEntry(
   );
   if (input.length > 0) {
     await until(() => stdin.rawModes.includes(true));
-    for (const chunk of input) {
-      stdin.write(chunk);
+    for (const step of input) {
+      if (typeof step === "string") stdin.write(step);
+      else await step(stderr, stdin);
       await new Promise<void>((resolve) => setTimeout(resolve, 1));
     }
   }
@@ -1268,9 +1317,6 @@ describe("bundled dialogs provider", () => {
 });
 
 describe("select filter", () => {
-  const DOWN = `${ESCAPE}[B`;
-  const UP = `${ESCAPE}[A`;
-
   function named(
     ...labels: readonly string[]
   ): readonly SelectOption<string>[] {
@@ -1498,21 +1544,10 @@ describe("select filter", () => {
 });
 
 describe("select viewport and extended navigation", () => {
-  const UP = `${ESCAPE}[A`;
-  const DOWN = `${ESCAPE}[B`;
   const HOME = `${ESCAPE}[H`;
   const END = `${ESCAPE}[F`;
   const PAGE_UP = `${ESCAPE}[5~`;
   const PAGE_DOWN = `${ESCAPE}[6~`;
-
-  /** Labels are numbered from `01`, so no label is a substring of another and
-   * an assertion that one row is absent means it. */
-  function listed(count: number): readonly SelectOption<number>[] {
-    return Array.from({ length: count }, (_, index) => ({
-      label: `Option ${String(index + 1).padStart(2, "0")}`,
-      value: index + 1,
-    }));
-  }
 
   /** Thirty options of which the fifteen odd positions carry `Alpha`, so a
    * filter leaves a list still longer than the window. */
@@ -1616,7 +1651,10 @@ describe("select viewport and extended navigation", () => {
         CARRIAGE_RETURN,
       ],
       undefined,
-      terminalOfRows(selectChromeHeight + 1),
+      // Pinned as a literal rather than as the chrome constant plus one: a
+      // bound written in terms of the number under test moves with it, and a
+      // constant that grew would keep passing here instead of failing.
+      terminalOfRows(7),
     );
 
     expect(result.value).toBe(2);
@@ -1627,7 +1665,7 @@ describe("select viewport and extended navigation", () => {
       "╚════════════╝",
       " ↑↓ move · Enter select · type to filter · Esc cancel",
     ]);
-    expect(open.length).toBeLessThan(selectChromeHeight + 1);
+    expect(open.length).toBeLessThan(7);
   });
 
   test("re-derives the window after the terminal is resized", async () => {
@@ -1783,7 +1821,9 @@ describe("select viewport and extended navigation", () => {
       listed(30),
       [PAGE_DOWN, CARRIAGE_RETURN],
       undefined,
-      terminalOfRows(selectChromeHeight + 6),
+      // A literal for the same reason: twelve rows is six option rows, and a
+      // chrome constant that grew must fail this page rather than shrink it.
+      terminalOfRows(12),
     );
 
     expect(result.value).toBe(6);
@@ -1821,9 +1861,12 @@ describe("select viewport and extended navigation", () => {
     // Every chrome row the collecting constant counts, on screen at once: the
     // panel and its filter, one indicator, the field's own panel, and the
     // hints. The window gave a row back to make room for that second panel.
+    // The filter keeps its row and its prompt but not its caret: it stops
+    // answering keystrokes the moment a field is collected, and only the row
+    // being typed into carries one.
     expect(collecting).toEqual([
       "╔═ Pick one ═╗",
-      "║ › █        ║",
+      "║ ›          ║",
       "║ ▲ 29 more  ║",
       "║ Other…     ║",
       "╚════════════╝",
@@ -1832,7 +1875,7 @@ describe("select viewport and extended navigation", () => {
       "└───────────────┘",
       " Enter submit · Esc cancel",
     ]);
-    expect(collecting).toHaveLength(collectingChromeHeight);
+    expect(collecting).toHaveLength(9);
     expect(collecting.length).toBeLessThan(SHORT_COLLECTING_TERMINAL);
   });
 
@@ -1933,7 +1976,7 @@ describe("select viewport and extended navigation", () => {
     // drawn rather than two and the frame stays under the terminal.
     expect(collecting).toEqual([
       "╔═ Pick one ═╗",
-      "║ › █        ║",
+      "║ ›          ║",
       "║ ▼ 31 more  ║",
       "╚════════════╝",
       "┌─ Branch ─┐",
@@ -2664,16 +2707,11 @@ describe("user-provided select options", () => {
 });
 
 describe("Norton Commander presentation", () => {
-  const DOWN = `${ESCAPE}[B`;
-
   /** The SGR codes a dialog is allowed to emit: dim on and off, inverse on and
    * off. Any other one would be a hue, which the palette does not have. */
   const GREYSCALE_CODES = new Set(["2", "22", "7", "27"]);
 
   const SGR = new RegExp(`${ESCAPE}\\[([\\d;]*)m`, "g");
-
-  const DIM_OPEN = `${ESCAPE}[2m`;
-  const DIM_CLOSE = `${ESCAPE}[22m`;
 
   test("draws a select in a double frame titled with its message, hints beneath", async () => {
     const result = await runSelection(
@@ -2903,6 +2941,394 @@ describe("Norton Commander presentation", () => {
     for (const { failure, stderr } of [...rejected, redirected]) {
       expect(failure).toBeInstanceOf(Error);
       expect(stderr.text()).toBe("");
+    }
+  });
+});
+
+describe("dialog animations", () => {
+  const CARET = "█";
+
+  /** The 250 milliseconds the spec gives a confirmed select to settle in. It is
+   * the spec's own budget rather than the implementation's, so a flash that
+   * grew past what the spec allows fails here. */
+  const CONFIRM_BUDGET = 250;
+
+  /** The renderer's render throttle at its default of thirty frames a second.
+   * A flash interval under it would have its ticks coalesced rather than
+   * delivered, which is the difference between a blink and a stall. */
+  const RENDER_THROTTLE = Math.ceil(1000 / 30);
+
+  /** The row the filter is typed into, which is the row the caret sits on. */
+  function filterRow(stderr: CapturedOutput): string {
+    return frameRows(stderr)[1] ?? "";
+  }
+
+  /** The module the renderer schedules its one shared animation timer from.
+   * Timers are told apart by the frame that called `setTimeout`, so the
+   * renderer's separate render-throttle timer — scheduled from its debounce
+   * helper, fired once inside its throttle window, and none of this plugin's
+   * business — is never mistaken for an animation. */
+  const ANIMATION_SCHEDULER = "ink/build/components/App.js";
+
+  /**
+   * Every animation timer the renderer sets while a dialog runs, and which of
+   * them are still neither cleared nor fired.
+   *
+   * The dialogs own no timer of their own: the animation subscription is the
+   * renderer's, and the unmount the cleanup contract already performs is what
+   * stops it. That is exactly what makes it worth asserting — a subscription
+   * the unmount missed leaves a timer waking on its own behind a dialog that
+   * has already settled.
+   */
+  function trackTimers(): {
+    readonly live: () => number;
+    readonly seen: () => number;
+    readonly restore: () => void;
+  } {
+    type TimerId = ReturnType<typeof setTimeout>;
+    const live = new Set<TimerId>();
+    let seen = 0;
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = ((
+      handler: (...args: unknown[]) => void,
+      timeout?: number,
+      ...args: unknown[]
+    ) => {
+      // Frame zero is the error's own message and frame one is this wrapper,
+      // so the caller is the frame after them.
+      const caller = (new Error().stack ?? "").split("\n")[2] ?? "";
+      const scheduled = caller.includes(ANIMATION_SCHEDULER);
+      const id: TimerId = realSetTimeout(() => {
+        live.delete(id);
+        handler(...args);
+      }, timeout);
+      if (scheduled) {
+        seen++;
+        live.add(id);
+      }
+      return id;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((id?: TimerId) => {
+      if (id !== undefined) live.delete(id);
+      realClearTimeout(id);
+    }) as typeof clearTimeout;
+    return {
+      live: () => live.size,
+      seen: () => seen,
+      restore: () => {
+        globalThis.setTimeout = realSetTimeout;
+        globalThis.clearTimeout = realClearTimeout;
+      },
+    };
+  }
+
+  test("keeps every animation inside the bounds the spec sets", () => {
+    // The caret's blink, between 400 and 600 milliseconds.
+    expect(animationInterval).toBeGreaterThanOrEqual(400);
+    expect(animationInterval).toBeLessThanOrEqual(600);
+    // The flash: long enough per phase that the renderer delivers its ticks
+    // rather than coalescing them, and short enough overall to settle inside
+    // the budget even when the last tick arrives late.
+    expect(flashInterval).toBeGreaterThanOrEqual(RENDER_THROTTLE);
+    expect(flashDuration).toBeGreaterThan(flashInterval);
+    expect(flashDuration).toBeLessThan(CONFIRM_BUDGET);
+  });
+
+  test("blinks the caret on and off while a select waits for input", async () => {
+    const phases: string[] = [];
+    const result = await runSelection(
+      [
+        { label: "Alpha", value: "alpha" },
+        { label: "Beta", value: "beta" },
+      ],
+      [
+        async (stderr) => {
+          // Ink batches its writes, so the first frame is not on screen the
+          // instant raw mode is on.
+          await until(() => stderr.text().includes("Alpha"));
+          // The dialog opens with its caret on screen rather than a blink away
+          // from it.
+          await until(() => filterRow(stderr).includes(CARET), PHASE_BUDGET);
+          phases.push("shown");
+          await until(() => !filterRow(stderr).includes(CARET), PHASE_BUDGET);
+          phases.push("hidden");
+          await until(() => filterRow(stderr).includes(CARET), PHASE_BUDGET);
+          phases.push("shown");
+          // The row keeps the caret's cell either way, so the panel does not
+          // resize on the blink's own timer.
+          expect(filterRow(stderr)).toHaveLength(
+            (frameRows(stderr)[0] as string).length,
+          );
+        },
+        CARRIAGE_RETURN,
+      ],
+      true,
+    );
+
+    expect(phases).toEqual(["shown", "hidden", "shown"]);
+    expect(result.value).toBe("alpha");
+  });
+
+  test("shows a keystroke and its caret on the render after it, mid-blink", async () => {
+    let typed = "";
+    const result = await runEntry({ message: "Branch" }, [
+      async (stderr, stdin) => {
+        await until(() => stderr.text().includes("Branch"));
+        // Wait out the visible phase, so the keystroke lands while the caret
+        // is hidden — the phase the spec's scenario names.
+        await until(
+          () => !stripped(lastFrame(stderr, "Branch")).includes(CARET),
+          PHASE_BUDGET,
+        );
+        stdin.write("x");
+        await until(() => stripped(lastFrame(stderr, "Branch")).includes("x"));
+        typed = frameRows(stderr, "Branch")[1] as string;
+      },
+      CARRIAGE_RETURN,
+    ]);
+
+    // The very next render carries the typed character with the caret after
+    // it: a keystroke is never answered by a row that looks like it lost one.
+    expect(typed).toContain(`x${CARET}`);
+    expect(result.value).toBe("x");
+  });
+
+  test("pulses the overflow indicator only while rows are hidden", async () => {
+    const phases: string[] = [];
+    const overflowing = await runSelection(
+      listed(30),
+      [
+        async (stderr) => {
+          await until(() => stderr.text().includes("▼ 20 more"));
+          const indicator = () => lastFrame(stderr);
+          await until(
+            () => indicator().includes(`${DIM_OPEN}▼ 20 more${DIM_CLOSE}`),
+            PHASE_BUDGET,
+          );
+          phases.push("dim");
+          await until(
+            () =>
+              indicator().includes(" ▼ 20 more") &&
+              !indicator().includes(`${DIM_OPEN}▼ 20 more`),
+            PHASE_BUDGET,
+          );
+          phases.push("normal");
+        },
+        CARRIAGE_RETURN,
+      ],
+      false,
+      terminalOfRows(40),
+    );
+
+    expect(phases).toEqual(["dim", "normal"]);
+    expect(overflowing.value).toBe(1);
+
+    // Nothing is hidden, so there is no indicator to pulse and no phase of the
+    // dialog it could appear in.
+    const whole = await runSelection(
+      listed(3),
+      [CARRIAGE_RETURN],
+      false,
+      terminalOfRows(40),
+    );
+    expect(whole.stderr.text()).not.toContain("▼");
+    expect(whole.stderr.text()).not.toContain("▲");
+  });
+
+  test("flashes the confirmed bar, ignores Escape, and settles inside the budget", async () => {
+    let elapsed = 0;
+    let barsWhileFlashing: readonly string[] = [];
+    const result = await runSelection(
+      [
+        { label: "Alpha", value: "alpha" },
+        { label: "Beta", value: "beta" },
+        { label: "Gamma", value: "gamma" },
+      ],
+      [
+        DOWN,
+        async (stderr, stdin) => {
+          await until(() => stderr.text().includes("Gamma"));
+          await until(() => invertedRows(lastFrame(stderr))[0] === "Beta");
+          const confirmedAt = performance.now();
+          stdin.write(CARRIAGE_RETURN);
+          // The bar blinks off on the flash's odd frames, which is the flash.
+          await until(() => invertedRows(lastFrame(stderr)).length === 0);
+          barsWhileFlashing = invertedRows(lastFrame(stderr));
+          // "and then Escape 50 milliseconds later": still well inside the
+          // flash, and the choice is already made.
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+          stdin.write(ESCAPE);
+          await until(() => stdin.rawModes.includes(false));
+          elapsed = performance.now() - confirmedAt;
+        },
+      ],
+      false,
+    );
+
+    expect(barsWhileFlashing).toEqual([]);
+    // Escape changed nothing: the second option is still what settled.
+    expect(result.value).toBe("beta");
+    expect(result.values).toEqual({});
+    // The flash ran its course, and the dialog settled inside the budget on
+    // elapsed time rather than on a frame that may never be delivered.
+    expect(elapsed).toBeGreaterThanOrEqual(flashDuration);
+    expect(elapsed).toBeLessThan(CONFIRM_BUDGET);
+    // The bar is back on the option that was taken by the time the dialog
+    // leaves the screen.
+    expect(activeRow(result.stderr)).toBe("Beta");
+  });
+
+  test("stops the filter's caret once the row stops taking input", async () => {
+    let choosing = "";
+    let collecting: readonly string[] = [];
+    const result = await runSelection(
+      [
+        { label: "Known", value: "known" },
+        {
+          label: "Other…",
+          value: "other",
+          fields: [{ type: "text", name: "branch", message: "Branch name" }],
+        },
+      ],
+      [
+        DOWN,
+        async (stderr) => {
+          await until(() => stderr.text().includes("Other…"));
+          await until(() => filterRow(stderr).includes(CARET), PHASE_BUDGET);
+          choosing = filterRow(stderr);
+        },
+        CARRIAGE_RETURN,
+        "abc",
+        async (stderr) => {
+          await until(() => stderr.text().includes("abc"));
+          collecting = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      true,
+    );
+
+    expect(result.value).toBe("other");
+    expect(result.values).toEqual({ branch: "abc" });
+    // While the filter still answers keystrokes it carries a caret.
+    expect(choosing).toContain(CARET);
+    // Once a field is collected the filter declines every edit, so its row
+    // keeps its text and gives up its caret — one caret on screen, on the row
+    // that is actually being typed into. Typing into the field resets the
+    // shared phase, so a filter caret would otherwise blink in lockstep with
+    // the field's on a row whose keystrokes are dropped.
+    const filter = collecting[1] as string;
+    const field = collecting.at(-3) as string;
+    expect(filter).toContain("›");
+    expect(filter).not.toContain(CARET);
+    expect(field).toContain(`abc${CARET}`);
+    // The cell the caret gave up is still there, so the panel kept its width.
+    expect(filter).toHaveLength((collecting[0] as string).length);
+  });
+
+  test("settles at once when the terminal leaves no bar to flash", async () => {
+    let elapsed = 0;
+    const result = await runSelection(
+      listed(30),
+      [
+        async (stderr, stdin) => {
+          await until(() => stderr.text().includes("▼ 30 more"));
+          // No option row fits, so no cursor bar is drawn.
+          expect(invertedRows(lastFrame(stderr))).toEqual([]);
+          const confirmedAt = performance.now();
+          stdin.write(CARRIAGE_RETURN);
+          await until(() => stdin.rawModes.includes(false));
+          elapsed = performance.now() - confirmedAt;
+        },
+      ],
+      undefined,
+      // One row short of what a choosing select needs for its first option
+      // row, so the window collapses to nothing.
+      terminalOfRows(7),
+    );
+
+    expect(result.value).toBe(1);
+    // Flashing a bar that is not on screen would be dead time with every key
+    // ignored, so the outcome settles without waiting one out.
+    expect(elapsed).toBeLessThan(flashDuration);
+  });
+
+  test("writes nothing while a static select idles", async () => {
+    let idle = "";
+    let after = "";
+    const result = await runSelection(
+      [
+        { label: "Alpha", value: "alpha" },
+        { label: "Beta", value: "beta" },
+        { label: "Gamma", value: "gamma" },
+      ],
+      [
+        async (stderr) => {
+          await until(() => stderr.text().includes("Gamma"));
+          idle = stderr.text();
+          // Two full blink phases: a dialog with a caret or an indicator on
+          // screen would have rewritten its frame twice over by now.
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, animationInterval * 2),
+          );
+          after = stderr.text();
+        },
+        CARRIAGE_RETURN,
+      ],
+      false,
+      terminalOfRows(40),
+    );
+
+    expect(after).toBe(idle);
+    // Nothing on screen animates: no filter caret, and nothing hidden.
+    expect(stripped(idle)).not.toContain(CARET);
+    expect(result.value).toBe("alpha");
+  });
+
+  test("leaves no timer running once a dialog has unmounted", async () => {
+    const probe = trackTimers();
+    let seen = 0;
+    /** Every exit path is checked against the timers its own dialog set, not
+     * against the ones an earlier dialog set: a guard that only counted the
+     * running total would be satisfied by the first case for all three. */
+    const animated = () => {
+      expect(probe.seen()).toBeGreaterThan(seen);
+      seen = probe.seen();
+      return probe.live();
+    };
+    try {
+      // Completion, through the confirmation flash, so the flash's own timer
+      // has to be gone as well as the caret's.
+      const completed = await runSelection(
+        [
+          { label: "Alpha", value: "alpha" },
+          { label: "Beta", value: "beta" },
+        ],
+        [CARRIAGE_RETURN],
+        true,
+      );
+      expect(completed.value).toBe("alpha");
+      expect(animated()).toBe(0);
+
+      // Cancellation, from a select whose caret and indicator were both live.
+      const cancelled = await runSelection(listed(30), [ESCAPE], true);
+      expect(cancelled.value).toBeUndefined();
+      expect(animated()).toBe(0);
+
+      // Failure: a terminal that cannot be restored rejects the dialog after
+      // it has rendered and animated.
+      const stdin = new TerminalInput();
+      stdin.failRawModeDisable = true;
+      const failed = await runEntry(
+        { message: "Teardown" },
+        ["x", CARRIAGE_RETURN],
+        stdin,
+      );
+      expect(failed.failure).toBeInstanceOf(Error);
+      expect(animated()).toBe(0);
+    } finally {
+      probe.restore();
     }
   });
 });
