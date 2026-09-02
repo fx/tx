@@ -1090,10 +1090,13 @@ describe("executable update delegation", () => {
   );
 
   test.each([
-    ["not json", "mise reports no installed version of github:fx/tx"],
+    [
+      "not json",
+      `mise reports no installed version of github:fx/tx; still ${runningVersion}`,
+    ],
     [
       JSON.stringify({ "github:fx/tx": [{ install_path: "/elsewhere" }] }),
-      "mise reports no installed version of github:fx/tx",
+      `mise reports no installed version of github:fx/tx; still ${runningVersion}`,
     ],
     [
       JSON.stringify({
