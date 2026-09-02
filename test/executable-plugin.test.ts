@@ -1028,6 +1028,39 @@ describe("executable update delegation", () => {
     expect(await readFile(target, "utf8")).toBe(installedBytes);
   });
 
+  test("reports the running version when mise names only newer ones", async () => {
+    // mise tolerates an entry naming no version, so the install that is
+    // running can be reported without one while a version pinned away is
+    // reported with one. Nothing appeared, and the only version reported is
+    // one the user is not running: naming it would be the very untruth this
+    // reports around.
+    const { store, target } = await miseInstallation("mise-unversioned");
+    const listing = JSON.stringify({
+      "github:fx/tx": [
+        { install_path: join(store, "github-fx-tx", runningVersion) },
+        {
+          version: publishedVersion,
+          install_path: join(store, "github-fx-tx", publishedVersion),
+        },
+      ],
+    });
+    const pinned = "mise github:fx/tx is pinned; nothing to upgrade";
+    const { run } = upgrading(listing, listing, {
+      exitCode: 0,
+      stdout: `${pinned}\n`,
+      stderr: "",
+    });
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: false,
+      detail: `"mise upgrade github:fx/tx": ${pinned}; still ${runningVersion}`,
+    });
+  });
+
   test.each([
     [["ref:main", runningVersion, publishedVersion]],
     [[publishedVersion, runningVersion, "ref:main"]],

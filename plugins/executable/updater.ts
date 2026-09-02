@@ -612,16 +612,19 @@ export class ExecutableUpdater implements UpdateParticipant {
     // the manager's own words are in the detail. What the user is still on is
     // the newest version reported that is not newer than the one running — a
     // newer one the manager reports is precisely the one this upgrade did not
-    // install — falling back to whatever it reported first when nothing it
-    // reports can be ordered.
-    const unmoved =
-      newestOrderable(
-        after.filter((version) => !isNewerRelease(version, this.#version)),
-      ) ?? after[0];
+    // install — falling back to whatever of those it reported first when none
+    // of them can be ordered, and to the running version when it reports only
+    // versions newer than that. Every candidate is drawn from the versions
+    // that survived the filter, never from the ones it excluded: naming an
+    // excluded version would tell the user they are on the very release this
+    // upgrade failed to install.
+    const remaining = after.filter(
+      (version) => !isNewerRelease(version, this.#version),
+    );
     const still =
-      unmoved === undefined
+      after.length === 0
         ? `${manager.name} reports no installed version of ${name}`
-        : `still ${unmoved}`;
+        : `still ${newestOrderable(remaining) ?? remaining[0] ?? this.#version}`;
     return { applied: false, detail: `${detail}; ${still}` };
   }
 
