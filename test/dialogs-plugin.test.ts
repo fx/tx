@@ -2454,6 +2454,25 @@ describe("Norton Commander presentation", () => {
     expect(filterRow).not.toContain("›");
   });
 
+  test("lays out for twenty columns in a terminal narrower than that", async () => {
+    const result = await runSelection(
+      [{ label: "N".repeat(30), value: "narrow" }],
+      [CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(10),
+    );
+
+    expect(result.value).toBe("narrow");
+    // Twenty columns is the narrowest supported terminal, so the frame is laid
+    // out for twenty rather than for the ten it was told about; how the
+    // terminal wraps the result is not the dialog's business.
+    for (const row of frameRows(result.stderr)) {
+      expect(row.length).toBeLessThanOrEqual(20);
+    }
+    expect(frameRows(result.stderr)[0]).toHaveLength(20);
+    expect(activeRow(result.stderr)).toHaveLength(16);
+  });
+
   test("follows the terminal width when it changes under the dialog", async () => {
     let wide = "";
     let narrow = "";
