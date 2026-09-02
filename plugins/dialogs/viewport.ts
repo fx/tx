@@ -4,21 +4,31 @@
 export const maximumOptionRows = 10;
 
 /**
- * Every row a select can draw that is not an option row: the request message,
- * the filter prompt, the two overflow indicators, and the message and value of
- * a field it may go on to collect.
+ * Every row a select can draw that is not an option row:
+ *
+ * 1. the panel's top edge, carrying the request message as its title;
+ * 2. the filter prompt row;
+ * 3. the `▲ N more` overflow indicator;
+ * 4. the `▼ N more` overflow indicator;
+ * 5. the panel's bottom edge;
+ * 6. the top edge of the panel of a field it may go on to collect, carrying
+ *    that field's message as its title;
+ * 7. that field's value row;
+ * 8. that field's bottom edge;
+ * 9. the key hint line under the lowest panel.
+ *
+ * A select that is not collecting a field spends rows 6 to 9 on its own hint
+ * line alone, so collection is the worst case and the only one this counts.
  *
  * It is one constant, and a fixed count of every such row rather than a count
- * of the rows a particular frame happens to draw, for three reasons. The window
+ * of the rows a particular frame happens to draw, for two reasons. The window
  * keeps its height as a filter narrows the list past an indicator, instead of
- * growing a row under the cursor bar. Choosing a user-provided option adds the
- * field's rows to a window already on screen, and a window sized without them
+ * growing a row under the cursor bar. And choosing a user-provided option adds
+ * the field's panel to a window already on screen, so a window sized without it
  * would push that frame to the terminal's full height, which is the one thing
- * the height exists to prevent. And the later restyling changes the number of
- * non-option rows a dialog draws — frame edges and a hint line — by editing
- * this one number rather than arithmetic spread through the view.
+ * the height exists to prevent.
  */
-export const selectChromeHeight = 6;
+export const selectChromeHeight = 9;
 
 /** The option rows a select renders, given what is visible and how tall the
  * terminal is. The `- 1` is load-bearing: Ink treats output as tall as the

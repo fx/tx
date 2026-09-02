@@ -9,6 +9,7 @@ import type {
 } from "@fx/tx/plugin";
 import { createEntry } from "./entry.ts";
 import { filterIsEnabled } from "./filter.ts";
+import { createFrame } from "./frame.ts";
 import { createSelectView } from "./select.ts";
 import type {
   Dialogs,
@@ -338,7 +339,8 @@ const definition: PluginDefinition = Object.freeze({
     return ({ context, dependencies, register }) => {
       const { react, ink } = dependencies;
       const session: DialogSession = { context, dependencies };
-      const Entry = createEntry(react, ink);
+      const Frame = createFrame(react, ink);
+      const Entry = createEntry(react, ink, Frame);
 
       const dialogs: Dialogs = {
         async input({ message, initialValue }: InputRequest) {
@@ -369,7 +371,7 @@ const definition: PluginDefinition = Object.freeze({
             createSelectView(
               react,
               ink,
-              Entry,
+              { Entry, Frame },
               { message, options, filtering },
               settle,
             ),

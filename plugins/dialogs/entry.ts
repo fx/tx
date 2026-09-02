@@ -1,4 +1,14 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
+import { type FrameComponent, panelWidth } from "./frame.ts";
+
+/** The caret drawn after text under entry, so the row the user is typing into
+ * says so. Shared with the select filter, which is the same editing step under
+ * a different prompt. */
+export const caretGlyph = "█";
+
+/** The key hint line under a standalone input and under a field: the two keys
+ * an entry answers to. */
+export const entryHint = "Enter submit · Esc cancel";
 
 /** A control sequence Ink did not resolve to a key, as it reaches a handler:
  * Ink strips the leading escape, leaving the introducer, any parameter and
@@ -66,6 +76,7 @@ type EntryProps = {
 export function createEntry(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
+  Frame: FrameComponent,
 ) {
   return function Entry({
     message,
@@ -73,6 +84,7 @@ export function createEntry(
     onSubmit,
     onCancel,
   }: EntryProps) {
+    const { columns } = ink.useWindowSize();
     const entered = react.useRef(initialValue ?? "");
     const [value, setValue] = react.useState(entered.current);
     ink.useInput((entry, key) => {
@@ -89,11 +101,18 @@ export function createEntry(
       }
     });
 
+    // The caret rides with the value in one text, so start truncation keeps
+    // the tail of a long value and the caret itself in view together.
+    const entry = `${value}${caretGlyph}`;
+    const width = panelWidth(message, entry.length, columns);
     return react.createElement(
-      ink.Box,
-      { flexDirection: "column" },
-      react.createElement(ink.Text, null, message),
-      react.createElement(ink.Text, null, value),
+      Frame,
+      { title: message, double: false, width, hint: entryHint },
+      react.createElement(
+        ink.Text,
+        { key: "value", wrap: "truncate-start" },
+        entry,
+      ),
     );
   };
 }

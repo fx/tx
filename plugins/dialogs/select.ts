@@ -1,6 +1,7 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
-import { type EntryComponent, editedText } from "./entry.ts";
+import { caretGlyph, type EntryComponent, editedText } from "./entry.ts";
 import { visibleOptionIndices } from "./filter.ts";
+import { type FrameComponent, innerWidth, panelWidth } from "./frame.ts";
 import type {
   DialogElement,
   DialogView,
@@ -11,8 +12,8 @@ import type {
 } from "./types.ts";
 import { optionRowCount, optionWindow } from "./viewport.ts";
 
-/** The prompt the filter row carries. Deliberately not the `>` an active option
- * carries, so the two rows stay distinguishable in output. */
+/** The prompt the filter row carries, so the row the user types into is
+ * distinguishable from the option rows under it. */
 const filterPrompt = "›";
 
 /** What the dialog shows when the filter text leaves nothing visible. */
@@ -22,6 +23,34 @@ const noMatch = "no match";
  * hides on its side. */
 const hiddenAboveGlyph = "▲";
 const hiddenBelowGlyph = "▼";
+
+/** The select's key hint line. The filter phrase is there exactly when the
+ * filter is, so the line never names a key the dialog would ignore. */
+function selectHint(filtering: boolean): string {
+  const keys = ["↑↓ move", "Enter select", "Esc cancel"];
+  if (filtering) keys.splice(2, 0, "type to filter");
+  return keys.join(" · ");
+}
+
+/** One rendered row of the panel, described before it is measured: the panel's
+ * width follows the widest of them, and only then can the cursor bar be padded
+ * to span the width that produced. */
+type PanelRow = {
+  readonly key: string;
+  readonly text: string;
+  /** A dimmed run drawn before the text. The filter needs one because its
+   * prompt is chrome while the text after it is what the user typed, and the
+   * two shadings have to meet inside one row for start truncation to trim the
+   * row as a whole. */
+  readonly prefix?: string;
+  /** Chrome rather than content, so it is dimmed relative to the labels. */
+  readonly dim?: boolean;
+  /** The active option, drawn as a bar across the panel's inner width. */
+  readonly inverse?: boolean;
+  /** Text whose tail matters more than its head — entered text — so a row too
+   * wide for the panel keeps its end and its caret rather than its start. */
+  readonly tail?: boolean;
+};
 
 /** The parts of Ink's key report a movement reads. */
 type NavigationKey = {
@@ -87,14 +116,14 @@ type SelectViewRequest<T> = {
 export function createSelectView<T>(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
-  Entry: EntryComponent,
+  { Entry, Frame }: { Entry: EntryComponent; Frame: FrameComponent },
   { message, options, filtering }: SelectViewRequest<T>,
   settle: (outcome: Outcome<SelectResult<T>>) => void,
 ): DialogView {
   const cancel = () => settle({ type: "cancelled" });
 
   return function Select() {
-    const { rows } = ink.useWindowSize();
+    const { columns, rows } = ink.useWindowSize();
     const active = react.useRef(0);
     const [activeIndex, setActiveIndex] = react.useState(0);
     /** Where the window sat on the previous frame. It is derived rather than
@@ -196,25 +225,25 @@ export function createSelectView<T>(
       rows,
     );
     windowStart.current = viewport.start;
-    /** Every row a select draws is one line of text, so naming the row keeps
-     * the frame's shape readable rather than buried in element construction. */
-    const row = (key: string, text: string) =>
-      react.createElement(ink.Text, { key }, text);
 
-    const children: DialogElement[] = [row("message", message)];
+    const panelRows: PanelRow[] = [];
     if (filtering) {
-      children.push(row("filter", `${filterPrompt} ${filterText}`));
+      panelRows.push({
+        key: "filter",
+        prefix: `${filterPrompt} `,
+        text: `${filterText}${caretGlyph}`,
+        tail: true,
+      });
     }
     if (visible.length === 0) {
-      children.push(row("no-match", noMatch));
+      panelRows.push({ key: "no-match", text: noMatch });
     } else {
       if (viewport.hiddenAbove > 0) {
-        children.push(
-          row(
-            "hidden-above",
-            `${hiddenAboveGlyph} ${viewport.hiddenAbove} more`,
-          ),
-        );
+        panelRows.push({
+          key: "hidden-above",
+          text: `${hiddenAboveGlyph} ${viewport.hiddenAbove} more`,
+          dim: true,
+        });
       }
       const windowed = visible.slice(
         viewport.start,
@@ -223,36 +252,82 @@ export function createSelectView<T>(
       for (const [offset, index] of windowed.entries()) {
         const option = options[index] as SelectOption<T>;
         const position = viewport.start + offset;
-        const marker = position === activeIndex ? ">" : " ";
-        children.push(row(`option-${index}`, `${marker} ${option.label}`));
+        panelRows.push({
+          key: `option-${index}`,
+          text: option.label,
+          inverse: position === activeIndex,
+        });
       }
       if (viewport.hiddenBelow > 0) {
-        children.push(
-          row(
-            "hidden-below",
-            `${hiddenBelowGlyph} ${viewport.hiddenBelow} more`,
-          ),
-        );
+        panelRows.push({
+          key: "hidden-below",
+          text: `${hiddenBelowGlyph} ${viewport.hiddenBelow} more`,
+          dim: true,
+        });
       }
     }
-    if (fieldIndex >= 0) {
-      const collection = collecting.current as Collection<T>;
-      const pending = collection.fields[fieldIndex] as TextField;
-      children.push(
-        react.createElement(Entry, {
-          key: `field-${fieldIndex}`,
-          message: pending.message,
-          initialValue: pending.initialValue,
-          onSubmit: (value: string) => submitField(fieldIndex, value),
-          onCancel: cancel,
-        }),
-      );
-    }
 
+    const widest = Math.max(
+      0,
+      ...panelRows.map(
+        ({ prefix, text }) => (prefix ?? "").length + text.length,
+      ),
+    );
+    const width = panelWidth(message, widest, columns);
+    const inner = innerWidth(width);
+    const children: DialogElement[] = panelRows.map((panelRow) =>
+      react.createElement(
+        ink.Text,
+        {
+          key: panelRow.key,
+          dimColor: panelRow.dim ?? false,
+          inverse: panelRow.inverse ?? false,
+          wrap: panelRow.tail ? "truncate-start" : "truncate-end",
+        },
+        panelRow.prefix === undefined
+          ? undefined
+          : react.createElement(
+              ink.Text,
+              { key: "prefix", dimColor: true },
+              panelRow.prefix,
+            ),
+        // The bar spans the panel rather than the label, so padding to the
+        // inner width is what makes it a bar at all; truncation then trims a
+        // label too long for the panel back to exactly that width.
+        panelRow.inverse ? panelRow.text.padEnd(inner) : panelRow.text,
+      ),
+    );
+
+    const collectingField = fieldIndex >= 0;
+    const panel = react.createElement(
+      Frame,
+      {
+        key: "select",
+        title: message,
+        double: true,
+        width,
+        // While a field is collected the entry's own panel follows this one
+        // and carries the hints that apply; naming navigation and selection
+        // here would name keys the dialog has stopped answering.
+        hint: collectingField ? undefined : selectHint(filtering),
+      },
+      children,
+    );
+    if (!collectingField) return panel;
+
+    const collection = collecting.current as Collection<T>;
+    const pending = collection.fields[fieldIndex] as TextField;
     return react.createElement(
       ink.Box,
       { flexDirection: "column" },
-      ...children,
+      panel,
+      react.createElement(Entry, {
+        key: `field-${fieldIndex}`,
+        message: pending.message,
+        initialValue: pending.initialValue,
+        onSubmit: (value: string) => submitField(fieldIndex, value),
+        onCancel: cancel,
+      }),
     );
   };
 }

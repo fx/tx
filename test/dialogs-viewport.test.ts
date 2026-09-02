@@ -22,8 +22,15 @@ describe("select viewport height", () => {
     expect(optionRowCount(maximumOptionRows, ROOMY)).toBe(maximumOptionRows);
   });
 
+  /**
+   * Nine rows of chrome: the panel's two edges, the filter prompt, the two
+   * overflow indicators, the three edges and value row of the panel a collected
+   * field draws under it, and the key hint line. A select that collects nothing
+   * spends the field's four rows on its own hint line alone, so collection is
+   * the worst case and the only one the constant has to cover.
+   */
   test("keeps the whole dialog strictly shorter than the terminal", () => {
-    expect(selectChromeHeight).toBe(6);
+    expect(selectChromeHeight).toBe(9);
     for (const rows of [selectChromeHeight + 1, 1, 0]) {
       expect(optionRowCount(300, rows)).toBe(0);
     }
@@ -32,8 +39,8 @@ describe("select viewport height", () => {
       if (count === 0) continue;
       expect(count + selectChromeHeight).toBeLessThan(rows);
     }
-    expect(optionRowCount(30, 8)).toBe(1);
-    expect(optionRowCount(30, 12)).toBe(5);
+    expect(optionRowCount(30, 11)).toBe(1);
+    expect(optionRowCount(30, 15)).toBe(5);
   });
 
   /**
@@ -176,7 +183,7 @@ describe("select option window", () => {
   });
 
   test("re-derives itself against the terminal's current height", () => {
-    expect(optionWindow(30, 12, 3, 12)).toEqual({
+    expect(optionWindow(30, 12, 3, 15)).toEqual({
       start: 8,
       count: 5,
       hiddenAbove: 8,
