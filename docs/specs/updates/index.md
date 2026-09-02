@@ -187,12 +187,14 @@ The executable plugin contributes one participant covering the running `tx` bina
 - When the executable is installed by a version manager the participant recognizes, applying MUST delegate to that manager's own upgrade command rather than replacing the file. Replacing a file inside a manager's store leaves the manager recording a version that is not what is on disk, and its next install silently reverts the update.
 - The recognized managers MUST be exactly those the project documents as installation paths — mise and npm — and MUST be recognized from the executable's own resolved location. A location no recognized manager owns MUST be treated as unmanaged, which is the only honest reading of it: the participant cannot refuse on behalf of a manager it cannot name, and the replacement path below already reports an unwritable location rather than forcing one.
 - Delegation MUST ask the manager which tool owns that location rather than reconstructing the tool's name from the path, and MUST report the manager's command, its output, and its outcome. A recognized manager that cannot be interrogated MUST be reported as a failure; the participant MUST NOT then fall back to replacing a file inside that manager's store.
+- A delegated upgrade MUST run in an environment that does not defer the release the participant has already offered. Where a recognized manager withholds a published release until it reaches a minimum age, that policy MUST be overridden for this one delegated command, because `tx update` is an explicit request to update this one tool now and a policy the participant cannot see would otherwise let the command name an available version and then decline to install it. The override MUST apply to that single command and nothing else: it MUST NOT modify the user's configuration, and MUST NOT reach any other tool, any other invocation of the manager, or any other participant.
+- A delegated upgrade MUST be reported as applied only when the manager afterwards reports a newer version installed for the tool it upgraded. A manager that exits successfully without installing anything newer — because it withheld the release, because the user pinned the tool, or because what it publishes is not yet what was offered — MUST be reported as nothing applied, carrying the manager's output and the version still installed as detail. A manager whose installations cannot be read afterwards MUST be reported the same way: an upgrade whose effect was not observed MUST NOT be reported as success.
 - When no version manager owns the executable, applying MUST download the published executable for the running platform, verify it against the checksum published alongside it, and refuse on any mismatch.
 - A verified download MUST be checked by running it and requiring it to report the version that was published, before it replaces anything.
 - Replacement MUST be atomic and MUST leave the installed executable untouched on every failure: the downloaded executable is staged beside the target, made executable, verified, and then moved onto the target in one step. A partially written file MUST NOT be reachable under the installed name at any point.
 - Every temporary file the participant creates MUST be removed on every exit path, and a removal the filesystem refuses MUST NOT replace the failure that preceded it.
 - When the executable's location is not writable and no version manager owns it, applying MUST report that, naming the path. `tx` MUST NOT attempt to acquire privileges.
-- After a successful update, the participant MUST report the version now installed, observed rather than assumed. Where a delegated upgrade makes the new executable's location unknowable, the participant MUST report what the manager reported instead of naming a version it did not observe.
+- After a successful update, the participant MUST report the version now installed, observed rather than assumed. A version the participant did not observe MUST NOT be named, whether the update replaced the file itself or was delegated to a manager.
 
 #### Scenario: Direct replacement
 
@@ -205,6 +207,18 @@ The executable plugin contributes one participant covering the running `tx` bina
 - **GIVEN** `tx` was installed by a version manager and a newer release exists
 - **WHEN** the user runs `tx update`
 - **THEN** the manager's own upgrade command runs for the tool that owns that path, its output is reported, and no file inside the manager's store is replaced by `tx`
+
+#### Scenario: A young release is not withheld from the delegated upgrade
+
+- **GIVEN** `tx` was installed by a manager configured to withhold a release until it reaches a minimum age, and the release `tx update` offers is younger than that
+- **WHEN** the user runs `tx update`
+- **THEN** the delegated upgrade installs the offered release, the user's configuration is unchanged, and every other tool that manager installed keeps the policy
+
+#### Scenario: A delegated upgrade that changed nothing is not reported as applied
+
+- **GIVEN** `tx` was installed by a version manager whose upgrade command exits successfully while leaving the installed version where it was
+- **WHEN** the user runs `tx update`
+- **THEN** the item is reported as nothing applied, with the manager's output and the version still installed as detail, and no version is named that the participant did not observe
 
 #### Scenario: Checksum mismatch aborts
 
@@ -268,6 +282,7 @@ That is a statement about root definitions only. The host queues a plugin's chil
 - [Change 0013: Update Installed Marketplaces](../../changes/0013-update-installed-marketplaces.md)
 - [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
 - [Change 0015: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
+- [Change 0022: Exempt and Verify the tx Self-Update](../../changes/0022-exempt-and-verify-the-tx-self-update.md)
 - [Git fast-forward merges](https://git-scm.com/docs/git-merge#_fast_forward_merge)
 - [GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
 
@@ -279,3 +294,4 @@ That is a statement about root definitions only. The host queues a plugin's chil
 | 2026-08-07 | Specified marketplace updating: version labels, live references, non-interactive fetching, forward-only movement, blocked checkouts, and restoration | [0013-update-installed-marketplaces](../../changes/0013-update-installed-marketplaces.md) |
 | 2026-08-07 | Specified marketplace version pins: the source suffix, ref resolution, pin recording, pin-aware gathering, and the pin commands | [0014-pin-marketplace-versions](../../changes/0014-pin-marketplace-versions.md) |
 | 2026-08-07 | Specified executable self-update: release lookup, availability gating, manager delegation, download verification, and atomic replacement | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |
+| 2026-09-02 | Specified that a delegated upgrade runs without the manager's minimum-release-age deferral and counts as applied only against an observed newer installed version | [0022-exempt-and-verify-the-tx-self-update](../../changes/0022-exempt-and-verify-the-tx-self-update.md) |

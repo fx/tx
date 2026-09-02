@@ -188,3 +188,11 @@ changes:
     status: complete
     depends_on:
       - "0020"
+  - id: "0022"
+    name: exempt-and-verify-the-tx-self-update
+    path: changes/0022-exempt-and-verify-the-tx-self-update.md
+    description: Run the delegated tx upgrade without the manager's minimum-release-age deferral, and report it as applied only when the manager afterwards reports a newer version installed.
+    spec: updates
+    status: draft
+    depends_on:
+      - "0015"
