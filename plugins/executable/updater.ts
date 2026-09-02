@@ -14,9 +14,12 @@ export interface CommandResult {
   readonly stderr: string;
 }
 
-/** Every effect this participant has on the world outside itself. */
+/** Every effect this participant has on the world outside itself. The
+ * environment, when given, is the complete environment for that one child; an
+ * absent one leaves the child inheriting this process's. */
 export type RunCommand = (
   command: readonly string[],
+  env?: Readonly<Record<string, string | undefined>>,
 ) => Promise<CommandResult> | CommandResult;
 export type FetchResource = (
   url: string,
@@ -74,6 +77,9 @@ const versionPattern = new RegExp(
 interface Installation {
   readonly name: string;
   readonly path: string;
+  /** The version this listing reports for that installation, where it reports
+   * one: what an upgrade is afterwards observed against. */
+  readonly version?: string;
 }
 
 function errorMessage(error: unknown): string {
@@ -108,9 +114,16 @@ export function stagingPath(target: string): string {
  */
 export async function runCommand(
   command: readonly string[],
+  env?: Readonly<Record<string, string | undefined>>,
 ): Promise<CommandResult> {
   try {
-    const child = Bun.spawn([...command], { stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([...command], {
+      stdout: "pipe",
+      stderr: "pipe",
+      // Spread rather than passed as undefined, so a call that names no
+      // environment spawns exactly as it did before there was one.
+      ...(env === undefined ? {} : { env: { ...env } }),
+    });
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
@@ -185,6 +198,9 @@ interface Manager {
    * read at all. */
   read(stdout: string): readonly Installation[] | undefined;
   upgrade(name: string): readonly string[];
+  /** What this manager's upgrade command runs with, merged over the injected
+   * environment. It reaches that one child and nothing else. */
+  readonly upgradeEnvironment?: Readonly<Record<string, string>>;
 }
 
 /** mise reports one entry per installed version, keyed by tool name. */
@@ -195,8 +211,19 @@ function readMiseListing(stdout: string): readonly Installation[] | undefined {
   for (const [name, versions] of Object.entries(parsed)) {
     if (!Array.isArray(versions)) continue;
     for (const installed of versions as readonly unknown[]) {
-      const path = (installed as { install_path?: unknown }).install_path;
-      if (typeof path === "string") installations.push({ name, path });
+      const entry = installed as {
+        install_path?: unknown;
+        version?: unknown;
+      };
+      if (typeof entry.install_path !== "string") continue;
+      const version = entry.version;
+      installations.push({
+        name,
+        path: entry.install_path,
+        // An entry naming no version is still an installation, and is simply
+        // no evidence of what is installed now.
+        ...(typeof version === "string" ? { version } : {}),
+      });
     }
   }
   return installations;
@@ -214,11 +241,12 @@ function readNpmListing(stdout: string): readonly Installation[] {
     // prefix root npm heads its listing with — a path containing every global
     // package, which would otherwise claim ownership of all of them and name a
     // package (`lib`) nobody installed.
-    const version = label.lastIndexOf("@");
-    if (version <= 0 || version === label.length - 1) continue;
+    const at = label.lastIndexOf("@");
+    if (at <= 0 || at === label.length - 1) continue;
     installations.push({
-      name: label.slice(0, version),
+      name: label.slice(0, at),
       path: line.slice(0, separator),
+      version: label.slice(at + 1),
     });
   }
   return installations;
@@ -231,6 +259,14 @@ const managers: Readonly<Record<ManagerKind, Manager>> = Object.freeze({
     listing: ["mise", "ls", "--installed", "--json"],
     read: readMiseListing,
     upgrade: (name: string) => ["mise", "upgrade", name],
+    // mise defers a release until it reaches `minimum_release_age`, which
+    // defaults to 24h and which this participant cannot see: it reads the
+    // published release from GitHub, so without this the command would name a
+    // version and then decline to install it. `tx update` is an explicit
+    // request to update this one tool now, and the override reaches this one
+    // child — every other tool and every other mise invocation keeps the
+    // policy, and the user's configuration is not touched.
+    upgradeEnvironment: { MISE_MINIMUM_RELEASE_AGE: "0" },
   },
   npm: {
     name: "npm",
@@ -482,10 +518,20 @@ export class ExecutableUpdater implements UpdateParticipant {
   }
 
   /**
-   * Runs the manager's own upgrade for whatever it says owns this path. What
-   * the manager reported is what is reported back: a delegated upgrade may
-   * install elsewhere, and naming a version this participant did not observe
-   * would be a claim rather than an observation.
+   * Runs the manager's own upgrade for whatever it says owns this path, in an
+   * environment carrying whatever that manager's upgrade needs, and then asks
+   * the manager what it has installed.
+   *
+   * A zero exit says the command ran, not that anything moved: a manager that
+   * withheld the release, a tool the user pinned, and a registry that has not
+   * published the version yet all exit successfully having installed nothing.
+   * Only a version the manager afterwards reports as strictly newer than the
+   * running one is an update, and it is that observed version that is
+   * reported — naming any other would be a claim rather than an observation.
+   *
+   * The manager is asked rather than the file: the target is the install
+   * directory of the version that is running, so after a successful upgrade
+   * running it would report the old version or not exist at all.
    */
   async #delegate(
     kinds: readonly ManagerKind[],
@@ -494,14 +540,51 @@ export class ExecutableUpdater implements UpdateParticipant {
     const { manager, name } = await this.#owningManager(kinds, target);
     const command = manager.upgrade(name);
     const spelled = command.join(" ");
-    const result = await this.#run(command);
+    const result = await this.#run(command, {
+      ...this.#env,
+      ...manager.upgradeEnvironment,
+    });
     if (result.exitCode !== 0) {
       throw new Error(`"${spelled}" failed: ${oneLine(result)}`);
     }
-    return {
-      applied: true,
-      detail: `"${spelled}": ${oneLine(result)}`,
-    };
+    const detail = `"${spelled}": ${oneLine(result)}`;
+    const installed = await this.#installedVersion(manager, name);
+    if (installed !== undefined && isNewerRelease(installed, this.#version)) {
+      return { applied: true, version: installed, detail };
+    }
+    // An upgrade whose effect was not observed is not success. It is not a
+    // failure either: the command the user asked for ran and exited zero, and
+    // the manager's own words are in the detail.
+    const still =
+      installed === undefined
+        ? `${manager.name} reports no installed version of ${name}`
+        : `still ${installed}`;
+    return { applied: false, detail: `${detail}; ${still}` };
+  }
+
+  /**
+   * The newest version the manager now reports for the tool it upgraded, or
+   * undefined when its listing cannot be read or names none. Unreadable is not
+   * an error here: the upgrade already succeeded, and the caller reports an
+   * unobserved move as nothing applied rather than exiting non-zero over it.
+   */
+  async #installedVersion(
+    manager: Manager,
+    name: string,
+  ): Promise<string | undefined> {
+    const listing = await this.#run(manager.listing);
+    const installations = manager.read(listing.stdout) ?? [];
+    let newest: string | undefined;
+    for (const installation of installations) {
+      const version = installation.version;
+      if (installation.name !== name || version === undefined) continue;
+      // Unorderable versions keep the first reported, so a listing that names
+      // nothing this can order is evidence of movement in neither direction.
+      if (newest === undefined || isNewerRelease(version, newest)) {
+        newest = version;
+      }
+    }
+    return newest;
   }
 
   /**

@@ -140,9 +140,16 @@ function downloadRoutes(
 
 const silentResult: CommandResult = { exitCode: 0, stdout: "", stderr: "" };
 
+type ChildEnvironment =
+  | Readonly<Record<string, string | undefined>>
+  | undefined;
+
 interface StubbedRun {
   readonly run: RunCommand;
   readonly commands: string[][];
+  /** What each command was handed as its own environment, in order, so an
+   * override that stopped being passed cannot pass unnoticed. */
+  readonly environments: ChildEnvironment[];
 }
 
 function recorder(
@@ -151,13 +158,36 @@ function recorder(
   ) => CommandResult | Promise<CommandResult> = () => silentResult,
 ): StubbedRun {
   const commands: string[][] = [];
+  const environments: ChildEnvironment[] = [];
   return {
     commands,
-    run: (command) => {
+    environments,
+    run: (command, env) => {
       commands.push([...command]);
+      environments.push(env);
       return answer(command);
     },
   };
+}
+
+/**
+ * A manager that answers its listing with `before` until its upgrade has run
+ * and with `after` from then on, so the post-upgrade observation reads a
+ * listing of its own rather than the one the interrogation read.
+ */
+function upgrading(
+  before: string,
+  after: string,
+  upgrade: CommandResult,
+): StubbedRun {
+  let applied = false;
+  return recorder((command) => {
+    if (command[1] !== "ls") {
+      applied = true;
+      return upgrade;
+    }
+    return { exitCode: 0, stdout: applied ? after : before, stderr: "" };
+  });
 }
 
 /** A compiled `tx` on the one platform an executable is published for. */
@@ -444,19 +474,22 @@ describe("executable update delegation", () => {
         "tx",
       ),
     );
-    const listing = JSON.stringify({
-      bun: [{ version: "1.3.14", install_path: join(store, "bun", "1.3.14") }],
-      "github:fx/tx": [
-        {
-          version: "1.2.0",
-          install_path: join(store, "github-fx-tx", "1.2.0"),
-        },
-      ],
-    });
-    const { run, commands } = recorder((command) =>
-      command[1] === "ls"
-        ? { exitCode: 0, stdout: listing, stderr: "" }
-        : { exitCode: 0, stdout: "mise github:fx/tx@1.3.0\n", stderr: "" },
+    const miseListing = (...versions: readonly string[]) =>
+      JSON.stringify({
+        bun: [
+          { version: "1.3.14", install_path: join(store, "bun", "1.3.14") },
+        ],
+        "github:fx/tx": versions.map((version) => ({
+          version,
+          install_path: join(store, "github-fx-tx", version),
+        })),
+      });
+    const { run, commands } = upgrading(
+      miseListing(runningVersion),
+      // mise leaves the version that was running installed beside the one it
+      // just installed, so the newest of what it reports is the answer.
+      miseListing(runningVersion, publishedVersion),
+      { exitCode: 0, stdout: "mise github:fx/tx@1.3.0\n", stderr: "" },
     );
     const updater = new ExecutableUpdater(
       runningVersion,
@@ -465,11 +498,13 @@ describe("executable update delegation", () => {
 
     expect(await updater.apply(availableItem)).toEqual({
       applied: true,
+      version: publishedVersion,
       detail: '"mise upgrade github:fx/tx": mise github:fx/tx@1.3.0',
     });
     expect(commands).toEqual([
       ["mise", "ls", "--installed", "--json"],
       ["mise", "upgrade", "github:fx/tx"],
+      ["mise", "ls", "--installed", "--json"],
     ]);
     // No file inside the manager's store is replaced by tx.
     expect(await readFile(target, "utf8")).toBe(installedBytes);
@@ -482,17 +517,18 @@ describe("executable update delegation", () => {
       join("lib", "node_modules", "@fx", "tx", "dist", "tx"),
     );
     const library = join(root, "lib");
-    const listing = [
-      `${library}:lib@`,
-      `${join(library, "node_modules", "npm")}:npm@10.9.3`,
-      `${join(library, "node_modules", "@fx", "tx")}:@fx/tx@1.2.0`,
-      "not a listing line",
-      "",
-    ].join("\n");
-    const { run, commands } = recorder((command) =>
-      command[1] === "ls"
-        ? { exitCode: 0, stdout: listing, stderr: "" }
-        : { exitCode: 0, stdout: "", stderr: "added 1 package\n" },
+    const npmListing = (version: string) =>
+      [
+        `${library}:lib@`,
+        `${join(library, "node_modules", "npm")}:npm@10.9.3`,
+        `${join(library, "node_modules", "@fx", "tx")}:@fx/tx@${version}`,
+        "not a listing line",
+        "",
+      ].join("\n");
+    const { run, commands } = upgrading(
+      npmListing(runningVersion),
+      npmListing(publishedVersion),
+      { exitCode: 0, stdout: "", stderr: "added 1 package\n" },
     );
     const updater = new ExecutableUpdater(
       runningVersion,
@@ -501,11 +537,13 @@ describe("executable update delegation", () => {
 
     expect(await updater.apply(availableItem)).toEqual({
       applied: true,
+      version: publishedVersion,
       detail: '"npm install --global @fx/tx": added 1 package',
     });
     expect(commands).toEqual([
       ["npm", "ls", "--global", "--parseable", "--long"],
       ["npm", "install", "--global", "@fx/tx"],
+      ["npm", "ls", "--global", "--parseable", "--long"],
     ]);
     expect(await readFile(target, "utf8")).toBe(installedBytes);
   });
@@ -519,12 +557,20 @@ describe("executable update delegation", () => {
       root,
       join("lib", "node_modules", "@fx", "tx", "dist", "tx"),
     );
-    const listing = `${join(root, "lib", "node_modules", "@fx", "tx")}:@fx/tx@1.2.0\n`;
-    const { run, commands } = recorder((command) =>
-      command[1] === "ls"
-        ? { exitCode: 1, stdout: listing, stderr: "npm ERR! ELSPROBLEMS\n" }
-        : { exitCode: 0, stdout: "changed 1 package\n", stderr: "" },
-    );
+    const installed = join(root, "lib", "node_modules", "@fx", "tx");
+    let upgraded = false;
+    const { run, commands } = recorder((command) => {
+      if (command[1] !== "ls") {
+        upgraded = true;
+        return { exitCode: 0, stdout: "changed 1 package\n", stderr: "" };
+      }
+      const version = upgraded ? publishedVersion : runningVersion;
+      return {
+        exitCode: 1,
+        stdout: `${installed}:@fx/tx@${version}\n`,
+        stderr: "npm ERR! ELSPROBLEMS\n",
+      };
+    });
     const updater = new ExecutableUpdater(
       runningVersion,
       options({ run, executablePath: target }),
@@ -532,6 +578,7 @@ describe("executable update delegation", () => {
 
     expect(await updater.apply(availableItem)).toMatchObject({
       applied: true,
+      version: publishedVersion,
     });
     expect(commands[1]).toEqual(["npm", "install", "--global", "@fx/tx"]);
   });
@@ -557,14 +604,15 @@ describe("executable update delegation", () => {
       ),
     );
     const prefix = join(store, "node", "22.18.0", "lib");
-    const listing = [
-      `${prefix}:lib@`,
-      `${join(prefix, "node_modules", "@fx", "tx")}:@fx/tx@1.2.0`,
-    ].join("\n");
-    const { run, commands } = recorder((command) =>
-      command[1] === "ls"
-        ? { exitCode: 0, stdout: listing, stderr: "" }
-        : { exitCode: 0, stdout: "changed 1 package\n", stderr: "" },
+    const npmListing = (version: string) =>
+      [
+        `${prefix}:lib@`,
+        `${join(prefix, "node_modules", "@fx", "tx")}:@fx/tx@${version}`,
+      ].join("\n");
+    const { run, commands } = upgrading(
+      npmListing(runningVersion),
+      npmListing(publishedVersion),
+      { exitCode: 0, stdout: "changed 1 package\n", stderr: "" },
     );
     const updater = new ExecutableUpdater(
       runningVersion,
@@ -573,11 +621,13 @@ describe("executable update delegation", () => {
 
     expect(await updater.apply(availableItem)).toEqual({
       applied: true,
+      version: publishedVersion,
       detail: '"npm install --global @fx/tx": changed 1 package',
     });
     expect(commands).toEqual([
       ["npm", "ls", "--global", "--parseable", "--long"],
       ["npm", "install", "--global", "@fx/tx"],
+      ["npm", "ls", "--global", "--parseable", "--long"],
     ]);
   });
 
@@ -594,16 +644,12 @@ describe("executable update delegation", () => {
     );
     await symlink(store, join(root, "link"));
     const linked = join(root, "link", "installs", "github-fx-tx", "1.2.0");
-    const { run, commands } = recorder((command) =>
-      command[1] === "ls"
-        ? {
-            exitCode: 0,
-            stdout: JSON.stringify({
-              "github:fx/tx": [{ install_path: linked }],
-            }),
-            stderr: "",
-          }
-        : { exitCode: 0, stdout: "upgraded\n", stderr: "" },
+    const { run, commands } = upgrading(
+      JSON.stringify({ "github:fx/tx": [{ install_path: linked }] }),
+      JSON.stringify({
+        "github:fx/tx": [{ install_path: linked, version: publishedVersion }],
+      }),
+      { exitCode: 0, stdout: "upgraded\n", stderr: "" },
     );
     const updater = new ExecutableUpdater(
       runningVersion,
@@ -625,15 +671,15 @@ describe("executable update delegation", () => {
       root,
       join("lib", "node_modules", "@fx", "tx", "dist", "tx"),
     );
-    const listing = `${join(root, "lib", "node_modules", "@fx", "tx")}:@fx/tx@1.2.0\n`;
-    const { run } = recorder((command) =>
-      command[1] === "ls"
-        ? { exitCode: 0, stdout: listing, stderr: "" }
-        : {
-            exitCode: 0,
-            stdout: "changed 1 package\n",
-            stderr: "npm warn deprecated\n",
-          },
+    const installed = join(root, "lib", "node_modules", "@fx", "tx");
+    const { run } = upgrading(
+      `${installed}:@fx/tx@${runningVersion}\n`,
+      `${installed}:@fx/tx@${publishedVersion}\n`,
+      {
+        exitCode: 0,
+        stdout: "changed 1 package\n",
+        stderr: "npm warn deprecated\n",
+      },
     );
     const updater = new ExecutableUpdater(
       runningVersion,
@@ -642,6 +688,7 @@ describe("executable update delegation", () => {
 
     expect(await updater.apply(availableItem)).toEqual({
       applied: true,
+      version: publishedVersion,
       detail:
         '"npm install --global @fx/tx": changed 1 package; npm warn deprecated',
     });
@@ -706,19 +753,27 @@ describe("executable update delegation", () => {
         "tx",
       ),
     );
+    let upgraded = false;
     const { run, commands } = recorder((command) => {
       if (command[0] === "npm") {
         return { exitCode: 0, stdout: "/usr/lib:lib@\n", stderr: "" };
       }
-      return command[1] === "ls"
-        ? {
-            exitCode: 0,
-            stdout: JSON.stringify({
-              "npm:@fx/tx": [{ install_path: installed }],
-            }),
-            stderr: "",
-          }
-        : { exitCode: 0, stdout: "mise npm:@fx/tx@1.3.0\n", stderr: "" };
+      if (command[1] !== "ls") {
+        upgraded = true;
+        return { exitCode: 0, stdout: "mise npm:@fx/tx@1.3.0\n", stderr: "" };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          "npm:@fx/tx": [
+            {
+              install_path: installed,
+              version: upgraded ? publishedVersion : runningVersion,
+            },
+          ],
+        }),
+        stderr: "",
+      };
     });
     const updater = new ExecutableUpdater(
       runningVersion,
@@ -727,12 +782,14 @@ describe("executable update delegation", () => {
 
     expect(await updater.apply(availableItem)).toEqual({
       applied: true,
+      version: publishedVersion,
       detail: '"mise upgrade npm:@fx/tx": mise npm:@fx/tx@1.3.0',
     });
     expect(commands).toEqual([
       ["npm", "ls", "--global", "--parseable", "--long"],
       ["mise", "ls", "--installed", "--json"],
       ["mise", "upgrade", "npm:@fx/tx"],
+      ["mise", "ls", "--installed", "--json"],
     ]);
     expect(await readFile(target, "utf8")).toBe(installedBytes);
   });
@@ -835,6 +892,158 @@ describe("executable update delegation", () => {
     );
     expect(await readFile(target, "utf8")).toBe(installedBytes);
   });
+
+  test("runs the delegated mise upgrade without the minimum release age", async () => {
+    // mise withholds a release younger than `minimum_release_age`, which this
+    // participant cannot see: without the override the upgrade declines to
+    // install the very version the same command has just offered.
+    const root = await workspace("mise-release-age");
+    const store = join(root, "mise", "installs");
+    const target = await installedExecutable(
+      root,
+      join("mise", "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
+    );
+    const miseListing = (version: string) =>
+      JSON.stringify({
+        "github:fx/tx": [
+          { version, install_path: join(store, "github-fx-tx", version) },
+        ],
+      });
+    const { run, commands, environments } = upgrading(
+      miseListing(runningVersion),
+      miseListing(publishedVersion),
+      { exitCode: 0, stdout: "mise github:fx/tx@1.3.0\n", stderr: "" },
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target, env: { PATH: "/usr/bin" } }),
+    );
+
+    expect(await updater.apply(availableItem)).toMatchObject({
+      applied: true,
+      version: publishedVersion,
+    });
+    expect(commands[1]).toEqual(["mise", "upgrade", "github:fx/tx"]);
+    // Asserted rather than inferred from the command succeeding: an override
+    // that stopped being passed would reintroduce the defect silently. It
+    // reaches that one child, and the listings run as they always have.
+    expect(environments).toEqual([
+      undefined,
+      { PATH: "/usr/bin", MISE_MINIMUM_RELEASE_AGE: "0" },
+      undefined,
+    ]);
+  });
+
+  test("runs npm's own install with no override of its own", async () => {
+    // npm has no release-age policy, so its upgrade gets the environment it
+    // was given and nothing more.
+    const root = await workspace("npm-no-override");
+    const target = await installedExecutable(
+      root,
+      join("lib", "node_modules", "@fx", "tx", "dist", "tx"),
+    );
+    const installed = join(root, "lib", "node_modules", "@fx", "tx");
+    const { run, commands, environments } = upgrading(
+      `${installed}:@fx/tx@${runningVersion}\n`,
+      `${installed}:@fx/tx@${publishedVersion}\n`,
+      { exitCode: 0, stdout: "added 1 package\n", stderr: "" },
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target, env: { PATH: "/usr/bin" } }),
+    );
+
+    expect(await updater.apply(availableItem)).toMatchObject({
+      applied: true,
+      version: publishedVersion,
+    });
+    expect(commands[1]).toEqual(["npm", "install", "--global", "@fx/tx"]);
+    expect(environments).toEqual([undefined, { PATH: "/usr/bin" }, undefined]);
+  });
+
+  test("reports nothing applied when a successful upgrade installed nothing", async () => {
+    // The reported defect: mise warns that it ignored the release, exits zero,
+    // and leaves the executable at the version that was running.
+    const root = await workspace("mise-unmoved");
+    const store = join(root, "mise", "installs");
+    const target = await installedExecutable(
+      root,
+      join("mise", "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
+    );
+    const listing = JSON.stringify({
+      "github:fx/tx": [
+        {
+          version: runningVersion,
+          install_path: join(store, "github-fx-tx", runningVersion),
+        },
+      ],
+    });
+    const warning =
+      "mise WARN newer github:fx/tx release 1.3.0 ignored by minimum_release_age (24h)";
+    const { run } = upgrading(listing, listing, {
+      exitCode: 0,
+      stdout: "",
+      stderr: `${warning}\n`,
+    });
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    // Nothing applied rather than a failure, carrying the manager's own words
+    // and the version still installed, and naming no version it did not
+    // observe.
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: false,
+      detail: `"mise upgrade github:fx/tx": ${warning}; still ${runningVersion}`,
+    });
+    expect(await readFile(target, "utf8")).toBe(installedBytes);
+  });
+
+  test.each([
+    ["not json", "mise reports no installed version of github:fx/tx"],
+    [
+      JSON.stringify({ "github:fx/tx": [{ install_path: "/elsewhere" }] }),
+      "mise reports no installed version of github:fx/tx",
+    ],
+    [
+      JSON.stringify({
+        "github:fx/tx": [{ version: "dev", install_path: "/elsewhere" }],
+      }),
+      "still dev",
+    ],
+  ])(
+    "reports nothing applied when the upgrade cannot be observed (%#)",
+    async (after, expected) => {
+      const root = await workspace("mise-unobserved");
+      const store = join(root, "mise", "installs");
+      const target = await installedExecutable(
+        root,
+        join("mise", "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
+      );
+      const { run } = upgrading(
+        JSON.stringify({
+          "github:fx/tx": [
+            {
+              version: runningVersion,
+              install_path: join(store, "github-fx-tx", runningVersion),
+            },
+          ],
+        }),
+        after,
+        { exitCode: 0, stdout: "upgraded\n", stderr: "" },
+      );
+      const updater = new ExecutableUpdater(
+        runningVersion,
+        options({ run, executablePath: target }),
+      );
+
+      expect(await updater.apply(availableItem)).toEqual({
+        applied: false,
+        detail: `"mise upgrade github:fx/tx": upgraded; ${expected}`,
+      });
+    },
+  );
 });
 
 describe("executable replacement", () => {
@@ -1165,6 +1374,24 @@ describe("executable update effects", () => {
     const missing = await runCommand([join(root, "absent")]);
     expect(missing.exitCode).toBe(127);
     expect(missing.stderr).not.toBe("");
+  });
+
+  test("gives a child the environment it was handed", async () => {
+    // The seam an override rides on: what is passed is the whole environment
+    // of that one child, and a call naming none spawns as it always did.
+    const root = await workspace("run-env");
+    const script = join(root, "stub");
+    await writeFile(script, '#!/bin/sh\necho "$TX_TEST_MARKER"\n');
+    await chmod(script, 0o755);
+
+    expect(await runCommand([script], { TX_TEST_MARKER: "given" })).toEqual({
+      exitCode: 0,
+      stdout: "given\n",
+      stderr: "",
+    });
+    // The environment given is the whole of the child's: nothing this process
+    // holds leaks into a command that named one.
+    expect(await runCommand([script], {})).toMatchObject({ stdout: "\n" });
   });
 
   test("lets a refused removal stand rather than becoming the failure", async () => {
