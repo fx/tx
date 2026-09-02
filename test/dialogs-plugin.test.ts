@@ -37,6 +37,7 @@ type Dialogs = {
   select<T>(request: {
     readonly message: string;
     readonly options: readonly SelectOption<T>[];
+    readonly filter?: boolean | "auto";
   }): Promise<SelectResult<T> | undefined>;
 };
 
@@ -246,9 +247,24 @@ async function until(predicate: () => boolean): Promise<void> {
   throw new Error("timed out waiting for dialog state");
 }
 
+/** The message every `runSelection` dialog carries, and so the row every one of
+ * its frames opens with. */
+const SELECT_MESSAGE = "Pick one";
+
+/** Ink rewrites its whole output on every render, and every select frame opens
+ * with the request message, so the text from that message's last occurrence
+ * onward is the frame the dialog left on screen. */
+function lastFrame(stderr: CapturedOutput): string {
+  const output = stderr.text();
+  const start = output.lastIndexOf(SELECT_MESSAGE);
+  expect(start).toBeGreaterThanOrEqual(0);
+  return output.slice(start);
+}
+
 async function runSelection<T>(
   options: readonly SelectOption<T>[],
   input: string | readonly string[],
+  filter?: boolean | "auto",
 ): Promise<{
   readonly value: T | undefined;
   readonly values: Readonly<Record<string, string>> | undefined;
@@ -267,7 +283,11 @@ async function runSelection<T>(
     [
       dialogsPlugin,
       consumer(async (dialogs) => {
-        result = await dialogs.select({ message: "Pick one", options });
+        result = await dialogs.select({
+          message: SELECT_MESSAGE,
+          options,
+          ...(filter === undefined ? {} : { filter }),
+        });
       }),
     ],
     commandContext,
@@ -407,7 +427,7 @@ describe("bundled dialogs provider", () => {
     expect(result.values).toEqual({});
     expect(result.stdout).toBe("");
     const output = result.stderr.text();
-    expect(output).toContain("Pick one");
+    expect(output).toContain(SELECT_MESSAGE);
     expect(output).toContain("> Alpha");
     expect(output.indexOf("Alpha")).toBeLessThan(output.indexOf("Beta"));
     expect(output.indexOf("Beta")).toBeLessThan(output.indexOf("Gamma"));
@@ -1146,6 +1166,232 @@ describe("bundled dialogs provider", () => {
     expect(await running).toBe(0);
     expect(unmountCalls).toBe(2);
     expect((failure as Error).message).toBe("raw mode cleanup failed");
+  });
+});
+
+describe("select filter", () => {
+  const DOWN = `${ESCAPE}[B`;
+  const UP = `${ESCAPE}[A`;
+
+  function named(
+    ...labels: readonly string[]
+  ): readonly SelectOption<string>[] {
+    return labels.map((label) => ({ label, value: label.toLowerCase() }));
+  }
+
+  const eight = named(
+    "Alpha",
+    "Beta",
+    "Gamma",
+    "Alphabet",
+    "Delta",
+    "Epsilon",
+    "Zeta",
+    "Eta",
+  );
+  const nine = [...eight, { label: "Theta", value: "theta" }];
+
+  test("turns itself on above eight options and narrows to the terms typed", async () => {
+    const result = await runSelection(nine, ["alp", CARRIAGE_RETURN]);
+
+    expect(result.value).toBe("alpha");
+    expect(result.values).toEqual({});
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("› alp");
+    expect(frame).toContain("> Alpha");
+    expect(frame).toContain("  Alphabet");
+    expect(frame.indexOf("> Alpha")).toBeLessThan(frame.indexOf("Alphabet"));
+    expect(frame).not.toContain("Beta");
+    expect(frame).not.toContain("Gamma");
+  });
+
+  test("stays off at eight options, leaving typed text ignored", async () => {
+    const result = await runSelection(eight, ["alp", CARRIAGE_RETURN]);
+
+    expect(result.value).toBe("alpha");
+    const frame = lastFrame(result.stderr);
+    expect(frame).not.toContain("›");
+    expect(frame).toContain("> Alpha");
+    expect(frame).toContain("  Gamma");
+  });
+
+  test("honours an explicit setting whatever the option count", async () => {
+    const enabled = await runSelection(
+      named("Alpha", "Beta", "Gamma"),
+      ["bet", CARRIAGE_RETURN],
+      true,
+    );
+    expect(enabled.value).toBe("beta");
+    const enabledFrame = lastFrame(enabled.stderr);
+    expect(enabledFrame).toContain("› bet");
+    expect(enabledFrame).toContain("> Beta");
+    expect(enabledFrame).not.toContain("Alpha");
+
+    const disabled = await runSelection(nine, ["alp", CARRIAGE_RETURN], false);
+    expect(disabled.value).toBe("alpha");
+    const disabledFrame = lastFrame(disabled.stderr);
+    expect(disabledFrame).not.toContain("›");
+    expect(disabledFrame).toContain("  Gamma");
+  });
+
+  test("requires every term, in any order, against the label alone", async () => {
+    const branches: readonly SelectOption<string>[] = [
+      { label: "release branch", value: "release" },
+      { label: "branch archive", value: "archive" },
+      { label: "main", value: "main" },
+    ];
+    const result = await runSelection(
+      branches,
+      ["branch rel", CARRIAGE_RETURN],
+      true,
+    );
+
+    expect(result.value).toBe("release");
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("> release branch");
+    expect(frame).not.toContain("branch archive");
+    expect(frame).not.toContain("main");
+  });
+
+  test("widens again on Backspace and ignores one on empty text", async () => {
+    const narrowed = await runSelection(
+      named("Alpha", "Beta", "Gamma"),
+      ["gam", CARRIAGE_RETURN],
+      true,
+    );
+    expect(narrowed.value).toBe("gamma");
+    expect(lastFrame(narrowed.stderr)).not.toContain("Alpha");
+
+    const widened = await runSelection(
+      named("Alpha", "Beta", "Gamma"),
+      [BACKSPACE, "gam", BACKSPACE, BACKSPACE, BACKSPACE, CARRIAGE_RETURN],
+      true,
+    );
+    expect(widened.value).toBe("alpha");
+    const frame = lastFrame(widened.stderr);
+    expect(frame).toContain("> Alpha");
+    expect(frame).toContain("  Beta");
+    expect(frame).toContain("  Gamma");
+  });
+
+  test("keeps a user-provided option reachable when nothing else matches", async () => {
+    const result = await runSelection(
+      [
+        { label: "Alpha", value: "alpha" },
+        { label: "Beta", value: "beta" },
+        {
+          label: "Other…",
+          value: "other",
+          fields: [{ type: "text", name: "branch", message: "Branch name" }],
+        },
+      ],
+      ["zzz", CARRIAGE_RETURN, "release", CARRIAGE_RETURN],
+      true,
+    );
+
+    expect(result.value).toBe("other");
+    expect(result.values).toEqual({ branch: "release" });
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("› zzz");
+    expect(frame).toContain("> Other…");
+    expect(frame).not.toContain("Alpha");
+    expect(frame).not.toContain("Beta");
+  });
+
+  test("shows no match, refuses Enter and navigation, and stays cancellable", async () => {
+    const cancelled = await runSelection(
+      named("Alpha", "Beta", "Gamma"),
+      ["zzz", CARRIAGE_RETURN, ESCAPE],
+      true,
+    );
+    expect(cancelled.value).toBeUndefined();
+    const frame = lastFrame(cancelled.stderr);
+    expect(frame).toContain("› zzz");
+    expect(frame).toContain("no match");
+    expect(frame).not.toContain("Alpha");
+
+    const recovered = await runSelection(
+      named("Alpha", "Beta", "Gamma"),
+      [
+        "zzz",
+        DOWN,
+        UP,
+        CARRIAGE_RETURN,
+        BACKSPACE,
+        BACKSPACE,
+        BACKSPACE,
+        CARRIAGE_RETURN,
+      ],
+      true,
+    );
+    expect(recovered.value).toBe("alpha");
+    expect(lastFrame(recovered.stderr)).not.toContain("no match");
+  });
+
+  test("navigates the visible list and clamps at its last entry", async () => {
+    const result = await runSelection(
+      named("Alpha", "Beta", "Alpaca", "Gamma", "Alpine"),
+      ["alp", DOWN, DOWN, DOWN, CARRIAGE_RETURN],
+      true,
+    );
+
+    expect(result.value).toBe("alpine");
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("  Alpha");
+    expect(frame).toContain("  Alpaca");
+    expect(frame).toContain("> Alpine");
+    expect(frame).not.toContain("Beta");
+    expect(frame).not.toContain("Gamma");
+  });
+
+  test("makes the first visible option active whenever the text changes", async () => {
+    const result = await runSelection(
+      named("Alpha", "Beta", "Alpaca"),
+      [DOWN, DOWN, "alp", CARRIAGE_RETURN],
+      true,
+    );
+
+    expect(result.value).toBe("alpha");
+  });
+
+  test.each([
+    ["Escape", ESCAPE],
+    ["Ctrl-C", CTRL_C],
+  ])(
+    "cancels with %s while the filter text is not empty",
+    async (_l, chunk) => {
+      const result = await runSelection(
+        named("Alpha", "Beta", "Gamma"),
+        ["alp", chunk],
+        true,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.value).toBeUndefined();
+      expect(lastFrame(result.stderr)).toContain("› alp");
+    },
+  );
+
+  test("stops accepting filter edits once field collection begins", async () => {
+    const result = await runSelection(
+      [
+        { label: "Known", value: "known" },
+        {
+          label: "Custom",
+          value: "custom",
+          fields: [{ type: "text", name: "branch", message: "Branch name" }],
+        },
+      ],
+      ["cus", CARRIAGE_RETURN, "abcd", BACKSPACE, CARRIAGE_RETURN],
+      true,
+    );
+
+    expect(result.value).toBe("custom");
+    expect(result.values).toEqual({ branch: "abc" });
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("› cus");
+    expect(frame).not.toContain("cusabc");
+    expect(frame).not.toContain("Known");
   });
 });
 
