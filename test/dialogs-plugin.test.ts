@@ -1503,6 +1503,35 @@ describe("select viewport and extended navigation", () => {
     expect(frameRows(result.stderr).length).toBeLessThan(8);
   });
 
+  /** Seven rows is the height at which one option row would make the
+   * worst-case frame exactly as tall as the terminal, which is what Ink reads
+   * as full-screen and answers by clearing the terminal on unmount. The window
+   * gives up its last row there, and the dialog still navigates and settles on
+   * a choice it no longer draws. */
+  test("draws no option row in a terminal one row above the chrome", async () => {
+    let open: readonly string[] = [];
+    const result = await runSelection(
+      listed(30),
+      [
+        PAGE_DOWN,
+        DOWN,
+        async (stderr) => {
+          // Ink batches its writes, so the first frame is not on screen the
+          // instant the chunks before it are written.
+          await until(() => stderr.text().includes("▼ 30 more"));
+          open = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(7),
+    );
+
+    expect(result.value).toBe(2);
+    expect(open).toEqual([SELECT_MESSAGE, "›", "▼ 30 more"]);
+    expect(open.length).toBeLessThan(7);
+  });
+
   test("re-derives the window after the terminal is resized", async () => {
     const result = await runSelection(
       listed(30),

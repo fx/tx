@@ -24,16 +24,38 @@ describe("select viewport height", () => {
 
   test("keeps the whole dialog strictly shorter than the terminal", () => {
     expect(selectChromeHeight).toBe(6);
-    for (let rows = selectChromeHeight + 2; rows <= 20; rows++) {
-      expect(optionRowCount(300, rows) + selectChromeHeight).toBeLessThan(rows);
+    for (const rows of [selectChromeHeight + 1, 1, 0]) {
+      expect(optionRowCount(300, rows)).toBe(0);
+    }
+    for (let rows = selectChromeHeight + 1; rows <= 60; rows++) {
+      const count = optionRowCount(300, rows);
+      if (count === 0) continue;
+      expect(count + selectChromeHeight).toBeLessThan(rows);
     }
     expect(optionRowCount(30, 8)).toBe(1);
     expect(optionRowCount(30, 12)).toBe(5);
   });
 
-  test("keeps one row however short the terminal claims to be", () => {
-    for (const rows of [selectChromeHeight + 1, 1, 0]) {
-      expect(optionRowCount(30, rows)).toBe(1);
+  /**
+   * A terminal of exactly the chrome plus one row is where the two viewport
+   * rules meet: one option row there makes the worst-case frame exactly as tall
+   * as the terminal, which is the height at which Ink treats output as
+   * full-screen and clears the terminal when the dialog settles. The
+   * no-clearing guarantee wins, so the window renders nothing rather than
+   * wiping out what the user was reading.
+   */
+  test("drops its last row rather than fill a terminal it would clear", () => {
+    const boundary = selectChromeHeight + 1;
+    expect(optionRowCount(300, boundary)).toBe(0);
+    expect(optionRowCount(300, boundary + 1)).toBe(1);
+    expect(optionRowCount(300, boundary + 1) + selectChromeHeight).toBeLessThan(
+      boundary + 1,
+    );
+  });
+
+  test("keeps one row wherever the terminal can afford one", () => {
+    for (const rows of [selectChromeHeight + 2, selectChromeHeight + 3]) {
+      expect(optionRowCount(30, rows)).toBeGreaterThanOrEqual(1);
     }
     expect(optionRowCount(0, ROOMY)).toBe(1);
   });
@@ -87,6 +109,30 @@ describe("select option window", () => {
     expect(optionWindow(3, 0, 20, ROOMY)).toEqual({
       start: 0,
       count: 3,
+      hiddenAbove: 0,
+      hiddenBelow: 0,
+    });
+  });
+
+  test("renders no rows and counts the whole list as hidden below", () => {
+    const boundary = selectChromeHeight + 1;
+    expect(optionWindow(30, 0, 0, boundary)).toEqual({
+      start: 0,
+      count: 0,
+      hiddenAbove: 0,
+      hiddenBelow: 30,
+    });
+    // The active option is well past a window with no rows to bring it into,
+    // and the window stays where it was rather than chasing it.
+    expect(optionWindow(30, 29, 4, boundary)).toEqual({
+      start: 4,
+      count: 0,
+      hiddenAbove: 4,
+      hiddenBelow: 26,
+    });
+    expect(optionWindow(0, 0, 0, boundary)).toEqual({
+      start: 0,
+      count: 0,
       hiddenAbove: 0,
       hiddenBelow: 0,
     });
