@@ -8,7 +8,7 @@ export const caretGlyph = "█";
 
 /** The key hint line under a standalone input and under a field: the two keys
  * an entry answers to. */
-export const entryHint = "Enter submit · Esc cancel";
+const entryHint = "Enter submit · Esc cancel";
 
 /** A control sequence Ink did not resolve to a key, as it reaches a handler:
  * Ink strips the leading escape, leaving the introducer, any parameter and
@@ -107,7 +107,7 @@ export function createEntry(
     const width = panelWidth(message, entry.length, columns);
     return react.createElement(
       Frame,
-      { title: message, double: false, width, hint: entryHint },
+      { title: message, double: false, width, columns, hint: entryHint },
       react.createElement(
         ink.Text,
         { key: "value", wrap: "truncate-start" },

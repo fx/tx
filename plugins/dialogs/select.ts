@@ -24,12 +24,13 @@ const noMatch = "no match";
 const hiddenAboveGlyph = "▲";
 const hiddenBelowGlyph = "▼";
 
-/** The select's key hint line. The filter phrase is there exactly when the
- * filter is, so the line never names a key the dialog would ignore. */
+/** The select's key hint line, written out either way rather than assembled,
+ * so each reads as the spec fixes it. The filter phrase is there exactly when
+ * the filter is, so the line never names a key the dialog would ignore. */
 function selectHint(filtering: boolean): string {
-  const keys = ["↑↓ move", "Enter select", "Esc cancel"];
-  if (filtering) keys.splice(2, 0, "type to filter");
-  return keys.join(" · ");
+  return filtering
+    ? "↑↓ move · Enter select · type to filter · Esc cancel"
+    : "↑↓ move · Enter select · Esc cancel";
 }
 
 /** One rendered row of the panel, described before it is measured: the panel's
@@ -121,6 +122,9 @@ export function createSelectView<T>(
   settle: (outcome: Outcome<SelectResult<T>>) => void,
 ): DialogView {
   const cancel = () => settle({ type: "cancelled" });
+  // Neither the request nor the filter setting changes for the life of the
+  // dialog, so its hint line is settled here rather than on every keystroke.
+  const hint = selectHint(filtering);
 
   return function Select() {
     const { columns, rows } = ink.useWindowSize();
@@ -306,10 +310,11 @@ export function createSelectView<T>(
         title: message,
         double: true,
         width,
+        columns,
         // While a field is collected the entry's own panel follows this one
         // and carries the hints that apply; naming navigation and selection
         // here would name keys the dialog has stopped answering.
-        hint: collectingField ? undefined : selectHint(filtering),
+        hint: collectingField ? undefined : hint,
       },
       children,
     );

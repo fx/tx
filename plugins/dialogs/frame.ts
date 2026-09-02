@@ -3,17 +3,17 @@ import type { DialogElement } from "./types.ts";
 
 /** The columns a panel spends on chrome rather than content: one border column
  * and one padding column on each side. */
-export const frameChromeWidth = 4;
+const frameChromeWidth = 4;
 
 /** The narrowest terminal a dialog lays itself out for. A narrower one still
  * gets this layout, and how the terminal wraps the result is unspecified —
  * laying out into three columns would be worse than overflowing a terminal
  * nobody drives a dialog from. */
-export const minimumTerminalColumns = 20;
+const minimumTerminalColumns = 20;
 
 /** The columns a dialog lays itself out into: the terminal's, never below the
  * narrowest width supported. */
-export function layoutColumns(terminalColumns: number): number {
+function layoutColumns(terminalColumns: number): number {
   return Math.max(terminalColumns, minimumTerminalColumns);
 }
 
@@ -47,6 +47,11 @@ type FrameProps = {
   readonly double: boolean;
   /** The whole panel, borders included, as `panelWidth` computed it. */
   readonly width: number;
+  /** The terminal's width, which the hint line is capped against separately:
+   * it sits outside the panel and is free to be wider than it. Passed in
+   * rather than read here, because the caller has already read it to size the
+   * panel and a second subscription would only duplicate the listener. */
+  readonly columns: number;
   /** The key hint line drawn under the panel, or nothing when another panel
    * follows this one and carries the hints that actually apply. */
   readonly hint: string | undefined;
@@ -67,8 +72,14 @@ export function createFrame(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
 ) {
-  return function Frame({ title, double, width, hint, children }: FrameProps) {
-    const { columns } = ink.useWindowSize();
+  return function Frame({
+    title,
+    double,
+    width,
+    columns,
+    hint,
+    children,
+  }: FrameProps) {
     /** The title starts two columns in, over the first border segment, and may
      * run up to the column before the closing corner. */
     const titleWidth = Math.max(1, width - 3);
