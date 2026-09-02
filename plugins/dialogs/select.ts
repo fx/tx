@@ -292,19 +292,24 @@ export function createSelectView<T>(
     // bar. Whatever the window's position, one side or the other hides exactly
     // the options the window has no room for, so that total is the widest
     // either indicator ever gets.
-    const measured: number[] = [];
-    if (filtering) {
-      measured.push(displayWidth(`${filterPrompt} ${filterText}${caretGlyph}`));
-    }
-    if (visible.length === 0) measured.push(displayWidth(noMatch));
+    //
+    // Kept as a running maximum rather than an array spread into `Math.max`.
+    // Measuring every visible option makes the argument count the length of the
+    // list rather than the height of the window, and a spread that long throws
+    // `RangeError` on a list a select can plausibly be given — a branch, plugin,
+    // or version list. One pass over the same strings, no intermediate array.
+    let content = 0;
+    const measure = (text: string) => {
+      content = Math.max(content, displayWidth(text));
+    };
+    if (filtering) measure(`${filterPrompt} ${filterText}${caretGlyph}`);
+    if (visible.length === 0) measure(noMatch);
     for (const index of visible) {
-      measured.push(displayWidth((options[index] as SelectOption<T>).label));
+      measure((options[index] as SelectOption<T>).label);
     }
     const hidable = visible.length - viewport.count;
-    if (hidable > 0) {
-      measured.push(displayWidth(`${hiddenAboveGlyph} ${hidable} more`));
-    }
-    const width = panelWidth(message, Math.max(0, ...measured), columns);
+    if (hidable > 0) measure(`${hiddenAboveGlyph} ${hidable} more`);
+    const width = panelWidth(message, content, columns);
     const inner = innerWidth(width);
     const children: DialogElement[] = panelRows.map((panelRow) =>
       react.createElement(

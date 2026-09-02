@@ -1673,7 +1673,11 @@ describe("select viewport and extended navigation", () => {
           // The window has to have reached a start of its own on screen before
           // the terminal shrinks; that start is what the collapse must keep.
           await until(() => stderr.text().includes("▲ 20 more"));
-          stderr.rows = selectChromeHeight + 1;
+          // Seven rows is where a choosing select gives up its last option
+          // row. Written as a literal rather than off the chrome constant, so a
+          // chrome that grows fails here instead of moving the boundary this
+          // test collapses at and passing against a case it never meant.
+          stderr.rows = 7;
           stderr.emit("resize");
         },
         async (stderr) => {
@@ -1974,6 +1978,51 @@ describe("select viewport and extended navigation", () => {
     expect(result.value).toBe("d");
     expect(opened).toHaveLength(13);
     expect(scrolled).toBe(opened);
+  });
+
+  /**
+   * Sizing the panel from every visible option makes the number of widths
+   * measured the length of the list rather than the height of the window, so
+   * the maximum is taken in one pass instead of by spreading an array into
+   * `Math.max` — an argument list that long throws `RangeError`. Four hundred
+   * options is well short of that limit and would pass either way; what it
+   * pins is that the running maximum still finds the one wide label, and finds
+   * it two hundred rows below the window that is on screen.
+   */
+  test("sizes a long list from its widest option, window or not", async () => {
+    const wide = "Widest label in a long list";
+    const long = (widest: boolean): readonly SelectOption<number>[] =>
+      Array.from({ length: 400 }, (_, index) => ({
+        label:
+          widest && index === 300
+            ? wide
+            : `Option ${String(index + 1).padStart(3, "0")}`,
+        value: index + 1,
+      }));
+
+    const widened = await runSelection(
+      long(true),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(widened.value).toBe(1);
+    expect(activeRow(widened.stderr)).toBe("Option 001");
+    // The wide label is two hundred rows below the ten on screen, so its width
+    // can only have come from measuring the whole visible list: twenty-seven
+    // columns of label inside four columns of border.
+    expect(frameRows(widened.stderr)[0]).toHaveLength(wide.length + 4);
+
+    // The same list without it falls back to the widest row it does have — a
+    // ten-column label, tied with the `▼ 390 more` indicator at its largest.
+    const plain = await runSelection(
+      long(false),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(plain.value).toBe(1);
+    expect(frameRows(plain.stderr)[0]).toHaveLength(14);
   });
 
   /**
