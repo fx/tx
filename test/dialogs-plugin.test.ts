@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
-import { selectChromeHeight } from "../plugins/dialogs/viewport.ts";
+import {
+  collectingChromeHeight,
+  selectChromeHeight,
+} from "../plugins/dialogs/viewport.ts";
 import { main } from "../src/cli.ts";
 import type {
   CommandContext,
@@ -1520,10 +1523,14 @@ describe("select viewport and extended navigation", () => {
     }),
   );
 
-  /** The height at which the window is down to its last option row: one more
-   * than the chrome the dialog can draw, plus the row that keeps it strictly
-   * shorter than the terminal. */
+  /** The height at which a choosing select is down to its last option row: one
+   * more than the chrome it draws, plus the row that keeps it strictly shorter
+   * than the terminal. */
   const SHORT_TERMINAL = selectChromeHeight + 2;
+
+  /** The same for a select that has gone on to collect a field, whose second
+   * panel costs three more rows than the hint line it replaces. */
+  const SHORT_COLLECTING_TERMINAL = collectingChromeHeight + 2;
 
   /** The frame a thirty-option select leaves in a terminal that short: the
    * panel, one option row, the count of everything it hides, and the hints. */
@@ -1724,13 +1731,14 @@ describe("select viewport and extended navigation", () => {
         CARRIAGE_RETURN,
       ],
       undefined,
-      terminalOfRows(SHORT_TERMINAL),
+      terminalOfRows(SHORT_COLLECTING_TERMINAL),
     );
 
     expect(result.value).toBe(0);
     expect(result.values).toEqual({ branch: "abc" });
-    // Every chrome row the constant counts, on screen at once: the panel and
-    // its filter, one indicator, the field's own panel, and the hints.
+    // Every chrome row the collecting constant counts, on screen at once: the
+    // panel and its filter, one indicator, the field's own panel, and the
+    // hints. The window gave a row back to make room for that second panel.
     expect(collecting).toEqual([
       "╔═ Pick one ═╗",
       "║ › █        ║",
@@ -1742,9 +1750,206 @@ describe("select viewport and extended navigation", () => {
       "└───────────────┘",
       " Enter submit · Esc cancel",
     ]);
-    expect(collecting).toHaveLength(selectChromeHeight);
-    expect(collecting.length).toBeLessThan(SHORT_TERMINAL);
+    expect(collecting).toHaveLength(collectingChromeHeight);
+    expect(collecting.length).toBeLessThan(SHORT_COLLECTING_TERMINAL);
   });
+
+  /** The spec's own short-terminal scenario, end to end: thirty options in the
+   * eight rows it names must still put an option row on screen with the active
+   * option among them. Pinned in absolute rows rather than against the chrome
+   * constant, so a constant that grows too large fails here instead of moving
+   * the expectation with it. */
+  test("renders an option row in the eight-row terminal the spec names", async () => {
+    const result = await runSelection(
+      listed(30),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(8),
+    );
+
+    expect(result.value).toBe(1);
+    expect(frameRows(result.stderr).length).toBeLessThan(8);
+    expect(activeRow(result.stderr)).toBe("Option 01");
+    expect(stripped(lastFrame(result.stderr))).toContain("▼ 29 more");
+  });
+
+  /** A list a terminal comfortably fits must be drawn whole. Ten rows and three
+   * options is the case an over-large chrome constant emptied outright. */
+  test("draws a short list whole in a ten-row terminal", async () => {
+    const result = await runSelection(
+      [
+        { label: "Alpha", value: 1 },
+        { label: "Beta", value: 2 },
+        { label: "Gamma", value: 3 },
+      ],
+      [CARRIAGE_RETURN],
+      false,
+      terminalOfRows(10),
+    );
+
+    expect(result.value).toBe(1);
+    expect(frameRows(result.stderr)).toEqual([
+      "╔═ Pick one ═╗",
+      "║ Alpha      ║",
+      "║ Beta       ║",
+      "║ Gamma      ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · Esc cancel",
+    ]);
+    expect(activeRow(result.stderr)).toBe("Alpha");
+  });
+
+  /**
+   * The chrome itself, not just the option rows, has to stay under the
+   * terminal's height — Ink reads a frame as tall as the terminal as
+   * full-screen and clears the terminal when it settles. The path that reaches
+   * the worst case: scroll so the window has a start of its own, shrink the
+   * terminal, then choose a user-provided option so the field's panel arrives
+   * on top and collapses the window.
+   */
+  test("keeps the chrome under the terminal after a resize into collection", async () => {
+    let scrolled: readonly string[] = [];
+    let collecting: readonly string[] = [];
+    const result = await runSelection(
+      [
+        ...listed(30),
+        {
+          label: "Other…",
+          value: 0,
+          fields: [{ type: "text", name: "branch", message: "Branch" }],
+        },
+      ],
+      [
+        END,
+        async (stderr) => {
+          await until(() => stderr.text().includes("Other…"));
+          stderr.rows = 9;
+          stderr.emit("resize");
+        },
+        async (stderr) => {
+          await until(() => stderr.text().includes("▲ 29 more"));
+          scrolled = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+        async (stderr) => {
+          await until(() => stderr.text().includes("Branch"));
+          collecting = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(0);
+    // The window carried a start of its own into the shortened terminal, so
+    // both the scrolled frame and the collecting frame that follows it are
+    // worst cases the chrome has to stay under.
+    expect(scrolled.length).toBeLessThan(9);
+    // Collection collapses the window, and no stale start survives it: nothing
+    // is reported hidden above rows that are not there, so one indicator is
+    // drawn rather than two and the frame stays under the terminal.
+    expect(collecting).toEqual([
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▼ 31 more  ║",
+      "╚════════════╝",
+      "┌─ Branch ─┐",
+      "│ █        │",
+      "└──────────┘",
+      " Enter submit · Esc cancel",
+    ]);
+    expect(collecting).toHaveLength(8);
+    expect(collecting.length).toBeLessThan(9);
+  });
+
+  /**
+   * The panel is sized from every visible option and from an indicator carrying
+   * the largest count it can reach, so ordinary navigation never resizes it.
+   * Measured over the current window instead, `▼ 10 more` narrowing to
+   * `▼ 9 more` took a column off the frame on a single Down press.
+   */
+  test("keeps the panel's width while the window scrolls under it", async () => {
+    let opened = "";
+    let scrolled = "";
+    const result = await runSelection(
+      "abcdefghijklm".split("").map((label) => ({ label, value: label })),
+      [
+        async (stderr) => {
+          await until(() => stderr.text().includes("▼ 10"));
+          opened = frameRows(stderr, "Zx")[0] as string;
+        },
+        DOWN,
+        DOWN,
+        DOWN,
+        async (stderr) => {
+          await until(() => stderr.text().includes("▲ 1 "));
+          scrolled = frameRows(stderr, "Zx")[0] as string;
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(10),
+      "Zx",
+    );
+
+    expect(result.value).toBe("d");
+    expect(opened).toHaveLength(13);
+    expect(scrolled).toBe(opened);
+  });
+
+  /**
+   * The whole frame, chrome included, has to stay strictly shorter than the
+   * terminal. Measured on the rendered frame rather than on the arithmetic,
+   * because the arithmetic bounds only the option rows. Six rows choosing and
+   * nine collecting are the tightest terminals a filter-enabled select fits
+   * under; below those its minimum frame of five and eight rows cannot, which
+   * is recorded as an open question on change 0020.
+   */
+  test.each([6, 7, 8, 9, 10, 12, 16])(
+    "renders a frame shorter than a terminal of %i rows",
+    async (rows) => {
+      const result = await runSelection(
+        listed(30),
+        [CARRIAGE_RETURN],
+        undefined,
+        terminalOfRows(rows),
+      );
+
+      expect(frameRows(result.stderr).length).toBeLessThan(rows);
+    },
+  );
+
+  test.each([9, 10, 12, 16])(
+    "renders a collecting frame shorter than a terminal of %i rows",
+    async (rows) => {
+      let collecting: readonly string[] = [];
+      await runSelection(
+        [
+          ...listed(30),
+          {
+            label: "Other…",
+            value: 0,
+            fields: [{ type: "text", name: "branch", message: "Branch" }],
+          },
+        ],
+        [
+          END,
+          CARRIAGE_RETURN,
+          async (stderr) => {
+            await until(() => stderr.text().includes("Branch"));
+            collecting = frameRows(stderr);
+          },
+          CARRIAGE_RETURN,
+        ],
+        undefined,
+        terminalOfRows(rows),
+      );
+
+      expect(collecting.length).toBeGreaterThan(0);
+      expect(collecting.length).toBeLessThan(rows);
+    },
+  );
 
   test("windows the filtered list rather than the supplied one", async () => {
     const result = await runSelection(

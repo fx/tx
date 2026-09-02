@@ -89,7 +89,9 @@ function movedPosition(
   else if (key.upArrow) target = current - 1;
   else if (key.downArrow) target = current + 1;
   else if (key.pageUp || key.pageDown) {
-    const page = optionRowCount(visibleCount, terminalRows);
+    // Navigation is refused once collection begins, so the window this pages
+    // by is always the choosing one.
+    const page = optionRowCount(visibleCount, terminalRows, false);
     target = current + (key.pageUp ? -page : page);
   }
   if (target === undefined || visibleCount === 0) return undefined;
@@ -224,14 +226,18 @@ export function createSelectView<T>(
       }
     };
 
+    const collectingField = fieldIndex >= 0;
     const visible = visibleOptionIndices(options, filterText);
     // Derived while rendering, and remembered only so the next frame can move
-    // it as little as possible; the window is never state of its own.
+    // it as little as possible; the window is never state of its own. Deriving
+    // it against the state the frame is actually in is what lets the window
+    // give back rows to the field's panel the moment collection begins.
     const viewport = optionWindow(
       visible.length,
       activeIndex,
       windowStart.current,
       rows,
+      collectingField,
     );
     windowStart.current = viewport.start;
 
@@ -276,13 +282,25 @@ export function createSelectView<T>(
       }
     }
 
-    const widest = Math.max(
-      0,
-      ...panelRows.map(
-        ({ prefix, text }) => displayWidth(prefix ?? "") + displayWidth(text),
-      ),
-    );
-    const width = panelWidth(message, widest, columns);
+    // Measured over every visible option and over an indicator carrying the
+    // largest count it can ever carry — not over the rows this frame happens to
+    // draw — so scrolling the window does not resize the panel under the cursor
+    // bar. Whatever the window's position, one side or the other hides exactly
+    // the options the window has no room for, so that total is the widest
+    // either indicator ever gets.
+    const measured: number[] = [];
+    if (filtering) {
+      measured.push(displayWidth(`${filterPrompt} ${filterText}${caretGlyph}`));
+    }
+    if (visible.length === 0) measured.push(displayWidth(noMatch));
+    for (const index of visible) {
+      measured.push(displayWidth((options[index] as SelectOption<T>).label));
+    }
+    const hidable = visible.length - viewport.count;
+    if (hidable > 0) {
+      measured.push(displayWidth(`${hiddenAboveGlyph} ${hidable} more`));
+    }
+    const width = panelWidth(message, Math.max(0, ...measured), columns);
     const inner = innerWidth(width);
     const children: DialogElement[] = panelRows.map((panelRow) =>
       react.createElement(
@@ -313,7 +331,6 @@ export function createSelectView<T>(
       ),
     );
 
-    const collectingField = fieldIndex >= 0;
     const panel = react.createElement(
       Frame,
       {
