@@ -252,8 +252,8 @@ async function until(predicate: () => boolean): Promise<void> {
 const SELECT_MESSAGE = "Pick one";
 
 /** Ink rewrites its whole output on every render, and every select frame opens
- * with the request message, so the text after that message's last occurrence is
- * the frame the dialog left on screen. */
+ * with the request message, so the text from that message's last occurrence
+ * onward is the frame the dialog left on screen. */
 function lastFrame(stderr: CapturedOutput): string {
   const output = stderr.text();
   const start = output.lastIndexOf(SELECT_MESSAGE);
