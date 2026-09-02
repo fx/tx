@@ -174,11 +174,15 @@ function recorder(
  * A manager that answers its listing with `before` until its upgrade has run
  * and with `after` from then on, so the post-upgrade observation reads a
  * listing of its own rather than the one the interrogation read.
+ *
+ * `listing` overlays the rest of the listing's result, for a manager that
+ * prints its answer and then exits non-zero over something else entirely.
  */
 function upgrading(
   before: string,
   after: string,
   upgrade: CommandResult,
+  listing: Partial<CommandResult> = {},
 ): StubbedRun {
   let applied = false;
   return recorder((command) => {
@@ -186,7 +190,37 @@ function upgrading(
       applied = true;
       return upgrade;
     }
-    return { exitCode: 0, stdout: applied ? after : before, stderr: "" };
+    return {
+      exitCode: 0,
+      stderr: "",
+      ...listing,
+      stdout: applied ? after : before,
+    };
+  });
+}
+
+/** The layout the mise delegation tests share: a `github:fx/tx` install of the
+ * running version inside a mise store. */
+async function miseInstallation(
+  prefix: string,
+): Promise<{ store: string; target: string }> {
+  const root = await workspace(prefix);
+  return {
+    store: join(root, "mise", "installs"),
+    target: await installedExecutable(
+      root,
+      join("mise", "installs", "github-fx-tx", runningVersion, "bin", "tx"),
+    ),
+  };
+}
+
+/** What mise reports for that store, one entry per version it has installed. */
+function miseListing(store: string, ...versions: readonly string[]): string {
+  return JSON.stringify({
+    "github:fx/tx": versions.map((version) => ({
+      version,
+      install_path: join(store, "github-fx-tx", version),
+    })),
   });
 }
 
@@ -558,19 +592,12 @@ describe("executable update delegation", () => {
       join("lib", "node_modules", "@fx", "tx", "dist", "tx"),
     );
     const installed = join(root, "lib", "node_modules", "@fx", "tx");
-    let upgraded = false;
-    const { run, commands } = recorder((command) => {
-      if (command[1] !== "ls") {
-        upgraded = true;
-        return { exitCode: 0, stdout: "changed 1 package\n", stderr: "" };
-      }
-      const version = upgraded ? publishedVersion : runningVersion;
-      return {
-        exitCode: 1,
-        stdout: `${installed}:@fx/tx@${version}\n`,
-        stderr: "npm ERR! ELSPROBLEMS\n",
-      };
-    });
+    const { run, commands } = upgrading(
+      `${installed}:@fx/tx@${runningVersion}\n`,
+      `${installed}:@fx/tx@${publishedVersion}\n`,
+      { exitCode: 0, stdout: "changed 1 package\n", stderr: "" },
+      { exitCode: 1, stderr: "npm ERR! ELSPROBLEMS\n" },
+    );
     const updater = new ExecutableUpdater(
       runningVersion,
       options({ run, executablePath: target }),
@@ -897,21 +924,10 @@ describe("executable update delegation", () => {
     // mise withholds a release younger than `minimum_release_age`, which this
     // participant cannot see: without the override the upgrade declines to
     // install the very version the same command has just offered.
-    const root = await workspace("mise-release-age");
-    const store = join(root, "mise", "installs");
-    const target = await installedExecutable(
-      root,
-      join("mise", "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
-    );
-    const miseListing = (version: string) =>
-      JSON.stringify({
-        "github:fx/tx": [
-          { version, install_path: join(store, "github-fx-tx", version) },
-        ],
-      });
+    const { store, target } = await miseInstallation("mise-release-age");
     const { run, commands, environments } = upgrading(
-      miseListing(runningVersion),
-      miseListing(publishedVersion),
+      miseListing(store, runningVersion),
+      miseListing(store, publishedVersion),
       { exitCode: 0, stdout: "mise github:fx/tx@1.3.0\n", stderr: "" },
     );
     const updater = new ExecutableUpdater(
@@ -964,20 +980,8 @@ describe("executable update delegation", () => {
   test("reports nothing applied when a successful upgrade installed nothing", async () => {
     // The reported defect: mise warns that it ignored the release, exits zero,
     // and leaves the executable at the version that was running.
-    const root = await workspace("mise-unmoved");
-    const store = join(root, "mise", "installs");
-    const target = await installedExecutable(
-      root,
-      join("mise", "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
-    );
-    const listing = JSON.stringify({
-      "github:fx/tx": [
-        {
-          version: runningVersion,
-          install_path: join(store, "github-fx-tx", runningVersion),
-        },
-      ],
-    });
+    const { store, target } = await miseInstallation("mise-unmoved");
+    const listing = miseListing(store, runningVersion);
     const warning =
       "mise WARN newer github:fx/tx release 1.3.0 ignored by minimum_release_age (24h)";
     const { run } = upgrading(listing, listing, {
@@ -1000,6 +1004,58 @@ describe("executable update delegation", () => {
     expect(await readFile(target, "utf8")).toBe(installedBytes);
   });
 
+  test("reports nothing applied when the newer version was installed all along", async () => {
+    // mise lists every installed version, so a newer one already on disk —
+    // here the user has pinned the tool to the version they are running — is
+    // not evidence that this upgrade installed anything.
+    const { store, target } = await miseInstallation("mise-pinned");
+    const listing = miseListing(store, runningVersion, publishedVersion);
+    const output = "mise github:fx/tx is pinned; nothing to upgrade";
+    const { run } = upgrading(listing, listing, {
+      exitCode: 0,
+      stdout: `${output}\n`,
+      stderr: "",
+    });
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ run, executablePath: target }),
+    );
+
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: false,
+      detail: `"mise upgrade github:fx/tx": ${output}; still ${runningVersion}`,
+    });
+    expect(await readFile(target, "utf8")).toBe(installedBytes);
+  });
+
+  test.each([
+    [["ref:main", runningVersion, publishedVersion]],
+    [[publishedVersion, runningVersion, "ref:main"]],
+  ])(
+    "observes the newest orderable version whatever order mise lists it in (%#)",
+    async (after) => {
+      // mise lists a `ref:` install beside released versions, and nothing
+      // orders it. Folding the listing through one accumulator would latch on
+      // it and report a real upgrade as having moved nothing.
+      const { store, target } = await miseInstallation("mise-unorderable");
+      const { run } = upgrading(
+        miseListing(store, runningVersion),
+        miseListing(store, ...after),
+        { exitCode: 0, stdout: "mise github:fx/tx@1.3.0\n", stderr: "" },
+      );
+      const updater = new ExecutableUpdater(
+        runningVersion,
+        options({ run, executablePath: target }),
+      );
+
+      expect(await updater.apply(availableItem)).toEqual({
+        applied: true,
+        version: publishedVersion,
+        detail: '"mise upgrade github:fx/tx": mise github:fx/tx@1.3.0',
+      });
+    },
+  );
+
   test.each([
     ["not json", "mise reports no installed version of github:fx/tx"],
     [
@@ -1012,27 +1068,24 @@ describe("executable update delegation", () => {
       }),
       "still dev",
     ],
+    [
+      JSON.stringify({
+        "github:fx/tx": [
+          { version: "ref:main", install_path: "/elsewhere" },
+          { version: "system", install_path: "/elsewhere" },
+        ],
+      }),
+      "still ref:main",
+    ],
   ])(
     "reports nothing applied when the upgrade cannot be observed (%#)",
     async (after, expected) => {
-      const root = await workspace("mise-unobserved");
-      const store = join(root, "mise", "installs");
-      const target = await installedExecutable(
-        root,
-        join("mise", "installs", "github-fx-tx", "1.2.0", "bin", "tx"),
-      );
-      const { run } = upgrading(
-        JSON.stringify({
-          "github:fx/tx": [
-            {
-              version: runningVersion,
-              install_path: join(store, "github-fx-tx", runningVersion),
-            },
-          ],
-        }),
-        after,
-        { exitCode: 0, stdout: "upgraded\n", stderr: "" },
-      );
+      const { store, target } = await miseInstallation("mise-unobserved");
+      const { run } = upgrading(miseListing(store, runningVersion), after, {
+        exitCode: 0,
+        stdout: "upgraded\n",
+        stderr: "",
+      });
       const updater = new ExecutableUpdater(
         runningVersion,
         options({ run, executablePath: target }),

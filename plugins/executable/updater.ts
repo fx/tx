@@ -35,6 +35,11 @@ export interface ExecutableUpdaterOptions {
   readonly executablePath?: string;
   readonly compiled?: boolean;
   readonly platform?: string;
+  /** The environment this participant reads, and the one a delegated upgrade's
+   * child is given in full. An injected environment must therefore be
+   * complete: a partial one — no `HOME`, no `PATH` — is not merged over the
+   * ambient environment, so it would change where a delegated upgrade installs
+   * rather than only what it reads. */
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly staging?: StagingPath;
 }
@@ -181,7 +186,7 @@ async function owner(
       : await resolvedPath(installation.path);
     if (!isWithin(path, target)) continue;
     if (best === undefined || path.length > best.path.length) {
-      best = { name: installation.name, path };
+      best = { ...installation, path };
     }
   }
   return best?.name;
@@ -368,6 +373,40 @@ export function isNewerRelease(published: string, running: string): boolean {
   return Bun.semver.order(left, right) > 0;
 }
 
+/** The versions a listing reports for one tool, in the order it reported
+ * them, skipping the entries that name none. */
+function reportedVersions(
+  installations: readonly Installation[],
+  name: string,
+): readonly string[] {
+  return installations
+    .filter((installation) => installation.name === name)
+    .map((installation) => installation.version)
+    .filter((version): version is string => version !== undefined);
+}
+
+/**
+ * The newest of these versions that can be ordered at all, or undefined when
+ * none can be.
+ *
+ * Selecting among the orderable ones is what makes this answer independent of
+ * the order the manager listed them in. Folding every candidate through one
+ * accumulator instead would latch on the first unorderable entry — `ref:main`,
+ * which mise lists beside released versions — because `isNewerRelease` refuses
+ * a comparison either side of which it cannot parse, and then nothing later
+ * could displace it.
+ */
+function newestOrderable(versions: readonly string[]): string | undefined {
+  let newest: string | undefined;
+  for (const version of versions) {
+    if (!versionPattern.test(version.trim())) continue;
+    if (newest === undefined || isNewerRelease(version, newest)) {
+      newest = version;
+    }
+  }
+  return newest;
+}
+
 function parsedJson(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
@@ -525,9 +564,10 @@ export class ExecutableUpdater implements UpdateParticipant {
    * A zero exit says the command ran, not that anything moved: a manager that
    * withheld the release, a tool the user pinned, and a registry that has not
    * published the version yet all exit successfully having installed nothing.
-   * Only a version the manager afterwards reports as strictly newer than the
-   * running one is an update, and it is that observed version that is
-   * reported — naming any other would be a claim rather than an observation.
+   * Only a version this upgrade is observed to have installed, and that is
+   * strictly newer than the running one, is an update, and it is that observed
+   * version that is reported — naming any other would be a claim rather than
+   * an observation.
    *
    * The manager is asked rather than the file: the target is the install
    * directory of the version that is running, so after a successful upgrade
@@ -537,7 +577,10 @@ export class ExecutableUpdater implements UpdateParticipant {
     kinds: readonly ManagerKind[],
     target: string,
   ): Promise<UpdateResult> {
-    const { manager, name } = await this.#owningManager(kinds, target);
+    const { manager, name, installed } = await this.#owningManager(
+      kinds,
+      target,
+    );
     const command = manager.upgrade(name);
     const spelled = command.join(" ");
     const result = await this.#run(command, {
@@ -548,48 +591,60 @@ export class ExecutableUpdater implements UpdateParticipant {
       throw new Error(`"${spelled}" failed: ${oneLine(result)}`);
     }
     const detail = `"${spelled}": ${oneLine(result)}`;
-    const installed = await this.#installedVersion(manager, name);
-    if (installed !== undefined && isNewerRelease(installed, this.#version)) {
-      return { applied: true, version: installed, detail };
+    const after = await this.#installedVersions(manager, name);
+    // Measured against what the manager already reported before the upgrade,
+    // not only against the running version: mise lists every installed
+    // version, so a newer one that was on disk all along — a tool the user
+    // pinned to an older version — would otherwise pass for something this
+    // upgrade installed. Looking for a version that appeared, rather than
+    // requiring the newest reported to have moved, still reports correctly
+    // when the manager installs something while an even newer version sits
+    // pinned beside it.
+    const before = new Set(installed);
+    const appeared = newestOrderable(
+      after.filter((version) => !before.has(version)),
+    );
+    if (appeared !== undefined && isNewerRelease(appeared, this.#version)) {
+      return { applied: true, version: appeared, detail };
     }
     // An upgrade whose effect was not observed is not success. It is not a
     // failure either: the command the user asked for ran and exited zero, and
-    // the manager's own words are in the detail.
+    // the manager's own words are in the detail. What the user is still on is
+    // the newest version reported that is not newer than the one running — a
+    // newer one the manager reports is precisely the one this upgrade did not
+    // install — falling back to whatever it reported first when nothing it
+    // reports can be ordered.
+    const unmoved =
+      newestOrderable(
+        after.filter((version) => !isNewerRelease(version, this.#version)),
+      ) ?? after[0];
     const still =
-      installed === undefined
+      unmoved === undefined
         ? `${manager.name} reports no installed version of ${name}`
-        : `still ${installed}`;
+        : `still ${unmoved}`;
     return { applied: false, detail: `${detail}; ${still}` };
   }
 
   /**
-   * The newest version the manager now reports for the tool it upgraded, or
-   * undefined when its listing cannot be read or names none. Unreadable is not
-   * an error here: the upgrade already succeeded, and the caller reports an
-   * unobserved move as nothing applied rather than exiting non-zero over it.
+   * Every version the manager now reports for the tool it upgraded, in the
+   * order it reported them, and nothing when its listing cannot be read or
+   * names none. Unreadable is not an error here: the upgrade already
+   * succeeded, and the caller reports an unobserved move as nothing applied
+   * rather than exiting non-zero over it.
    */
-  async #installedVersion(
+  async #installedVersions(
     manager: Manager,
     name: string,
-  ): Promise<string | undefined> {
+  ): Promise<readonly string[]> {
     const listing = await this.#run(manager.listing);
-    const installations = manager.read(listing.stdout) ?? [];
-    let newest: string | undefined;
-    for (const installation of installations) {
-      const version = installation.version;
-      if (installation.name !== name || version === undefined) continue;
-      // Unorderable versions keep the first reported, so a listing that names
-      // nothing this can order is evidence of movement in neither direction.
-      if (newest === undefined || isNewerRelease(version, newest)) {
-        newest = version;
-      }
-    }
-    return newest;
+    return reportedVersions(manager.read(listing.stdout) ?? [], name);
   }
 
   /**
-   * The first candidate manager that claims this path, and what it says owns
-   * it.
+   * The first candidate manager that claims this path, what it says owns it,
+   * and the versions it already reports for that name — the baseline a later
+   * upgrade is observed against, read here because this interrogation reads
+   * the listing anyway.
    *
    * Only a manager that answered and did not claim the path is passed over. An
    * interrogation that failed throws straight out of here rather than moving
@@ -600,12 +655,16 @@ export class ExecutableUpdater implements UpdateParticipant {
   async #owningManager(
     kinds: readonly ManagerKind[],
     target: string,
-  ): Promise<{ manager: Manager; name: string }> {
+  ): Promise<{
+    manager: Manager;
+    name: string;
+    installed: readonly string[];
+  }> {
     let refusal = new Error(`No version manager owns "${target}"`);
     for (const kind of kinds) {
       const manager = managers[kind];
-      const name = await this.#owningName(manager, target);
-      if (name !== undefined) return { manager, name };
+      const owning = await this.#owningName(manager, target);
+      if (owning !== undefined) return { manager, ...owning };
       refusal = new Error(
         `${manager.name} reported no ${manager.noun} owning "${target}"`,
       );
@@ -618,7 +677,9 @@ export class ExecutableUpdater implements UpdateParticipant {
    * listing. The path is not asked to answer for itself: a backend, an owner,
    * and a repository collapse into one directory component through a
    * flattening that is not invertible, so reconstructing the name would
-   * upgrade something the user may not have.
+   * upgrade something the user may not have. The versions that listing already
+   * reports for that name come back with it, so the state before an upgrade
+   * costs no further command.
    *
    * The listing is read before its exit status is judged, because npm exits
    * non-zero for any problem anywhere in a global tree — an extraneous package
@@ -629,14 +690,18 @@ export class ExecutableUpdater implements UpdateParticipant {
   async #owningName(
     manager: Manager,
     target: string,
-  ): Promise<string | undefined> {
+  ): Promise<{ name: string; installed: readonly string[] } | undefined> {
     const listing = await this.#run(manager.listing);
     const installations = manager.read(listing.stdout);
-    const owning =
-      installations === undefined
-        ? undefined
-        : await owner(target, installations);
-    if (owning !== undefined) return owning;
+    if (installations !== undefined) {
+      const owning = await owner(target, installations);
+      if (owning !== undefined) {
+        return {
+          name: owning,
+          installed: reportedVersions(installations, owning),
+        };
+      }
+    }
     if (listing.exitCode !== 0) {
       throw new Error(
         `${manager.name} could not report which ${manager.noun} owns "${target}": ${oneLine(listing)}`,
