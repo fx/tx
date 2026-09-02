@@ -177,7 +177,7 @@ changes:
     path: changes/0020-add-select-filter-and-viewport.md
     description: Add a type-to-filter input to the select dialog, enabled per request or automatically for long lists, and bound the option list to a scrolling viewport with Home, End, and Page navigation.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0017"
   - id: "0021"
