@@ -5,7 +5,7 @@
 Make `tx update` tell the truth about updating `tx` itself. The delegated `mise upgrade` runs with mise's minimum release age disabled for that one command, so the release `tx` just offered is not withheld from the command sent to install it; and a delegated upgrade counts as applied only when the manager afterwards reports a newer version installed, so an upgrade that changed nothing is reported as nothing applied rather than as success. [Updates: Executable Updates](../specs/updates/index.md#executable-updates) owns both behaviors.
 
 **Spec:** [Updates](../specs/updates/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0015
 
 ## Motivation
@@ -97,35 +97,35 @@ The observation deliberately asks the manager rather than the filesystem. The pa
 
 ## Tasks
 
-- [ ] Specify the two behaviors in [Updates: Executable Updates](../specs/updates/index.md#executable-updates)
-  - [ ] Require the delegated upgrade to run without the manager's minimum-release-age deferral, scoped to that one command
-  - [ ] Require a delegated upgrade to count as applied only against an observed newer installed version, and drop the carve-out that let it name a version it did not observe
-  - [ ] Add scenarios for a withheld young release and for an upgrade that changed nothing
-  - [ ] Update the spec's references, changelog, and both documentation indexes
+- [x] Specify the two behaviors in [Updates: Executable Updates](../specs/updates/index.md#executable-updates)
+  - [x] Require the delegated upgrade to run without the manager's minimum-release-age deferral, scoped to that one command
+  - [x] Require a delegated upgrade to count as applied only against an observed newer installed version, and drop the carve-out that let it name a version it did not observe
+  - [x] Add scenarios for a withheld young release and for an upgrade that changed nothing
+  - [x] Update the spec's references, changelog, and both documentation indexes
 
-- [ ] Carry a per-child environment on the runner seam
-  - [ ] Extend `RunCommand` with an optional environment argument and pass it through `runCommand` to `Bun.spawn`, leaving an absent argument spawning as it does today
-  - [ ] Give `Manager` the environment entries its upgrade command runs with, set only for mise as `MISE_MINIMUM_RELEASE_AGE=0`, and merge it over the injected `env` in `#delegate`
+- [x] Carry a per-child environment on the runner seam
+  - [x] Extend `RunCommand` with an optional environment argument and pass it through `runCommand` to `Bun.spawn`, leaving an absent argument spawning as it does today
+  - [x] Give `Manager` the environment entries its upgrade command runs with, set only for mise as `MISE_MINIMUM_RELEASE_AGE=0`, and merge it over the injected `env` in `#delegate`
 
-- [ ] Report a delegated upgrade against what the manager installed
-  - [ ] Record each listing's reported version in `Installation`, from mise's JSON entries and npm's `<name>@<version>` label
-  - [ ] Re-read the owning manager's listing after a zero-exit upgrade and take the newest version it reports for the upgraded tool
-  - [ ] Report `applied: true` with that observed version only when it is strictly newer than the running version
-  - [ ] Report `applied: false` with the manager's output and the version still installed otherwise, including when the listing cannot be read or names nothing orderable, and keep a non-zero exit a thrown failure
+- [x] Report a delegated upgrade against what the manager installed
+  - [x] Record each listing's reported version in `Installation`, from mise's JSON entries and npm's `<name>@<version>` label
+  - [x] Re-read the owning manager's listing after a zero-exit upgrade and take the newest version it reports for the upgraded tool
+  - [x] Report `applied: true` with that observed version only when it is strictly newer than the running version
+  - [x] Report `applied: false` with the manager's output and the version still installed otherwise, including when the listing cannot be read or names nothing orderable, and keep a non-zero exit a thrown failure
 
-- [ ] Cover the new behavior in `test/executable-plugin.test.ts`
-  - [ ] Assert the exact environment the delegated mise upgrade receives, and that the listing commands receive no override
-  - [ ] Assert npm's upgrade receives no override
-  - [ ] A delegated upgrade the manager confirms moved: `applied: true` with the observed version
-  - [ ] A delegated upgrade that exits zero with the version unchanged — the reported defect — asserting `applied: false`, the manager's output in the detail, and no version named
-  - [ ] A post-upgrade listing that cannot be read, and one naming an unorderable version
-  - [ ] Extend the existing delegation tests' fake listings so their post-upgrade read reports the upgraded version
+- [x] Cover the new behavior in `test/executable-plugin.test.ts`
+  - [x] Assert the exact environment the delegated mise upgrade receives, and that the listing commands receive no override
+  - [x] Assert npm's upgrade receives no override
+  - [x] A delegated upgrade the manager confirms moved: `applied: true` with the observed version
+  - [x] A delegated upgrade that exits zero with the version unchanged — the reported defect — asserting `applied: false`, the manager's output in the detail, and no version named
+  - [x] A post-upgrade listing that cannot be read, and one naming an unorderable version
+  - [x] Extend the existing delegation tests' fake listings so their post-upgrade read reports the upgraded version
 
-- [ ] Amend the wording the change makes wrong, in the same pull request
-  - [ ] `README.md`: the delegation sentence in the update section
-  - [ ] `docs/manual/plugins.md`: the version-manager bullet under "Updating tx itself"
+- [x] Amend the wording the change makes wrong, in the same pull request
+  - [x] `README.md`: the delegation sentence in the update section
+  - [x] `docs/manual/plugins.md`: the version-manager bullet under "Updating tx itself"
 
-- [ ] Verify 100% coverage and `bun run check`
+- [x] Verify 100% coverage and `bun run check`
 
 ## Open Questions
 
