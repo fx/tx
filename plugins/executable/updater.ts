@@ -186,7 +186,7 @@ async function owner(
       : await resolvedPath(installation.path);
     if (!isWithin(path, target)) continue;
     if (best === undefined || path.length > best.path.length) {
-      best = { ...installation, path };
+      best = { name: installation.name, path };
     }
   }
   return best?.name;
