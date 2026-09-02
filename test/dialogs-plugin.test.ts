@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import {
+  collectingChromeHeight,
+  selectChromeHeight,
+} from "../plugins/dialogs/viewport.ts";
 import { main } from "../src/cli.ts";
 import type {
   CommandContext,
@@ -251,27 +255,83 @@ async function until(predicate: () => boolean): Promise<void> {
  * its frames opens with. */
 const SELECT_MESSAGE = "Pick one";
 
-/** Ink rewrites its whole output on every render, and every select frame opens
- * with the request message, so the text from that message's last occurrence
- * onward is the frame the dialog left on screen. */
-function lastFrame(stderr: CapturedOutput): string {
-  const output = stderr.text();
-  const start = output.lastIndexOf(SELECT_MESSAGE);
-  expect(start).toBeGreaterThanOrEqual(0);
-  return output.slice(start);
+/** The escape sequences the renderer writes around a frame, so a test that
+ * matches on what the user reads can ignore them. Built from the escape
+ * character rather than written literally, so the source carries no control
+ * character. */
+const CONTROL_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[a-zA-Z]`, "g");
+
+/** The text a frame puts on screen, with every styling and cursor sequence
+ * removed. */
+function stripped(text: string): string {
+  return text.replace(CONTROL_SEQUENCE, "");
 }
 
-/** The escape sequences Ink writes around a frame, so a row count can ignore
- * them. Built from the escape character rather than written literally, so the
- * source carries no control character. */
-const CONTROL_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[a-zA-Z]`, "g");
+/** Every control sequence except the SGR styling codes: cursor movement,
+ * erasure, and mode switches. Ink leaves its last row unterminated and
+ * repositions the cursor before rewriting, so the previous frame's last row
+ * shares a line of the byte stream with the next frame's first row and this is
+ * the boundary between them. */
+const CURSOR_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[A-Za-ln-z]`, "g");
+
+/** Ink rewrites its whole output on every render, and every select frame opens
+ * with the request message set into its top border, so the frame the dialog
+ * left on screen begins at the start of the row carrying that message's last
+ * occurrence. The row is taken whole, because the message now shares it with
+ * the border either side of it, and from after the last repositioning ahead of
+ * it, because the row the previous frame ended with is still on that line. */
+function lastFrame(stderr: CapturedOutput, anchor = SELECT_MESSAGE): string {
+  const output = stderr.text();
+  const found = output.lastIndexOf(anchor);
+  expect(found).toBeGreaterThanOrEqual(0);
+  const start = output.lastIndexOf("\n", found) + 1;
+  let boundary = 0;
+  for (const match of output.slice(start, found).matchAll(CURSOR_SEQUENCE)) {
+    boundary = (match.index as number) + match[0].length;
+  }
+  return output.slice(start + boundary);
+}
 
 /** The rows of the frame the dialog left on screen, so a test can count them
  * against the terminal's height. */
-function frameRows(stderr: CapturedOutput): readonly string[] {
-  const rows = lastFrame(stderr).replace(CONTROL_SEQUENCE, "").split("\n");
+function frameRows(
+  stderr: CapturedOutput,
+  anchor = SELECT_MESSAGE,
+): readonly string[] {
+  const rows = stripped(lastFrame(stderr, anchor)).split("\n");
   while (rows.at(-1) === "") rows.pop();
   return rows;
+}
+
+/** The sequences the renderer wraps an inverted run in. The active option is
+ * the only inverted element a dialog draws, so they are how a test tells which
+ * row the cursor bar is on now that no marker character says so. */
+const INVERSE_OPEN = `${ESCAPE}[7m`;
+const INVERSE_CLOSE = `${ESCAPE}[27m`;
+
+/** Every inverted run in the given output, in order, as the text it carries:
+ * the bar is padded to the panel's inner width, and the padding is not what a
+ * test is asserting about. */
+function invertedRows(text: string): readonly string[] {
+  const rows: string[] = [];
+  let cursor = 0;
+  for (;;) {
+    const open = text.indexOf(INVERSE_OPEN, cursor);
+    if (open < 0) return rows;
+    const start = open + INVERSE_OPEN.length;
+    const close = text.indexOf(INVERSE_CLOSE, start);
+    expect(close).toBeGreaterThanOrEqual(start);
+    rows.push(stripped(text.slice(start, close)).trimEnd());
+    cursor = close + INVERSE_CLOSE.length;
+  }
+}
+
+/** The one row the frame on screen renders as the cursor bar, which is the
+ * active option. */
+function activeRow(stderr: CapturedOutput, anchor = SELECT_MESSAGE): string {
+  const rows = invertedRows(lastFrame(stderr, anchor));
+  expect(rows).toHaveLength(1);
+  return rows[0] as string;
 }
 
 /** A terminal double of a chosen height, for the dialogs whose behavior depends
@@ -279,6 +339,14 @@ function frameRows(stderr: CapturedOutput): readonly string[] {
 function terminalOfRows(rows: number): CapturedOutput {
   const stderr = new CapturedOutput();
   stderr.rows = rows;
+  return stderr;
+}
+
+/** A terminal double of a chosen width, for the frames whose width follows it
+ * and the labels it makes too long to render whole. */
+function terminalOfColumns(columns: number): CapturedOutput {
+  const stderr = new CapturedOutput();
+  stderr.columns = columns;
   return stderr;
 }
 
@@ -294,6 +362,7 @@ async function runSelection<T>(
   input: string | readonly SelectionStep[],
   filter?: boolean | "auto",
   stderr: CapturedOutput = new CapturedOutput(),
+  message: string = SELECT_MESSAGE,
 ): Promise<{
   readonly value: T | undefined;
   readonly values: Readonly<Record<string, string>> | undefined;
@@ -312,7 +381,7 @@ async function runSelection<T>(
       dialogsPlugin,
       consumer(async (dialogs) => {
         result = await dialogs.select({
-          message: SELECT_MESSAGE,
+          message,
           options,
           ...(filter === undefined ? {} : { filter }),
         });
@@ -457,7 +526,7 @@ describe("bundled dialogs provider", () => {
     expect(result.stdout).toBe("");
     const output = result.stderr.text();
     expect(output).toContain(SELECT_MESSAGE);
-    expect(output).toContain("> Alpha");
+    expect(activeRow(result.stderr)).toBe("Alpha");
     expect(output.indexOf("Alpha")).toBeLessThan(output.indexOf("Beta"));
     expect(output.indexOf("Beta")).toBeLessThan(output.indexOf("Gamma"));
   });
@@ -736,7 +805,7 @@ describe("bundled dialogs provider", () => {
     expect(result.stdin.refs).toBe(1);
     expect(result.stdin.unrefs).toBe(1);
     expect(result.stdin.listenerCount("readable")).toBe(0);
-    expect(result.stderr.text()).toContain("> Two");
+    expect(activeRow(result.stderr)).toBe("Two");
   });
 
   test("supports sequential reuse without retaining input listeners", async () => {
@@ -1225,11 +1294,11 @@ describe("select filter", () => {
 
     expect(result.value).toBe("alpha");
     expect(result.values).toEqual({});
-    const frame = lastFrame(result.stderr);
+    const frame = stripped(lastFrame(result.stderr));
     expect(frame).toContain("› alp");
-    expect(frame).toContain("> Alpha");
-    expect(frame).toContain("  Alphabet");
-    expect(frame.indexOf("> Alpha")).toBeLessThan(frame.indexOf("Alphabet"));
+    expect(activeRow(result.stderr)).toBe("Alpha");
+    expect(frame).toContain("Alphabet");
+    expect(frame.indexOf("Alpha")).toBeLessThan(frame.indexOf("Alphabet"));
     expect(frame).not.toContain("Beta");
     expect(frame).not.toContain("Gamma");
   });
@@ -1238,10 +1307,10 @@ describe("select filter", () => {
     const result = await runSelection(eight, ["alp", CARRIAGE_RETURN]);
 
     expect(result.value).toBe("alpha");
-    const frame = lastFrame(result.stderr);
+    const frame = stripped(lastFrame(result.stderr));
     expect(frame).not.toContain("›");
-    expect(frame).toContain("> Alpha");
-    expect(frame).toContain("  Gamma");
+    expect(activeRow(result.stderr)).toBe("Alpha");
+    expect(frame).toContain("Gamma");
   });
 
   test("honours an explicit setting whatever the option count", async () => {
@@ -1251,16 +1320,17 @@ describe("select filter", () => {
       true,
     );
     expect(enabled.value).toBe("beta");
-    const enabledFrame = lastFrame(enabled.stderr);
+    const enabledFrame = stripped(lastFrame(enabled.stderr));
     expect(enabledFrame).toContain("› bet");
-    expect(enabledFrame).toContain("> Beta");
+    expect(activeRow(enabled.stderr)).toBe("Beta");
     expect(enabledFrame).not.toContain("Alpha");
 
     const disabled = await runSelection(nine, ["alp", CARRIAGE_RETURN], false);
     expect(disabled.value).toBe("alpha");
-    const disabledFrame = lastFrame(disabled.stderr);
+    const disabledFrame = stripped(lastFrame(disabled.stderr));
     expect(disabledFrame).not.toContain("›");
-    expect(disabledFrame).toContain("  Gamma");
+    expect(disabledFrame).toContain("Gamma");
+    expect(activeRow(disabled.stderr)).toBe("Alpha");
   });
 
   test("requires every term, in any order, against the label alone", async () => {
@@ -1276,8 +1346,8 @@ describe("select filter", () => {
     );
 
     expect(result.value).toBe("release");
-    const frame = lastFrame(result.stderr);
-    expect(frame).toContain("> release branch");
+    const frame = stripped(lastFrame(result.stderr));
+    expect(activeRow(result.stderr)).toBe("release branch");
     expect(frame).not.toContain("branch archive");
     expect(frame).not.toContain("main");
   });
@@ -1297,10 +1367,10 @@ describe("select filter", () => {
       true,
     );
     expect(widened.value).toBe("alpha");
-    const frame = lastFrame(widened.stderr);
-    expect(frame).toContain("> Alpha");
-    expect(frame).toContain("  Beta");
-    expect(frame).toContain("  Gamma");
+    const frame = stripped(lastFrame(widened.stderr));
+    expect(activeRow(widened.stderr)).toBe("Alpha");
+    expect(frame).toContain("Beta");
+    expect(frame).toContain("Gamma");
   });
 
   test("keeps a user-provided option reachable when nothing else matches", async () => {
@@ -1320,9 +1390,9 @@ describe("select filter", () => {
 
     expect(result.value).toBe("other");
     expect(result.values).toEqual({ branch: "release" });
-    const frame = lastFrame(result.stderr);
+    const frame = stripped(lastFrame(result.stderr));
     expect(frame).toContain("› zzz");
-    expect(frame).toContain("> Other…");
+    expect(activeRow(result.stderr)).toBe("Other…");
     expect(frame).not.toContain("Alpha");
     expect(frame).not.toContain("Beta");
   });
@@ -1334,10 +1404,12 @@ describe("select filter", () => {
       true,
     );
     expect(cancelled.value).toBeUndefined();
-    const frame = lastFrame(cancelled.stderr);
+    const frame = stripped(lastFrame(cancelled.stderr));
     expect(frame).toContain("› zzz");
     expect(frame).toContain("no match");
     expect(frame).not.toContain("Alpha");
+    // Nothing is visible, so nothing is active and no row carries the bar.
+    expect(invertedRows(lastFrame(cancelled.stderr))).toEqual([]);
 
     const recovered = await runSelection(
       named("Alpha", "Beta", "Gamma"),
@@ -1354,7 +1426,8 @@ describe("select filter", () => {
       true,
     );
     expect(recovered.value).toBe("alpha");
-    expect(lastFrame(recovered.stderr)).not.toContain("no match");
+    expect(stripped(lastFrame(recovered.stderr))).not.toContain("no match");
+    expect(activeRow(recovered.stderr)).toBe("Alpha");
   });
 
   test("navigates the visible list and clamps at its last entry", async () => {
@@ -1365,10 +1438,10 @@ describe("select filter", () => {
     );
 
     expect(result.value).toBe("alpine");
-    const frame = lastFrame(result.stderr);
-    expect(frame).toContain("  Alpha");
-    expect(frame).toContain("  Alpaca");
-    expect(frame).toContain("> Alpine");
+    const frame = stripped(lastFrame(result.stderr));
+    expect(frame).toContain("Alpha");
+    expect(frame).toContain("Alpaca");
+    expect(activeRow(result.stderr)).toBe("Alpine");
     expect(frame).not.toContain("Beta");
     expect(frame).not.toContain("Gamma");
   });
@@ -1397,7 +1470,7 @@ describe("select filter", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.value).toBeUndefined();
-      expect(lastFrame(result.stderr)).toContain("› alp");
+      expect(stripped(lastFrame(result.stderr))).toContain("› alp");
     },
   );
 
@@ -1417,7 +1490,7 @@ describe("select filter", () => {
 
     expect(result.value).toBe("custom");
     expect(result.values).toEqual({ branch: "abc" });
-    const frame = lastFrame(result.stderr);
+    const frame = stripped(lastFrame(result.stderr));
     expect(frame).toContain("› cus");
     expect(frame).not.toContain("cusabc");
     expect(frame).not.toContain("Known");
@@ -1425,6 +1498,7 @@ describe("select filter", () => {
 });
 
 describe("select viewport and extended navigation", () => {
+  const UP = `${ESCAPE}[A`;
   const DOWN = `${ESCAPE}[B`;
   const HOME = `${ESCAPE}[H`;
   const END = `${ESCAPE}[F`;
@@ -1450,7 +1524,25 @@ describe("select viewport and extended navigation", () => {
     }),
   );
 
-  const shortTerminalFrame = [SELECT_MESSAGE, "›", "> Option 01", "▼ 29 more"];
+  /** The height at which a choosing select is down to its last option row: one
+   * more than the chrome it draws, plus the row that keeps it strictly shorter
+   * than the terminal. */
+  const SHORT_TERMINAL = selectChromeHeight + 2;
+
+  /** The same for a select that has gone on to collect a field, whose second
+   * panel costs three more rows than the hint line it replaces. */
+  const SHORT_COLLECTING_TERMINAL = collectingChromeHeight + 2;
+
+  /** The frame a thirty-option select leaves in a terminal that short: the
+   * panel, one option row, the count of everything it hides, and the hints. */
+  const shortTerminalFrame = [
+    "╔═ Pick one ═╗",
+    "║ › █        ║",
+    "║ Option 01  ║",
+    "║ ▼ 29 more  ║",
+    "╚════════════╝",
+    " ↑↓ move · Enter select · type to filter · Esc cancel",
+  ];
 
   const repeated = (chunk: string, times: number): readonly string[] =>
     Array.from({ length: times }, () => chunk);
@@ -1464,9 +1556,9 @@ describe("select viewport and extended navigation", () => {
     );
 
     expect(result.value).toBe(1);
-    const frame = lastFrame(result.stderr);
-    expect(frame).toContain("> Option 01");
-    expect(frame).toContain("  Option 10");
+    const frame = stripped(lastFrame(result.stderr));
+    expect(activeRow(result.stderr)).toBe("Option 01");
+    expect(frame).toContain("Option 10");
     expect(frame).not.toContain("Option 11");
     expect(frame).toContain("▼ 20 more");
     expect(frame).not.toContain("▲");
@@ -1481,10 +1573,10 @@ describe("select viewport and extended navigation", () => {
     );
 
     expect(result.value).toBe(11);
-    const frame = lastFrame(result.stderr);
+    const frame = stripped(lastFrame(result.stderr));
     expect(frame).toContain("▲ 1 more");
-    expect(frame).toContain("  Option 02");
-    expect(frame).toContain("> Option 11");
+    expect(frame).toContain("Option 02");
+    expect(activeRow(result.stderr)).toBe("Option 11");
     expect(frame).toContain("▼ 19 more");
     expect(frame).not.toContain("Option 01");
     expect(frame).not.toContain("Option 12");
@@ -1495,19 +1587,19 @@ describe("select viewport and extended navigation", () => {
       listed(30),
       [CARRIAGE_RETURN],
       undefined,
-      terminalOfRows(8),
+      terminalOfRows(SHORT_TERMINAL),
     );
 
     expect(result.value).toBe(1);
     expect(frameRows(result.stderr)).toEqual(shortTerminalFrame);
-    expect(frameRows(result.stderr).length).toBeLessThan(8);
+    expect(frameRows(result.stderr).length).toBeLessThan(SHORT_TERMINAL);
   });
 
-  /** Seven rows is the height at which one option row would make the
-   * worst-case frame exactly as tall as the terminal, which is what Ink reads
-   * as full-screen and answers by clearing the terminal on unmount. The window
-   * gives up its last row there, and the dialog still navigates and settles on
-   * a choice it no longer draws. */
+  /** One row above the chrome is the height at which one option row would make
+   * the worst-case frame exactly as tall as the terminal, which is what Ink
+   * reads as full-screen and answers by clearing the terminal on unmount. The
+   * window gives up its last row there, and the dialog still navigates and
+   * settles on a choice it no longer draws. */
   test("draws no option row in a terminal one row above the chrome", async () => {
     let open: readonly string[] = [];
     const result = await runSelection(
@@ -1524,12 +1616,18 @@ describe("select viewport and extended navigation", () => {
         CARRIAGE_RETURN,
       ],
       undefined,
-      terminalOfRows(7),
+      terminalOfRows(selectChromeHeight + 1),
     );
 
     expect(result.value).toBe(2);
-    expect(open).toEqual([SELECT_MESSAGE, "›", "▼ 30 more"]);
-    expect(open.length).toBeLessThan(7);
+    expect(open).toEqual([
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▼ 30 more  ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    ]);
+    expect(open.length).toBeLessThan(selectChromeHeight + 1);
   });
 
   test("re-derives the window after the terminal is resized", async () => {
@@ -1537,7 +1635,7 @@ describe("select viewport and extended navigation", () => {
       listed(30),
       [
         (stderr) => {
-          stderr.rows = 8;
+          stderr.rows = SHORT_TERMINAL;
           stderr.emit("resize");
         },
         CARRIAGE_RETURN,
@@ -1550,6 +1648,87 @@ describe("select viewport and extended navigation", () => {
     expect(frameRows(result.stderr)).toEqual(shortTerminalFrame);
   });
 
+  /**
+   * A terminal too short to draw the window does not cost the window its place
+   * in the list. Scroll so it holds a start of its own, leave the cursor bar in
+   * the middle of it, shrink the terminal until no option row fits at all, and
+   * grow it back: the window must reopen where the user left it. Collapsing it
+   * used to throw the remembered start away along with the drawn one, so the
+   * window came back at the edge the active option drags it to from the top of
+   * the list — four rows short of where it was, with the whole list shifted
+   * under a cursor bar the user never moved.
+   */
+  test("reopens a collapsed window where it was, not at the active option", async () => {
+    let collapsed: readonly string[] = [];
+    let reopened: readonly string[] = [];
+    const result = await runSelection(
+      listed(30),
+      [
+        END,
+        UP,
+        UP,
+        UP,
+        UP,
+        async (stderr) => {
+          // The window has to have reached a start of its own on screen before
+          // the terminal shrinks; that start is what the collapse must keep.
+          await until(() => stderr.text().includes("▲ 20 more"));
+          // Seven rows is where a choosing select gives up its last option
+          // row. Written as a literal rather than off the chrome constant, so a
+          // chrome that grows fails here instead of moving the boundary this
+          // test collapses at and passing against a case it never meant.
+          stderr.rows = 7;
+          stderr.emit("resize");
+        },
+        async (stderr) => {
+          await until(() => stderr.text().includes("▼ 30 more"));
+          collapsed = frameRows(stderr);
+          stderr.rows = 40;
+          stderr.emit("resize");
+        },
+        async (stderr) => {
+          // The collapsed frame is the only one short enough to have no option
+          // row in it, so growing past it is the signal, whatever the window
+          // then does with its start.
+          await until(() => frameRows(stderr).length > collapsed.length);
+          reopened = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(26);
+    // Nothing sits above rows that are not there, so the collapsed frame still
+    // carries one indicator rather than two.
+    expect(collapsed).toEqual([
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▼ 30 more  ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    ]);
+    expect(reopened).toEqual([
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▲ 20 more  ║",
+      "║ Option 21  ║",
+      "║ Option 22  ║",
+      "║ Option 23  ║",
+      "║ Option 24  ║",
+      "║ Option 25  ║",
+      "║ Option 26  ║",
+      "║ Option 27  ║",
+      "║ Option 28  ║",
+      "║ Option 29  ║",
+      "║ Option 30  ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    ]);
+    expect(activeRow(result.stderr)).toBe("Option 26");
+  });
+
   test("jumps to the last and the first visible option", async () => {
     const end = await runSelection(
       listed(30),
@@ -1558,9 +1737,9 @@ describe("select viewport and extended navigation", () => {
       terminalOfRows(40),
     );
     expect(end.value).toBe(30);
-    const endFrame = lastFrame(end.stderr);
+    const endFrame = stripped(lastFrame(end.stderr));
     expect(endFrame).toContain("▲ 20 more");
-    expect(endFrame).toContain("> Option 30");
+    expect(activeRow(end.stderr)).toBe("Option 30");
     expect(endFrame).not.toContain("▼");
 
     const home = await runSelection(
@@ -1570,7 +1749,7 @@ describe("select viewport and extended navigation", () => {
       terminalOfRows(40),
     );
     expect(home.value).toBe(1);
-    expect(lastFrame(home.stderr)).toContain("> Option 01");
+    expect(activeRow(home.stderr)).toBe("Option 01");
   });
 
   test("pages by the window's height and clamps at either end", async () => {
@@ -1604,7 +1783,7 @@ describe("select viewport and extended navigation", () => {
       listed(30),
       [PAGE_DOWN, CARRIAGE_RETURN],
       undefined,
-      terminalOfRows(12),
+      terminalOfRows(selectChromeHeight + 6),
     );
 
     expect(result.value).toBe(6);
@@ -1634,21 +1813,270 @@ describe("select viewport and extended navigation", () => {
         CARRIAGE_RETURN,
       ],
       undefined,
-      terminalOfRows(8),
+      terminalOfRows(SHORT_COLLECTING_TERMINAL),
     );
 
     expect(result.value).toBe(0);
     expect(result.values).toEqual({ branch: "abc" });
+    // Every chrome row the collecting constant counts, on screen at once: the
+    // panel and its filter, one indicator, the field's own panel, and the
+    // hints. The window gave a row back to make room for that second panel.
     expect(collecting).toEqual([
-      SELECT_MESSAGE,
-      "›",
-      "▲ 29 more",
-      "> Other…",
-      "Branch name",
-      "abc",
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▲ 29 more  ║",
+      "║ Other…     ║",
+      "╚════════════╝",
+      "┌─ Branch name ─┐",
+      "│ abc█          │",
+      "└───────────────┘",
+      " Enter submit · Esc cancel",
     ]);
-    expect(collecting.length).toBeLessThan(8);
+    expect(collecting).toHaveLength(collectingChromeHeight);
+    expect(collecting.length).toBeLessThan(SHORT_COLLECTING_TERMINAL);
   });
+
+  /** The spec's own short-terminal scenario, end to end: thirty options in the
+   * eight rows it names must still put an option row on screen with the active
+   * option among them. Pinned in absolute rows rather than against the chrome
+   * constant, so a constant that grows too large fails here instead of moving
+   * the expectation with it. */
+  test("renders an option row in the eight-row terminal the spec names", async () => {
+    const result = await runSelection(
+      listed(30),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(8),
+    );
+
+    expect(result.value).toBe(1);
+    expect(frameRows(result.stderr).length).toBeLessThan(8);
+    expect(activeRow(result.stderr)).toBe("Option 01");
+    expect(stripped(lastFrame(result.stderr))).toContain("▼ 29 more");
+  });
+
+  /** A list a terminal comfortably fits must be drawn whole. Ten rows and three
+   * options is the case an over-large chrome constant emptied outright. */
+  test("draws a short list whole in a ten-row terminal", async () => {
+    const result = await runSelection(
+      [
+        { label: "Alpha", value: 1 },
+        { label: "Beta", value: 2 },
+        { label: "Gamma", value: 3 },
+      ],
+      [CARRIAGE_RETURN],
+      false,
+      terminalOfRows(10),
+    );
+
+    expect(result.value).toBe(1);
+    expect(frameRows(result.stderr)).toEqual([
+      "╔═ Pick one ═╗",
+      "║ Alpha      ║",
+      "║ Beta       ║",
+      "║ Gamma      ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · Esc cancel",
+    ]);
+    expect(activeRow(result.stderr)).toBe("Alpha");
+  });
+
+  /**
+   * The chrome itself, not just the option rows, has to stay under the
+   * terminal's height — Ink reads a frame as tall as the terminal as
+   * full-screen and clears the terminal when it settles. The path that reaches
+   * the worst case: scroll so the window has a start of its own, shrink the
+   * terminal, then choose a user-provided option so the field's panel arrives
+   * on top and collapses the window.
+   */
+  test("keeps the chrome under the terminal after a resize into collection", async () => {
+    let scrolled: readonly string[] = [];
+    let collecting: readonly string[] = [];
+    const result = await runSelection(
+      [
+        ...listed(30),
+        {
+          label: "Other…",
+          value: 0,
+          fields: [{ type: "text", name: "branch", message: "Branch" }],
+        },
+      ],
+      [
+        END,
+        async (stderr) => {
+          await until(() => stderr.text().includes("Other…"));
+          stderr.rows = 9;
+          stderr.emit("resize");
+        },
+        async (stderr) => {
+          await until(() => stderr.text().includes("▲ 29 more"));
+          scrolled = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+        async (stderr) => {
+          await until(() => stderr.text().includes("Branch"));
+          collecting = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(0);
+    // The window carried a start of its own into the shortened terminal, so
+    // both the scrolled frame and the collecting frame that follows it are
+    // worst cases the chrome has to stay under.
+    expect(scrolled.length).toBeLessThan(9);
+    // Collection collapses the window, and no stale start survives it: nothing
+    // is reported hidden above rows that are not there, so one indicator is
+    // drawn rather than two and the frame stays under the terminal.
+    expect(collecting).toEqual([
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▼ 31 more  ║",
+      "╚════════════╝",
+      "┌─ Branch ─┐",
+      "│ █        │",
+      "└──────────┘",
+      " Enter submit · Esc cancel",
+    ]);
+    expect(collecting).toHaveLength(8);
+    expect(collecting.length).toBeLessThan(9);
+  });
+
+  /**
+   * The panel is sized from every visible option and from an indicator carrying
+   * the largest count it can reach, so ordinary navigation never resizes it.
+   * Measured over the current window instead, `▼ 10 more` narrowing to
+   * `▼ 9 more` took a column off the frame on a single Down press.
+   */
+  test("keeps the panel's width while the window scrolls under it", async () => {
+    let opened = "";
+    let scrolled = "";
+    const result = await runSelection(
+      "abcdefghijklm".split("").map((label) => ({ label, value: label })),
+      [
+        async (stderr) => {
+          await until(() => stderr.text().includes("▼ 10"));
+          opened = frameRows(stderr, "Zx")[0] as string;
+        },
+        DOWN,
+        DOWN,
+        DOWN,
+        async (stderr) => {
+          await until(() => stderr.text().includes("▲ 1 "));
+          scrolled = frameRows(stderr, "Zx")[0] as string;
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(10),
+      "Zx",
+    );
+
+    expect(result.value).toBe("d");
+    expect(opened).toHaveLength(13);
+    expect(scrolled).toBe(opened);
+  });
+
+  /**
+   * Sizing the panel from every visible option makes the number of widths
+   * measured the length of the list rather than the height of the window, so
+   * the maximum is taken in one pass instead of by spreading an array into
+   * `Math.max` — an argument list that long throws `RangeError`. Four hundred
+   * options is well short of that limit and would pass either way; what it
+   * pins is that the running maximum still finds the one wide label, and finds
+   * it two hundred rows below the window that is on screen.
+   */
+  test("sizes a long list from its widest option, window or not", async () => {
+    const wide = "Widest label in a long list";
+    const long = (widest: boolean): readonly SelectOption<number>[] =>
+      Array.from({ length: 400 }, (_, index) => ({
+        label:
+          widest && index === 300
+            ? wide
+            : `Option ${String(index + 1).padStart(3, "0")}`,
+        value: index + 1,
+      }));
+
+    const widened = await runSelection(
+      long(true),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(widened.value).toBe(1);
+    expect(activeRow(widened.stderr)).toBe("Option 001");
+    // The wide label is two hundred rows below the ten on screen, so its width
+    // can only have come from measuring the whole visible list: twenty-seven
+    // columns of label inside four columns of border.
+    expect(frameRows(widened.stderr)[0]).toHaveLength(wide.length + 4);
+
+    // The same list without it falls back to the widest row it does have — a
+    // ten-column label, tied with the `▼ 390 more` indicator at its largest.
+    const plain = await runSelection(
+      long(false),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(plain.value).toBe(1);
+    expect(frameRows(plain.stderr)[0]).toHaveLength(14);
+  });
+
+  /**
+   * The whole frame, chrome included, has to stay strictly shorter than the
+   * terminal. Measured on the rendered frame rather than on the arithmetic,
+   * because the arithmetic bounds only the option rows. Six rows choosing and
+   * nine collecting are the tightest terminals a filter-enabled select fits
+   * under; below those its minimum frame of five and eight rows cannot, which
+   * is recorded as an open question on change 0020.
+   */
+  test.each([6, 7, 8, 9, 10, 12, 16])(
+    "renders a frame shorter than a terminal of %i rows",
+    async (rows) => {
+      const result = await runSelection(
+        listed(30),
+        [CARRIAGE_RETURN],
+        undefined,
+        terminalOfRows(rows),
+      );
+
+      expect(frameRows(result.stderr).length).toBeLessThan(rows);
+    },
+  );
+
+  test.each([9, 10, 12, 16])(
+    "renders a collecting frame shorter than a terminal of %i rows",
+    async (rows) => {
+      let collecting: readonly string[] = [];
+      await runSelection(
+        [
+          ...listed(30),
+          {
+            label: "Other…",
+            value: 0,
+            fields: [{ type: "text", name: "branch", message: "Branch" }],
+          },
+        ],
+        [
+          END,
+          CARRIAGE_RETURN,
+          async (stderr) => {
+            await until(() => stderr.text().includes("Branch"));
+            collecting = frameRows(stderr);
+          },
+          CARRIAGE_RETURN,
+        ],
+        undefined,
+        terminalOfRows(rows),
+      );
+
+      expect(collecting.length).toBeGreaterThan(0);
+      expect(collecting.length).toBeLessThan(rows);
+    },
+  );
 
   test("windows the filtered list rather than the supplied one", async () => {
     const result = await runSelection(
@@ -1659,11 +2087,11 @@ describe("select viewport and extended navigation", () => {
     );
 
     expect(result.value).toBe(29);
-    const frame = lastFrame(result.stderr);
+    const frame = stripped(lastFrame(result.stderr));
     expect(frame).toContain("› alpha");
     expect(frame).toContain("▲ 5 more");
-    expect(frame).toContain("  Alpha 11");
-    expect(frame).toContain("> Alpha 29");
+    expect(frame).toContain("Alpha 11");
+    expect(activeRow(result.stderr)).toBe("Alpha 29");
     expect(frame).not.toContain("Alpha 09");
     expect(frame).not.toContain("▼");
     expect(frame).not.toContain("Beta");
@@ -2006,7 +2434,10 @@ describe("user-provided select options", () => {
 
     expect(result.value).toBe("custom");
     expect(result.values).toEqual({ branch: "" });
-    expect(result.stderr.text()).not.toContain("> Known");
+    // No frame the dialog ever drew put the bar on the option the Down arrow
+    // would have moved to.
+    expect(invertedRows(result.stderr.text())).not.toContain("Known");
+    expect(activeRow(result.stderr)).toBe("Custom");
   });
 
   test.each([
@@ -2229,5 +2660,249 @@ describe("user-provided select options", () => {
     expect(stdin.unrefs).toBe(1);
     expect(stdin.activeReferences).toBe(0);
     expect(stdin.listenerCount("data")).toBe(0);
+  });
+});
+
+describe("Norton Commander presentation", () => {
+  const DOWN = `${ESCAPE}[B`;
+
+  /** The SGR codes a dialog is allowed to emit: dim on and off, inverse on and
+   * off. Any other one would be a hue, which the palette does not have. */
+  const GREYSCALE_CODES = new Set(["2", "22", "7", "27"]);
+
+  const SGR = new RegExp(`${ESCAPE}\\[([\\d;]*)m`, "g");
+
+  const DIM_OPEN = `${ESCAPE}[2m`;
+  const DIM_CLOSE = `${ESCAPE}[22m`;
+
+  test("draws a select in a double frame titled with its message, hints beneath", async () => {
+    const result = await runSelection(
+      [
+        { label: "Alpha", value: "alpha" },
+        { label: "Beta", value: "beta" },
+        { label: "Gamma", value: "gamma" },
+      ],
+      [DOWN, CARRIAGE_RETURN],
+      false,
+    );
+
+    expect(result.value).toBe("beta");
+    expect(frameRows(result.stderr)).toEqual([
+      "╔═ Pick one ═╗",
+      "║ Alpha      ║",
+      "║ Beta       ║",
+      "║ Gamma      ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · Esc cancel",
+    ]);
+    expect(activeRow(result.stderr)).toBe("Beta");
+  });
+
+  test("draws a standalone input in a single frame with the caret after the value", async () => {
+    const result = await runEntry(
+      { message: "Branch name", initialValue: "main" },
+      [CARRIAGE_RETURN],
+    );
+
+    expect(result.value).toBe("main");
+    expect(frameRows(result.stderr, "Branch name")).toEqual([
+      "┌─ Branch name ─┐",
+      "│ main█         │",
+      "└───────────────┘",
+      " Enter submit · Esc cancel",
+    ]);
+  });
+
+  test("names the filter in the select hints exactly when it is enabled", async () => {
+    const enabled = await runSelection(
+      [{ label: "Alpha", value: "alpha" }],
+      [CARRIAGE_RETURN],
+      true,
+    );
+    const enabledRows = frameRows(enabled.stderr);
+    expect(enabledRows.at(-1)).toBe(
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    );
+
+    const disabled = await runSelection(
+      [{ label: "Alpha", value: "alpha" }],
+      [CARRIAGE_RETURN],
+      false,
+    );
+    expect(frameRows(disabled.stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · Esc cancel",
+    );
+  });
+
+  test("truncates a long label and a long title at the end within the terminal", async () => {
+    const label = "L".repeat(60);
+    const message = "A question long enough that forty columns cannot hold it";
+    const result = await runSelection(
+      [{ label, value: "long" }],
+      [CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(40),
+      message,
+    );
+
+    expect(result.value).toBe("long");
+    const rows = frameRows(result.stderr, "A question long");
+    for (const row of rows) expect(row.length).toBeLessThanOrEqual(40);
+    expect(rows[0]).toHaveLength(40);
+    expect(rows[0]?.startsWith("╔═ A question long")).toBe(true);
+    expect(rows[0]?.endsWith("…╗")).toBe(true);
+    // One row, ending in the renderer's ellipsis, exactly as wide as the bar.
+    const active = activeRow(result.stderr, "A question long");
+    expect(active).toHaveLength(36);
+    expect(active.endsWith("…")).toBe(true);
+    expect(active.startsWith("LLL")).toBe(true);
+  });
+
+  test("truncates entered text and filter text at the start, keeping the caret", async () => {
+    const entered = await runEntry(
+      { message: "Value", initialValue: "e".repeat(60) },
+      [CARRIAGE_RETURN],
+      new TerminalInput(),
+      terminalOfColumns(40),
+    );
+    const valueRow = frameRows(entered.stderr, "Value")[1] as string;
+    expect(valueRow).toHaveLength(40);
+    expect(valueRow.startsWith("│ …")).toBe(true);
+    expect(valueRow.endsWith("e█ │")).toBe(true);
+
+    const typed = "f".repeat(40);
+    const filtered = await runSelection(
+      [{ label: "Alpha", value: "alpha" }],
+      [typed, ESCAPE],
+      true,
+      terminalOfColumns(40),
+    );
+    expect(filtered.value).toBeUndefined();
+    const filterRow = frameRows(filtered.stderr)[1] as string;
+    expect(filterRow).toHaveLength(40);
+    expect(filterRow.startsWith("║ …")).toBe(true);
+    expect(filterRow.endsWith("f█ ║")).toBe(true);
+    // The prompt is the head of the row, so start truncation is what drops it.
+    expect(filterRow).not.toContain("›");
+  });
+
+  test("sizes the panel in terminal columns, not in code units", async () => {
+    // Eighteen ideographs are eighteen code units and thirty-six columns, so a
+    // panel sized by the string's length would truncate a label the terminal
+    // has ample room for.
+    const label = "界".repeat(18);
+    const result = await runSelection(
+      [{ label, value: "wide" }],
+      [CARRIAGE_RETURN],
+      false,
+    );
+
+    expect(result.value).toBe("wide");
+    const rows = frameRows(result.stderr);
+    expect(rows[0]).toBe(`╔═ Pick one ${"═".repeat(27)}╗`);
+    expect(activeRow(result.stderr)).toBe(label);
+    expect(rows[1]).toBe(`║ ${label} ║`);
+  });
+
+  test("lays out for twenty columns in a terminal narrower than that", async () => {
+    const result = await runSelection(
+      [{ label: "N".repeat(30), value: "narrow" }],
+      [CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(10),
+    );
+
+    expect(result.value).toBe("narrow");
+    // Twenty columns is the narrowest supported terminal, so the frame is laid
+    // out for twenty rather than for the ten it was told about; how the
+    // terminal wraps the result is not the dialog's business.
+    for (const row of frameRows(result.stderr)) {
+      expect(row.length).toBeLessThanOrEqual(20);
+    }
+    expect(frameRows(result.stderr)[0]).toHaveLength(20);
+    expect(activeRow(result.stderr)).toHaveLength(16);
+  });
+
+  test("follows the terminal width when it changes under the dialog", async () => {
+    let wide = "";
+    let narrow = "";
+    const result = await runSelection(
+      [{ label: "W".repeat(30), value: "wide" }],
+      [
+        async (stderr) => {
+          await until(() => stderr.text().includes("WWW"));
+          wide = frameRows(stderr)[0] as string;
+          stderr.columns = 24;
+          stderr.emit("resize");
+        },
+        async (stderr) => {
+          await until(() => frameRows(stderr)[0]?.length === 24);
+          narrow = frameRows(stderr)[0] as string;
+        },
+        CARRIAGE_RETURN,
+      ],
+      false,
+    );
+
+    expect(result.value).toBe("wide");
+    expect(wide).toHaveLength(34);
+    expect(narrow).toHaveLength(24);
+  });
+
+  test("dims the chrome, inverts the active option, and emits no hue", async () => {
+    const result = await runSelection(
+      Array.from({ length: 30 }, (_, index) => ({
+        label: `Option ${String(index + 1).padStart(2, "0")}`,
+        value: index + 1,
+      })),
+      [CARRIAGE_RETURN],
+      true,
+      terminalOfRows(40),
+    );
+
+    const frame = lastFrame(result.stderr);
+    // The frame edges, the title, the filter prompt, the overflow indicator,
+    // and the hint line, each wrapped in the dim sequence.
+    // The title shares the top edge's dim run, which is what "set into the
+    // frame" means: one dimmed row carrying border and message together.
+    expect(frame).toContain(`${DIM_OPEN}╔═ Pick one ═╗${DIM_CLOSE}`);
+    expect(frame).toContain(`${DIM_OPEN}╚`);
+    expect(frame).toContain(`${DIM_OPEN}› ${DIM_CLOSE}`);
+    expect(frame).toContain(`${DIM_OPEN}▼ 20 more${DIM_CLOSE}`);
+    expect(frame).toContain(
+      `${DIM_OPEN}↑↓ move · Enter select · type to filter · Esc cancel${DIM_CLOSE}`,
+    );
+    // The active option is the one inverted run, and it is not dimmed.
+    expect(invertedRows(frame)).toEqual(["Option 01"]);
+    expect(frame).not.toContain(`${DIM_OPEN}Option 01`);
+
+    const codes = [...frame.matchAll(SGR)].map(([, code]) => code as string);
+    expect(codes.length).toBeGreaterThan(0);
+    expect([...new Set(codes)].sort()).toEqual(
+      [...GREYSCALE_CODES].sort() as string[],
+    );
+  });
+
+  test("draws no frame at all when a request is rejected before rendering", async () => {
+    const rejected = [
+      await runRejected([]),
+      await runRejected([{ label: "One", value: 1, fields: [] }]),
+      await runRejected([{ label: "One", value: 1 }], new TerminalInput(false)),
+      await runRejected(
+        [{ label: "One", value: 1 }],
+        new TerminalInput(),
+        new CapturedOutput(false),
+      ),
+    ];
+    const redirected = await runEntry(
+      { message: "Redirected" },
+      [],
+      new TerminalInput(false),
+    );
+
+    for (const { failure, stderr } of [...rejected, redirected]) {
+      expect(failure).toBeInstanceOf(Error);
+      expect(stderr.text()).toBe("");
+    }
   });
 });

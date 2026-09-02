@@ -1,6 +1,12 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
-import { type EntryComponent, editedText } from "./entry.ts";
+import { caretGlyph, type EntryComponent, editedText } from "./entry.ts";
 import { visibleOptionIndices } from "./filter.ts";
+import {
+  displayWidth,
+  type FrameComponent,
+  innerWidth,
+  panelWidth,
+} from "./frame.ts";
 import type {
   DialogElement,
   DialogView,
@@ -11,8 +17,8 @@ import type {
 } from "./types.ts";
 import { optionRowCount, optionWindow } from "./viewport.ts";
 
-/** The prompt the filter row carries. Deliberately not the `>` an active option
- * carries, so the two rows stay distinguishable in output. */
+/** The prompt the filter row carries, so the row the user types into is
+ * distinguishable from the option rows under it. */
 const filterPrompt = "›";
 
 /** What the dialog shows when the filter text leaves nothing visible. */
@@ -22,6 +28,35 @@ const noMatch = "no match";
  * hides on its side. */
 const hiddenAboveGlyph = "▲";
 const hiddenBelowGlyph = "▼";
+
+/** The select's key hint line, written out either way rather than assembled,
+ * so each reads as the spec fixes it. The filter phrase is there exactly when
+ * the filter is, so the line never names a key the dialog would ignore. */
+function selectHint(filtering: boolean): string {
+  return filtering
+    ? "↑↓ move · Enter select · type to filter · Esc cancel"
+    : "↑↓ move · Enter select · Esc cancel";
+}
+
+/** One rendered row of the panel, described before it is measured: the panel's
+ * width follows the widest of them, and only then can the cursor bar be padded
+ * to span the width that produced. */
+type PanelRow = {
+  readonly key: string;
+  readonly text: string;
+  /** A dimmed run drawn before the text. The filter needs one because its
+   * prompt is chrome while the text after it is what the user typed, and the
+   * two shadings have to meet inside one row for start truncation to trim the
+   * row as a whole. */
+  readonly prefix?: string;
+  /** Chrome rather than content, so it is dimmed relative to the labels. */
+  readonly dim?: boolean;
+  /** The active option, drawn as a bar across the panel's inner width. */
+  readonly inverse?: boolean;
+  /** Text whose tail matters more than its head — entered text — so a row too
+   * wide for the panel keeps its end and its caret rather than its start. */
+  readonly tail?: boolean;
+};
 
 /** The parts of Ink's key report a movement reads. */
 type NavigationKey = {
@@ -54,7 +89,9 @@ function movedPosition(
   else if (key.upArrow) target = current - 1;
   else if (key.downArrow) target = current + 1;
   else if (key.pageUp || key.pageDown) {
-    const page = optionRowCount(visibleCount, terminalRows);
+    // Navigation is refused once collection begins, so the window this pages
+    // by is always the choosing one.
+    const page = optionRowCount(visibleCount, terminalRows, false);
     target = current + (key.pageUp ? -page : page);
   }
   if (target === undefined || visibleCount === 0) return undefined;
@@ -87,14 +124,17 @@ type SelectViewRequest<T> = {
 export function createSelectView<T>(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
-  Entry: EntryComponent,
+  { Entry, Frame }: { Entry: EntryComponent; Frame: FrameComponent },
   { message, options, filtering }: SelectViewRequest<T>,
   settle: (outcome: Outcome<SelectResult<T>>) => void,
 ): DialogView {
   const cancel = () => settle({ type: "cancelled" });
+  // Neither the request nor the filter setting changes for the life of the
+  // dialog, so its hint line is settled here rather than on every keystroke.
+  const hint = selectHint(filtering);
 
   return function Select() {
-    const { rows } = ink.useWindowSize();
+    const { columns, rows } = ink.useWindowSize();
     const active = react.useRef(0);
     const [activeIndex, setActiveIndex] = react.useState(0);
     /** Where the window sat on the previous frame. It is derived rather than
@@ -186,73 +226,155 @@ export function createSelectView<T>(
       }
     };
 
+    const collectingField = fieldIndex >= 0;
     const visible = visibleOptionIndices(options, filterText);
     // Derived while rendering, and remembered only so the next frame can move
-    // it as little as possible; the window is never state of its own.
+    // it as little as possible; the window is never state of its own. Deriving
+    // it against the state the frame is actually in is what lets the window
+    // give back rows to the field's panel the moment collection begins.
     const viewport = optionWindow(
       visible.length,
       activeIndex,
       windowStart.current,
       rows,
+      collectingField,
     );
-    windowStart.current = viewport.start;
-    /** Every row a select draws is one line of text, so naming the row keeps
-     * the frame's shape readable rather than buried in element construction. */
-    const row = (key: string, text: string) =>
-      react.createElement(ink.Text, { key }, text);
+    // The remembered start, not the rendered one: a terminal too short to draw
+    // the window collapses it to nothing and renders from the top, and storing
+    // that would lose the place the user scrolled to the moment the terminal
+    // grew back.
+    windowStart.current = viewport.rememberedStart;
 
-    const children: DialogElement[] = [row("message", message)];
+    const panelRows: PanelRow[] = [];
     if (filtering) {
-      children.push(row("filter", `${filterPrompt} ${filterText}`));
+      panelRows.push({
+        key: "filter",
+        prefix: `${filterPrompt} `,
+        text: `${filterText}${caretGlyph}`,
+        tail: true,
+      });
     }
     if (visible.length === 0) {
-      children.push(row("no-match", noMatch));
+      panelRows.push({ key: "no-match", text: noMatch });
     } else {
       if (viewport.hiddenAbove > 0) {
-        children.push(
-          row(
-            "hidden-above",
-            `${hiddenAboveGlyph} ${viewport.hiddenAbove} more`,
-          ),
-        );
+        panelRows.push({
+          key: "hidden-above",
+          text: `${hiddenAboveGlyph} ${viewport.hiddenAbove} more`,
+          dim: true,
+        });
       }
       const windowed = visible.slice(
-        viewport.start,
-        viewport.start + viewport.count,
+        viewport.renderedStart,
+        viewport.renderedStart + viewport.count,
       );
       for (const [offset, index] of windowed.entries()) {
         const option = options[index] as SelectOption<T>;
-        const position = viewport.start + offset;
-        const marker = position === activeIndex ? ">" : " ";
-        children.push(row(`option-${index}`, `${marker} ${option.label}`));
+        const position = viewport.renderedStart + offset;
+        panelRows.push({
+          key: `option-${index}`,
+          text: option.label,
+          inverse: position === activeIndex,
+        });
       }
       if (viewport.hiddenBelow > 0) {
-        children.push(
-          row(
-            "hidden-below",
-            `${hiddenBelowGlyph} ${viewport.hiddenBelow} more`,
-          ),
-        );
+        panelRows.push({
+          key: "hidden-below",
+          text: `${hiddenBelowGlyph} ${viewport.hiddenBelow} more`,
+          dim: true,
+        });
       }
     }
-    if (fieldIndex >= 0) {
+
+    // Measured over every visible option and over an indicator carrying the
+    // largest count it can ever carry — not over the rows this frame happens to
+    // draw — so scrolling the window does not resize the panel under the cursor
+    // bar. Whatever the window's position, one side or the other hides exactly
+    // the options the window has no room for, so that total is the widest
+    // either indicator ever gets.
+    //
+    // Kept as a running maximum rather than an array spread into `Math.max`.
+    // Measuring every visible option makes the argument count the length of the
+    // list rather than the height of the window, and a spread that long throws
+    // `RangeError` on a list a select can plausibly be given — a branch, plugin,
+    // or version list. One pass over the same strings, no intermediate array.
+    let content = 0;
+    const measure = (text: string) => {
+      content = Math.max(content, displayWidth(text));
+    };
+    if (filtering) measure(`${filterPrompt} ${filterText}${caretGlyph}`);
+    if (visible.length === 0) measure(noMatch);
+    for (const index of visible) {
+      measure((options[index] as SelectOption<T>).label);
+    }
+    const hidable = visible.length - viewport.count;
+    if (hidable > 0) measure(`${hiddenAboveGlyph} ${hidable} more`);
+    const width = panelWidth(message, content, columns);
+    const inner = innerWidth(width);
+    const children: DialogElement[] = panelRows.map((panelRow) =>
+      react.createElement(
+        ink.Text,
+        {
+          key: panelRow.key,
+          dimColor: panelRow.dim ?? false,
+          inverse: panelRow.inverse ?? false,
+          wrap: panelRow.tail ? "truncate-start" : "truncate-end",
+        },
+        panelRow.prefix === undefined
+          ? undefined
+          : react.createElement(
+              ink.Text,
+              { key: "prefix", dimColor: true },
+              panelRow.prefix,
+            ),
+        // The bar spans the panel rather than the label, so padding to the
+        // inner width is what makes it a bar at all; truncation then trims a
+        // label too long for the panel back to exactly that width.
+        // Padded in columns, not code units, so the bar spans the panel for a
+        // label the terminal draws wider than its `length`.
+        panelRow.inverse
+          ? panelRow.text.padEnd(
+              panelRow.text.length + inner - displayWidth(panelRow.text),
+            )
+          : panelRow.text,
+      ),
+    );
+
+    const panel = react.createElement(
+      Frame,
+      {
+        key: "select",
+        title: message,
+        double: true,
+        width,
+        columns,
+        // While a field is collected the entry's own panel follows this one
+        // and carries the hints that apply; naming navigation and selection
+        // here would name keys the dialog has stopped answering.
+        hint: collectingField ? undefined : hint,
+      },
+      children,
+    );
+    // The column stays the root whether or not a field is on screen, so
+    // beginning collection adds a panel under the existing one rather than
+    // changing the element the whole view hangs from and remounting it.
+    let fieldPanel: DialogElement | undefined;
+    if (collectingField) {
       const collection = collecting.current as Collection<T>;
       const pending = collection.fields[fieldIndex] as TextField;
-      children.push(
-        react.createElement(Entry, {
-          key: `field-${fieldIndex}`,
-          message: pending.message,
-          initialValue: pending.initialValue,
-          onSubmit: (value: string) => submitField(fieldIndex, value),
-          onCancel: cancel,
-        }),
-      );
+      fieldPanel = react.createElement(Entry, {
+        key: `field-${fieldIndex}`,
+        message: pending.message,
+        initialValue: pending.initialValue,
+        onSubmit: (value: string) => submitField(fieldIndex, value),
+        onCancel: cancel,
+      });
     }
-
     return react.createElement(
       ink.Box,
       { flexDirection: "column" },
-      ...children,
+      panel,
+      fieldPanel,
     );
   };
 }

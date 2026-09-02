@@ -104,15 +104,15 @@ Tests strip escape sequences with the runtime's built-in stripper before matchin
 
 ## Tasks
 
-- [ ] Frame, title, palette, and layout
-  - [ ] Add a frame module under `plugins/dialogs/` rendering a bordered panel with the title set into the top edge, dimmed chrome, and greyscale-only styling, sized to content and capped at the terminal width
-  - [ ] Render `select` in a double-line frame with the inverted full-width cursor bar, the dimmed filter prompt and overflow indicators, and the dimmed key hint line beneath the frame that names the filter only when it is enabled
-  - [ ] Render `input` and each collected field in a single-line frame with the caret after the value
-  - [ ] Truncate labels and titles at the end and entered values and filter text at the start, never wrapping
-  - [ ] Update the viewport chrome-height constant from [0020](./0020-add-select-filter-and-viewport.md) and re-run its tests
-  - [ ] Add a Bun test preload that sets `FORCE_COLOR=1` before any module loads, an escape-stripping helper and an inverted-row helper to the dialog tests, migrate every marker assertion to the inverted-row helper so it fails against the old output, and add tests for the frame and title, the double and single frames, the hint lines for select with and without the filter and for input, truncation at forty columns for labels and titles, start truncation for entered text and filter text, width following resize, dimming in one dedicated raw-output test, and unchanged empty output on every pre-render rejection
-  - [ ] Document the look in `docs/manual/plugins.md`
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Frame, title, palette, and layout
+  - [x] Add a frame module under `plugins/dialogs/` rendering a bordered panel with the title set into the top edge, dimmed chrome, and greyscale-only styling, sized to content and capped at the terminal width
+  - [x] Render `select` in a double-line frame with the inverted full-width cursor bar, the dimmed filter prompt and overflow indicators, and the dimmed key hint line beneath the frame that names the filter only when it is enabled
+  - [x] Render `input` and each collected field in a single-line frame with the caret after the value
+  - [x] Truncate labels and titles at the end and entered values and filter text at the start, never wrapping
+  - [x] Update the viewport chrome-height constant from [0020](./0020-add-select-filter-and-viewport.md) and re-run its tests
+  - [x] Add a Bun test preload that sets `FORCE_COLOR=1` before any module loads, an escape-stripping helper and an inverted-row helper to the dialog tests, migrate every marker assertion to the inverted-row helper so it fails against the old output, and add tests for the frame and title, the double and single frames, the hint lines for select with and without the filter and for input, truncation at forty columns for labels and titles, start truncation for entered text and filter text, width following resize, dimming in one dedicated raw-output test, and unchanged empty output on every pre-render rejection
+  - [x] Document the look in `docs/manual/plugins.md`
+  - [x] Verify 100% coverage and `bun run check`
 
 - [ ] Animations
   - [ ] Add the shared interval, flash interval, and flash-duration constants and the single per-dialog animation subscription, active only while a caret, an indicator, or a flash is on screen, with the caret blinking on its frame parity wherever text entry or the filter is on screen
