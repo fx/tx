@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/fx/tx/compare/v1.6.0...v1.6.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **executable:** exempt and verify the delegated tx self-update ([#58](https://github.com/fx/tx/issues/58)) ([5149690](https://github.com/fx/tx/commit/51496907aa8bba4cc013ae4a9819c6595169ac3b))
+
 ## [1.6.0](https://github.com/fx/tx/compare/v1.5.0...v1.6.0) (2026-09-02)
 
 
