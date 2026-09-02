@@ -6,10 +6,19 @@ import { displayWidth, type FrameComponent, panelWidth } from "./frame.ts";
  * a different prompt. */
 export const caretGlyph = "█";
 
-/** What stands in the caret's cell while it is on its hidden phase. Blanking
- * the cell rather than dropping it is what keeps a blinking caret from
- * resizing the panel it sits in twice a second. */
-export const hiddenCaret = " ";
+/** What stands in the caret's cell while it is on its hidden phase. */
+const hiddenCaret = " ";
+
+/**
+ * Text with the caret after it, drawn or blanked according to the phase it is
+ * on. The cell is kept either way, which is what stops a blinking caret from
+ * resizing the panel it sits in twice a second and shifting the text under the
+ * reader; every row that draws a caret goes through here, so that rule holds in
+ * one place rather than wherever text is entered.
+ */
+export function withCaret(text: string, shown: boolean): string {
+  return `${text}${shown ? caretGlyph : hiddenCaret}`;
+}
 
 /** The key hint line under a standalone input and under a field: the two keys
  * an entry answers to. */
@@ -118,10 +127,8 @@ export function createEntry(
     });
 
     // The caret rides with the value in one text, so start truncation keeps
-    // the tail of a long value and the caret itself in view together. Its cell
-    // is kept while it is hidden, so the panel does not change width on the
-    // blink's own timer and the value does not shift under the reader.
-    const entry = `${value}${caret ? caretGlyph : hiddenCaret}`;
+    // the tail of a long value and the caret itself in view together.
+    const entry = withCaret(value, caret);
     const width = panelWidth(message, displayWidth(entry), columns);
     return react.createElement(
       Frame,

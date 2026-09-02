@@ -7,7 +7,7 @@ import type {
   PluginDefinition,
   PluginIdentity,
 } from "@fx/tx/plugin";
-import { animationInterval, evenFrame } from "./animation.ts";
+import { animationInterval, onPhase } from "./animation.ts";
 import { createEntry } from "./entry.ts";
 import { filterIsEnabled } from "./filter.ts";
 import { createFrame } from "./frame.ts";
@@ -352,13 +352,13 @@ const definition: PluginDefinition = Object.freeze({
               // The dialog's one animation subscription. A standalone input
               // always has its caret on screen, so it never idles and needs no
               // activity test of its own.
-              const { frame, reset } = ink.useAnimation({
+              const { time, reset } = ink.useAnimation({
                 interval: animationInterval,
               });
               return react.createElement(Entry, {
                 message,
                 initialValue,
-                caret: evenFrame(frame),
+                caret: onPhase(time, animationInterval),
                 onEdit: reset,
                 onSubmit: (value: string) =>
                   settle({ type: "completed", value }),

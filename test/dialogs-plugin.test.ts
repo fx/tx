@@ -55,6 +55,8 @@ const BACKSPACE = String.fromCharCode(127);
 const CTRL_A = String.fromCharCode(1);
 const CTRL_C = String.fromCharCode(3);
 const CARRIAGE_RETURN = "\r";
+const UP = `${ESCAPE}[A`;
+const DOWN = `${ESCAPE}[B`;
 const NEXT_LINE = String.fromCharCode(0x85);
 const GRINNING_FACE = String.fromCodePoint(0x1f600);
 
@@ -329,6 +331,11 @@ function frameRows(
 /** The sequences the renderer wraps an inverted run in. The active option is
  * the only inverted element a dialog draws, so they are how a test tells which
  * row the cursor bar is on now that no marker character says so. */
+/** The sequences the renderer wraps a dimmed run in, which is how a test tells
+ * chrome from content and a pulsing indicator from a resting one. */
+const DIM_OPEN = `${ESCAPE}[2m`;
+const DIM_CLOSE = `${ESCAPE}[22m`;
+
 const INVERSE_OPEN = `${ESCAPE}[7m`;
 const INVERSE_CLOSE = `${ESCAPE}[27m`;
 
@@ -355,6 +362,15 @@ function activeRow(stderr: CapturedOutput, anchor = SELECT_MESSAGE): string {
   const rows = invertedRows(lastFrame(stderr, anchor));
   expect(rows).toHaveLength(1);
   return rows[0] as string;
+}
+
+/** Labels are numbered from `01`, so no label is a substring of another and
+ * an assertion that one row is absent means it. */
+function listed(count: number): readonly SelectOption<number>[] {
+  return Array.from({ length: count }, (_, index) => ({
+    label: `Option ${String(index + 1).padStart(2, "0")}`,
+    value: index + 1,
+  }));
 }
 
 /** A terminal double of a chosen height, for the dialogs whose behavior depends
@@ -1293,9 +1309,6 @@ describe("bundled dialogs provider", () => {
 });
 
 describe("select filter", () => {
-  const DOWN = `${ESCAPE}[B`;
-  const UP = `${ESCAPE}[A`;
-
   function named(
     ...labels: readonly string[]
   ): readonly SelectOption<string>[] {
@@ -1523,21 +1536,10 @@ describe("select filter", () => {
 });
 
 describe("select viewport and extended navigation", () => {
-  const UP = `${ESCAPE}[A`;
-  const DOWN = `${ESCAPE}[B`;
   const HOME = `${ESCAPE}[H`;
   const END = `${ESCAPE}[F`;
   const PAGE_UP = `${ESCAPE}[5~`;
   const PAGE_DOWN = `${ESCAPE}[6~`;
-
-  /** Labels are numbered from `01`, so no label is a substring of another and
-   * an assertion that one row is absent means it. */
-  function listed(count: number): readonly SelectOption<number>[] {
-    return Array.from({ length: count }, (_, index) => ({
-      label: `Option ${String(index + 1).padStart(2, "0")}`,
-      value: index + 1,
-    }));
-  }
 
   /** Thirty options of which the fifteen odd positions carry `Alpha`, so a
    * filter leaves a list still longer than the window. */
@@ -2694,16 +2696,11 @@ describe("user-provided select options", () => {
 });
 
 describe("Norton Commander presentation", () => {
-  const DOWN = `${ESCAPE}[B`;
-
   /** The SGR codes a dialog is allowed to emit: dim on and off, inverse on and
    * off. Any other one would be a hue, which the palette does not have. */
   const GREYSCALE_CODES = new Set(["2", "22", "7", "27"]);
 
   const SGR = new RegExp(`${ESCAPE}\\[([\\d;]*)m`, "g");
-
-  const DIM_OPEN = `${ESCAPE}[2m`;
-  const DIM_CLOSE = `${ESCAPE}[22m`;
 
   test("draws a select in a double frame titled with its message, hints beneath", async () => {
     const result = await runSelection(
@@ -2938,10 +2935,7 @@ describe("Norton Commander presentation", () => {
 });
 
 describe("dialog animations", () => {
-  const DOWN = `${ESCAPE}[B`;
   const CARET = "█";
-  const DIM_OPEN = `${ESCAPE}[2m`;
-  const DIM_CLOSE = `${ESCAPE}[22m`;
 
   /** The 250 milliseconds the spec gives a confirmed select to settle in. It is
    * the spec's own budget rather than the implementation's, so a flash that
@@ -2952,12 +2946,6 @@ describe("dialog animations", () => {
    * A flash interval under it would have its ticks coalesced rather than
    * delivered, which is the difference between a blink and a stall. */
   const RENDER_THROTTLE = Math.ceil(1000 / 30);
-
-  const listed = (count: number): readonly SelectOption<number>[] =>
-    Array.from({ length: count }, (_, index) => ({
-      label: `Option ${String(index + 1).padStart(2, "0")}`,
-      value: index + 1,
-    }));
 
   /** The row the filter is typed into, which is the row the caret sits on. */
   function filterRow(stderr: CapturedOutput): string {
@@ -3214,6 +3202,15 @@ describe("dialog animations", () => {
 
   test("leaves no timer running once a dialog has unmounted", async () => {
     const probe = trackTimers();
+    let seen = 0;
+    /** Every exit path is checked against the timers its own dialog set, not
+     * against the ones an earlier dialog set: a guard that only counted the
+     * running total would be satisfied by the first case for all three. */
+    const animated = () => {
+      expect(probe.seen()).toBeGreaterThan(seen);
+      seen = probe.seen();
+      return probe.live();
+    };
     try {
       // Completion, through the confirmation flash, so the flash's own timer
       // has to be gone as well as the caret's.
@@ -3226,17 +3223,12 @@ describe("dialog animations", () => {
         true,
       );
       expect(completed.value).toBe("alpha");
-      // Non-vacuous: the dialog really did animate, so "none is left" is a
-      // statement about timers that existed rather than about a match that
-      // never fired.
-      expect(probe.seen()).toBeGreaterThan(0);
-      expect(probe.live()).toBe(0);
+      expect(animated()).toBe(0);
 
       // Cancellation, from a select whose caret and indicator were both live.
       const cancelled = await runSelection(listed(30), [ESCAPE], true);
       expect(cancelled.value).toBeUndefined();
-      expect(probe.seen()).toBeGreaterThan(0);
-      expect(probe.live()).toBe(0);
+      expect(animated()).toBe(0);
 
       // Failure: a terminal that cannot be restored rejects the dialog after
       // it has rendered and animated.
@@ -3248,8 +3240,7 @@ describe("dialog animations", () => {
         stdin,
       );
       expect(failed.failure).toBeInstanceOf(Error);
-      expect(probe.seen()).toBeGreaterThan(0);
-      expect(probe.live()).toBe(0);
+      expect(animated()).toBe(0);
     } finally {
       probe.restore();
     }

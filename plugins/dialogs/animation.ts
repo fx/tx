@@ -29,13 +29,21 @@ export const flashInterval = 60;
 export const flashDuration = 180;
 
 /**
- * Whether the animation is on the phase its elements show themselves in: the
- * caret visible, the overflow indicator dimmed, the cursor bar inverted.
+ * Whether an element blinking at `interval` is on the phase it shows itself
+ * on — the caret visible, the overflow indicator dimmed, the cursor bar
+ * inverted — after `elapsed` milliseconds of animation.
  *
- * One parity for all three, because one subscription drives all three. Frame
- * zero is that phase, so a dialog opens — and a reset lands — with its caret
- * on screen rather than a blink away from it.
+ * Phase is read from elapsed time rather than from the subscription's frame
+ * counter because one subscription drives elements that blink at different
+ * rates: the flash runs the shared timer faster for as long as it lasts, and a
+ * frame counter would carry that faster rate to the caret and the indicator as
+ * a side effect. Elapsed time restarts with the flash and never reaches one
+ * caret interval inside it, so both simply hold their opening phase for the
+ * whole of it, and no element needs a special case saying so.
+ *
+ * Zero is that phase, so a dialog opens — and a reset lands — with its caret on
+ * screen rather than a blink away from it.
  */
-export function evenFrame(frame: number): boolean {
-  return frame % 2 === 0;
+export function onPhase(elapsed: number, interval: number): boolean {
+  return Math.floor(elapsed / interval) % 2 === 0;
 }
