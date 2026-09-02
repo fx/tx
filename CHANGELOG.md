@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.0](https://github.com/fx/tx/compare/v1.5.0...v1.6.0) (2026-09-02)
+
+
+### Features
+
+* **dialogs:** add a type-to-filter to select ([#53](https://github.com/fx/tx/issues/53)) ([d0f7618](https://github.com/fx/tx/commit/d0f7618e445d80feb03cc99c66f3e28d0a9ddee7))
+* **dialogs:** animate the caret, overflow indicator, and confirmation ([#57](https://github.com/fx/tx/issues/57)) ([420315d](https://github.com/fx/tx/commit/420315d69d72ea29beba53eb1e9230c9526ca23e))
+* **dialogs:** frame dialogs in a Norton Commander panel ([#56](https://github.com/fx/tx/issues/56)) ([df775e3](https://github.com/fx/tx/commit/df775e3554a5a703122fd9538d50f9230005c7e0))
+* **dialogs:** window the select option list and extend its navigation ([#55](https://github.com/fx/tx/issues/55)) ([5292519](https://github.com/fx/tx/commit/5292519f060a1aa57404e9c35eba0d645d9a1a2b))
+
 ## [1.5.0](https://github.com/fx/tx/compare/v1.4.0...v1.5.0) (2026-09-01)
 
 
