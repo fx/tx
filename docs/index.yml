@@ -185,6 +185,6 @@ changes:
     path: changes/0021-restyle-dialogs-as-norton-commander.md
     description: Restyle the dialogs in greyscale Norton Commander fashion with framed titled panels, an inverted cursor bar, key hints, truncation, and bounded caret, pulse, and confirmation animations.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0020"

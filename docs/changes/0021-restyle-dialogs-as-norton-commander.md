@@ -5,7 +5,7 @@
 Give the bundled dialogs a Norton Commander look in greyscale: framed panels with the message set into the frame as a title, an inverted full-width cursor bar, dimmed chrome and key hints, width-aware truncation, and three bounded animations — a blinking caret, a pulsing overflow indicator, and a flash on confirmation — none of which may slow a keystroke. [Dialogs](../specs/dialogs/) owns the observable behavior.
 
 **Specs:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** [0020](./0020-add-select-filter-and-viewport.md)
 
 ## Motivation
@@ -114,13 +114,13 @@ Tests strip escape sequences with the runtime's built-in stripper before matchin
   - [x] Document the look in `docs/manual/plugins.md`
   - [x] Verify 100% coverage and `bun run check`
 
-- [ ] Animations
-  - [ ] Add the shared interval, flash interval, and flash-duration constants and the single per-dialog animation subscription, active only while a caret, an indicator, or a flash is on screen, with the caret blinking on its frame parity wherever text entry or the filter is on screen
-  - [ ] Pulse the overflow indicator between dim and normal on the same frame parity, only while rows are hidden
-  - [ ] Flash the cursor bar on a plain-option Enter, ignore every key including Escape and Ctrl-C during the flash, and settle on elapsed time within the 250 ms budget
-  - [ ] Add Bun tests for the caret toggling, a keystroke reflected in the next render during the hidden phase, the pulse present only with hidden rows, the flash settling within budget with Escape ignored, a static select writing nothing while idle, and no timer outliving unmount on completion, cancellation, and failure
-  - [ ] Document the animations and idle quiescence in `docs/manual/plugins.md`
-  - [ ] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
+- [x] Animations
+  - [x] Add the shared interval, flash interval, and flash-duration constants and the single per-dialog animation subscription, active only while a caret, an indicator, or a flash is on screen, with the caret blinking on its frame parity wherever text entry or the filter is on screen
+  - [x] Pulse the overflow indicator between dim and normal on the same frame parity, only while rows are hidden
+  - [x] Flash the cursor bar on a plain-option Enter, ignore every key including Escape and Ctrl-C during the flash, and settle on elapsed time within the 250 ms budget
+  - [x] Add Bun tests for the caret toggling, a keystroke reflected in the next render during the hidden phase, the pulse present only with hidden rows, the flash settling within budget with Escape ignored, a static select writing nothing while idle, and no timer outliving unmount on completion, cancellation, and failure
+  - [x] Document the animations and idle quiescence in `docs/manual/plugins.md`
+  - [x] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
 
 ## Open Questions
 
