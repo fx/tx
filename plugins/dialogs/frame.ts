@@ -5,6 +5,19 @@ import type { DialogElement } from "./types.ts";
  * and one padding column on each side. */
 const frameChromeWidth = 4;
 
+/**
+ * The terminal columns a string occupies, which is what a panel is sized in.
+ * A string's `length` counts UTF-16 code units, and neither wide characters
+ * nor astral ones occupy one column each: eighteen ideographs are eighteen
+ * code units and thirty-six columns, so a panel sized by `length` would
+ * truncate a label the terminal had room for. The runtime measures this
+ * itself, which is why no width library is imported for it — and it is the
+ * same measure the renderer truncates by, so the two agree.
+ */
+export function displayWidth(text: string): number {
+  return Bun.stringWidth(text);
+}
+
 /** The narrowest terminal a dialog lays itself out for. A narrower one still
  * gets this layout, and how the terminal wraps the result is unspecified —
  * laying out into three columns would be worse than overflowing a terminal
@@ -29,7 +42,8 @@ export function panelWidth(
   contentColumns: number,
   terminalColumns: number,
 ): number {
-  const desired = Math.max(title.length + 2, contentColumns) + frameChromeWidth;
+  const desired =
+    Math.max(displayWidth(title) + 2, contentColumns) + frameChromeWidth;
   return Math.min(layoutColumns(terminalColumns), desired);
 }
 

@@ -1,7 +1,12 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
 import { caretGlyph, type EntryComponent, editedText } from "./entry.ts";
 import { visibleOptionIndices } from "./filter.ts";
-import { type FrameComponent, innerWidth, panelWidth } from "./frame.ts";
+import {
+  displayWidth,
+  type FrameComponent,
+  innerWidth,
+  panelWidth,
+} from "./frame.ts";
 import type {
   DialogElement,
   DialogView,
@@ -274,7 +279,7 @@ export function createSelectView<T>(
     const widest = Math.max(
       0,
       ...panelRows.map(
-        ({ prefix, text }) => (prefix ?? "").length + text.length,
+        ({ prefix, text }) => displayWidth(prefix ?? "") + displayWidth(text),
       ),
     );
     const width = panelWidth(message, widest, columns);
@@ -298,7 +303,13 @@ export function createSelectView<T>(
         // The bar spans the panel rather than the label, so padding to the
         // inner width is what makes it a bar at all; truncation then trims a
         // label too long for the panel back to exactly that width.
-        panelRow.inverse ? panelRow.text.padEnd(inner) : panelRow.text,
+        // Padded in columns, not code units, so the bar spans the panel for a
+        // label the terminal draws wider than its `length`.
+        panelRow.inverse
+          ? panelRow.text.padEnd(
+              panelRow.text.length + inner - displayWidth(panelRow.text),
+            )
+          : panelRow.text,
       ),
     );
 
@@ -318,21 +329,26 @@ export function createSelectView<T>(
       },
       children,
     );
-    if (!collectingField) return panel;
-
-    const collection = collecting.current as Collection<T>;
-    const pending = collection.fields[fieldIndex] as TextField;
-    return react.createElement(
-      ink.Box,
-      { flexDirection: "column" },
-      panel,
-      react.createElement(Entry, {
+    // The column stays the root whether or not a field is on screen, so
+    // beginning collection adds a panel under the existing one rather than
+    // changing the element the whole view hangs from and remounting it.
+    let fieldPanel: DialogElement | undefined;
+    if (collectingField) {
+      const collection = collecting.current as Collection<T>;
+      const pending = collection.fields[fieldIndex] as TextField;
+      fieldPanel = react.createElement(Entry, {
         key: `field-${fieldIndex}`,
         message: pending.message,
         initialValue: pending.initialValue,
         onSubmit: (value: string) => submitField(fieldIndex, value),
         onCancel: cancel,
-      }),
+      });
+    }
+    return react.createElement(
+      ink.Box,
+      { flexDirection: "column" },
+      panel,
+      fieldPanel,
     );
   };
 }

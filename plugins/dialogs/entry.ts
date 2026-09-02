@@ -1,5 +1,5 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
-import { type FrameComponent, panelWidth } from "./frame.ts";
+import { displayWidth, type FrameComponent, panelWidth } from "./frame.ts";
 
 /** The caret drawn after text under entry, so the row the user is typing into
  * says so. Shared with the select filter, which is the same editing step under
@@ -104,7 +104,7 @@ export function createEntry(
     // The caret rides with the value in one text, so start truncation keeps
     // the tail of a long value and the caret itself in view together.
     const entry = `${value}${caretGlyph}`;
-    const width = panelWidth(message, entry.length, columns);
+    const width = panelWidth(message, displayWidth(entry), columns);
     return react.createElement(
       Frame,
       { title: message, double: false, width, columns, hint: entryHint },

@@ -2454,6 +2454,24 @@ describe("Norton Commander presentation", () => {
     expect(filterRow).not.toContain("›");
   });
 
+  test("sizes the panel in terminal columns, not in code units", async () => {
+    // Eighteen ideographs are eighteen code units and thirty-six columns, so a
+    // panel sized by the string's length would truncate a label the terminal
+    // has ample room for.
+    const label = "界".repeat(18);
+    const result = await runSelection(
+      [{ label, value: "wide" }],
+      [CARRIAGE_RETURN],
+      false,
+    );
+
+    expect(result.value).toBe("wide");
+    const rows = frameRows(result.stderr);
+    expect(rows[0]).toBe(`╔═ Pick one ${"═".repeat(27)}╗`);
+    expect(activeRow(result.stderr)).toBe(label);
+    expect(rows[1]).toBe(`║ ${label} ║`);
+  });
+
   test("lays out for twenty columns in a terminal narrower than that", async () => {
     const result = await runSelection(
       [{ label: "N".repeat(30), value: "narrow" }],
