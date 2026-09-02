@@ -136,6 +136,7 @@ Rendering in this change stays unstyled but uses the glyphs the spec fixes, so i
 ## Open Questions
 
 - [ ] Whether the `"auto"` threshold should be lower than eight once a bundled consumer presents a real list — the spec records it as revisitable; nothing in this change depends on the number beyond one constant and its tests.
+- [ ] Whether the [viewport](../specs/dialogs/index.md#viewport)'s "never fewer than one" option row wants qualifying: at exactly `selectChromeHeight + 1` terminal rows with a user-provided option present, three of that section's requirements cannot all hold. One option row plus the chrome comes to exactly the terminal's height — which is what Ink reads as full-screen — so keeping that row breaks the "MUST NOT clear the terminal" guarantee, while dropping it breaks both "never fewer than one" and "The active option MUST always be among the rendered options". This change chose the no-clearing guarantee over both of the others, since a terminal wiped out from under the reader is the failure a user actually sees, while a row they were never shown is not; below that height the window renders nothing either, so those two go on failing where the no-clearing rule no longer applies.
 
 ## References
 
