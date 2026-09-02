@@ -5,7 +5,7 @@
 Give the bundled `select` dialog a type-to-filter input that is the active element from the moment the dialog opens, enabled per request or automatically for long lists, and bound the option list to a scrolling viewport so long lists stay usable. [Dialogs](../specs/dialogs/) owns the observable behavior of both.
 
 **Specs:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** [0017](./0017-add-dialog-text-input-and-composition.md)
 
 ## Motivation
@@ -124,18 +124,19 @@ Rendering in this change stays unstyled but uses the glyphs the spec fixes, so i
   - [x] Document the filter in `docs/manual/plugins.md` and correct its navigation and ignored-input sentences
   - [x] Verify 100% coverage and `bun run check`
 
-- [ ] Add the viewport and extended navigation
-  - [ ] Extract the viewport arithmetic into a module under `plugins/dialogs/`: at most ten rows, reduced so the dialog stays strictly shorter than the terminal using a single chrome-height constant, floor of one, minimal window movement, hidden counts per side
-  - [ ] Read terminal rows through the injected output adapter so the window re-derives on the forwarded `resize` event
-  - [ ] Render only the windowed options plus the `▲ N more` and `▼ N more` indicators with their hidden counts, and `no match` for an empty visible list
-  - [ ] Handle Home, End, Page Up, and Page Down over the visible list with clamping
-  - [ ] Add Bun tests for the arithmetic directly and for the dialog: opens at the top with the below count, window follows the active option, short terminal shrinks the window and the dialog stays shorter than the terminal, resize re-derives it, Home and End, Page keys clamp, and the window composes with a filter
-  - [ ] Document the viewport and the new keys in `docs/manual/plugins.md`
-  - [ ] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
+- [x] Add the viewport and extended navigation
+  - [x] Extract the viewport arithmetic into a module under `plugins/dialogs/`: at most ten rows, reduced so the dialog stays strictly shorter than the terminal using a single chrome-height constant, floor of one, minimal window movement, hidden counts per side
+  - [x] Read terminal rows through the injected output adapter so the window re-derives on the forwarded `resize` event
+  - [x] Render only the windowed options plus the `▲ N more` and `▼ N more` indicators with their hidden counts, and `no match` for an empty visible list
+  - [x] Handle Home, End, Page Up, and Page Down over the visible list with clamping
+  - [x] Add Bun tests for the arithmetic directly and for the dialog: opens at the top with the below count, window follows the active option, short terminal shrinks the window and the dialog stays shorter than the terminal, resize re-derives it, Home and End, Page keys clamp, and the window composes with a filter
+  - [x] Document the viewport and the new keys in `docs/manual/plugins.md`
+  - [x] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
 
 ## Open Questions
 
 - [ ] Whether the `"auto"` threshold should be lower than eight once a bundled consumer presents a real list — the spec records it as revisitable; nothing in this change depends on the number beyond one constant and its tests.
+- [ ] Whether the [viewport](../specs/dialogs/index.md#viewport)'s "never fewer than one" option row wants qualifying: at exactly `selectChromeHeight + 1` terminal rows with a user-provided option present, three of that section's requirements cannot all hold. One option row plus the chrome comes to exactly the terminal's height — which is what Ink reads as full-screen — so keeping that row breaks the "MUST NOT clear the terminal" guarantee, while dropping it breaks both "never fewer than one" and "The active option MUST always be among the rendered options". This change chose the no-clearing guarantee over both of the others, since a terminal wiped out from under the reader is the failure a user actually sees, while a row they were never shown is not; below that height the window renders nothing either, so those two go on failing where the no-clearing rule no longer applies.
 
 ## References
 
