@@ -261,10 +261,39 @@ function lastFrame(stderr: CapturedOutput): string {
   return output.slice(start);
 }
 
+/** The escape sequences Ink writes around a frame, so a row count can ignore
+ * them. Built from the escape character rather than written literally, so the
+ * source carries no control character. */
+const CONTROL_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[a-zA-Z]`, "g");
+
+/** The rows of the frame the dialog left on screen, so a test can count them
+ * against the terminal's height. */
+function frameRows(stderr: CapturedOutput): readonly string[] {
+  const rows = lastFrame(stderr).replace(CONTROL_SEQUENCE, "").split("\n");
+  while (rows.at(-1) === "") rows.pop();
+  return rows;
+}
+
+/** A terminal double of a chosen height, for the dialogs whose behavior depends
+ * on how many rows they have to work with. */
+function terminalOfRows(rows: number): CapturedOutput {
+  const stderr = new CapturedOutput();
+  stderr.rows = rows;
+  return stderr;
+}
+
+/** One step a running dialog takes: a chunk written to its input, or something
+ * done to the terminal it renders on — a resize, or reading the frame that is
+ * on screen while the dialog is still open. */
+type SelectionStep =
+  | string
+  | ((stderr: CapturedOutput) => void | Promise<void>);
+
 async function runSelection<T>(
   options: readonly SelectOption<T>[],
-  input: string | readonly string[],
+  input: string | readonly SelectionStep[],
   filter?: boolean | "auto",
+  stderr: CapturedOutput = new CapturedOutput(),
 ): Promise<{
   readonly value: T | undefined;
   readonly values: Readonly<Record<string, string>> | undefined;
@@ -274,7 +303,6 @@ async function runSelection<T>(
   readonly exitCode: number;
 }> {
   const stdin = new TerminalInput();
-  const stderr = new CapturedOutput();
   const commandContext = context(stdin, stderr);
   const stdoutText = commandContext.stdoutText;
   let result: SelectResult<T> | undefined;
@@ -293,8 +321,9 @@ async function runSelection<T>(
     commandContext,
   );
   await until(() => stdin.rawModes.includes(true));
-  for (const chunk of typeof input === "string" ? [input] : input) {
-    stdin.write(chunk);
+  for (const step of typeof input === "string" ? [input] : input) {
+    if (typeof step === "string") stdin.write(step);
+    else await step(stderr);
     await new Promise<void>((resolve) => setTimeout(resolve, 1));
   }
   const exitCode = await running;
@@ -1392,6 +1421,223 @@ describe("select filter", () => {
     expect(frame).toContain("› cus");
     expect(frame).not.toContain("cusabc");
     expect(frame).not.toContain("Known");
+  });
+});
+
+describe("select viewport and extended navigation", () => {
+  const DOWN = `${ESCAPE}[B`;
+  const HOME = `${ESCAPE}[H`;
+  const END = `${ESCAPE}[F`;
+  const PAGE_UP = `${ESCAPE}[5~`;
+  const PAGE_DOWN = `${ESCAPE}[6~`;
+
+  /** Labels are numbered from `01`, so no label is a substring of another and
+   * an assertion that one row is absent means it. */
+  function listed(count: number): readonly SelectOption<number>[] {
+    return Array.from({ length: count }, (_, index) => ({
+      label: `Option ${String(index + 1).padStart(2, "0")}`,
+      value: index + 1,
+    }));
+  }
+
+  /** Thirty options of which the fifteen odd positions carry `Alpha`, so a
+   * filter leaves a list still longer than the window. */
+  const mixed: readonly SelectOption<number>[] = Array.from(
+    { length: 30 },
+    (_, index) => ({
+      label: `${index % 2 === 0 ? "Beta" : "Alpha"} ${String(index).padStart(2, "0")}`,
+      value: index,
+    }),
+  );
+
+  const shortTerminalFrame = [SELECT_MESSAGE, "›", "> Option 01", "▼ 29 more"];
+
+  const repeated = (chunk: string, times: number): readonly string[] =>
+    Array.from({ length: times }, () => chunk);
+
+  test("opens at the top and counts the options hidden below", async () => {
+    const result = await runSelection(
+      listed(30),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(1);
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("> Option 01");
+    expect(frame).toContain("  Option 10");
+    expect(frame).not.toContain("Option 11");
+    expect(frame).toContain("▼ 20 more");
+    expect(frame).not.toContain("▲");
+  });
+
+  test("follows the active option and counts both sides", async () => {
+    const result = await runSelection(
+      listed(30),
+      [...repeated(DOWN, 10), CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(11);
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("▲ 1 more");
+    expect(frame).toContain("  Option 02");
+    expect(frame).toContain("> Option 11");
+    expect(frame).toContain("▼ 19 more");
+    expect(frame).not.toContain("Option 01");
+    expect(frame).not.toContain("Option 12");
+  });
+
+  test("shrinks in a short terminal and stays shorter than it", async () => {
+    const result = await runSelection(
+      listed(30),
+      [CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(8),
+    );
+
+    expect(result.value).toBe(1);
+    expect(frameRows(result.stderr)).toEqual(shortTerminalFrame);
+    expect(frameRows(result.stderr).length).toBeLessThan(8);
+  });
+
+  test("re-derives the window after the terminal is resized", async () => {
+    const result = await runSelection(
+      listed(30),
+      [
+        (stderr) => {
+          stderr.rows = 8;
+          stderr.emit("resize");
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(1);
+    expect(frameRows(result.stderr)).toEqual(shortTerminalFrame);
+  });
+
+  test("jumps to the last and the first visible option", async () => {
+    const end = await runSelection(
+      listed(30),
+      [END, CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(end.value).toBe(30);
+    const endFrame = lastFrame(end.stderr);
+    expect(endFrame).toContain("▲ 20 more");
+    expect(endFrame).toContain("> Option 30");
+    expect(endFrame).not.toContain("▼");
+
+    const home = await runSelection(
+      listed(30),
+      [END, HOME, CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(home.value).toBe(1);
+    expect(lastFrame(home.stderr)).toContain("> Option 01");
+  });
+
+  test("pages by the window's height and clamps at either end", async () => {
+    const back = await runSelection(
+      listed(30),
+      [END, PAGE_UP, CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(back.value).toBe(20);
+
+    const top = await runSelection(
+      listed(30),
+      [...repeated(PAGE_UP, 2), CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(top.value).toBe(1);
+
+    const bottom = await runSelection(
+      listed(30),
+      [...repeated(PAGE_DOWN, 4), CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+    expect(bottom.value).toBe(30);
+  });
+
+  test("pages by the shrunken window in a short terminal", async () => {
+    const result = await runSelection(
+      listed(30),
+      [PAGE_DOWN, CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(12),
+    );
+
+    expect(result.value).toBe(6);
+  });
+
+  test("leaves room for a collected field in a short terminal", async () => {
+    let collecting: readonly string[] = [];
+    const result = await runSelection(
+      [
+        ...listed(29),
+        {
+          label: "Other…",
+          value: 0,
+          fields: [{ type: "text", name: "branch", message: "Branch name" }],
+        },
+      ],
+      [
+        END,
+        CARRIAGE_RETURN,
+        "abc",
+        async (stderr) => {
+          // Ink batches its writes, so the frame carrying the entered text is
+          // not on screen the instant the chunk is written.
+          await until(() => stderr.text().includes("abc"));
+          collecting = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(8),
+    );
+
+    expect(result.value).toBe(0);
+    expect(result.values).toEqual({ branch: "abc" });
+    expect(collecting).toEqual([
+      SELECT_MESSAGE,
+      "›",
+      "▲ 29 more",
+      "> Other…",
+      "Branch name",
+      "abc",
+    ]);
+    expect(collecting.length).toBeLessThan(8);
+  });
+
+  test("windows the filtered list rather than the supplied one", async () => {
+    const result = await runSelection(
+      mixed,
+      ["alpha", END, CARRIAGE_RETURN],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(29);
+    const frame = lastFrame(result.stderr);
+    expect(frame).toContain("› alpha");
+    expect(frame).toContain("▲ 5 more");
+    expect(frame).toContain("  Alpha 11");
+    expect(frame).toContain("> Alpha 29");
+    expect(frame).not.toContain("Alpha 09");
+    expect(frame).not.toContain("▼");
+    expect(frame).not.toContain("Beta");
   });
 });
 
