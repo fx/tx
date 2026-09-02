@@ -336,14 +336,14 @@ function frameRows(
   return rows;
 }
 
-/** The sequences the renderer wraps an inverted run in. The active option is
- * the only inverted element a dialog draws, so they are how a test tells which
- * row the cursor bar is on now that no marker character says so. */
 /** The sequences the renderer wraps a dimmed run in, which is how a test tells
  * chrome from content and a pulsing indicator from a resting one. */
 const DIM_OPEN = `${ESCAPE}[2m`;
 const DIM_CLOSE = `${ESCAPE}[22m`;
 
+/** The sequences the renderer wraps an inverted run in. The active option is
+ * the only inverted element a dialog draws, so they are how a test tells which
+ * row the cursor bar is on now that no marker character says so. */
 const INVERSE_OPEN = `${ESCAPE}[7m`;
 const INVERSE_CLOSE = `${ESCAPE}[27m`;
 
