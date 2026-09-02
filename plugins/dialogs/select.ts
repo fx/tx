@@ -267,12 +267,21 @@ export function createSelectView<T>(
           collecting.current = { value: option.value, fields: option.fields };
           setFieldIndex(0);
         } else {
+          const outcome: SelectResult<T> = { value: option.value, values: {} };
+          // A terminal too short for one option row leaves no cursor bar to
+          // flash, and a flash nobody can see is only dead time with every key
+          // ignored. The outcome is still fixed by the key that chose it, so
+          // the settlement rule the flash exists to protect is unaffected.
+          if (viewport.count === 0) {
+            settle({ type: "completed", value: outcome });
+            return;
+          }
           // Recorded before the flash rather than after it, so the outcome is
           // fixed by the key that chose it and no later key can reach it. The
           // reset is explicit rather than left to the interval change, so the
           // flash starts from its first phase however the renderer decides to
           // treat a subscription whose interval moved.
-          confirmed.current = { value: option.value, values: {} };
+          confirmed.current = outcome;
           reset();
           setFlashing(true);
         }
@@ -329,6 +338,13 @@ export function createSelectView<T>(
      * whole of it and the bar is the only thing moving while a choice is
      * confirmed. */
     const showPhase = onPhase(time, animationInterval);
+    /** The filter stops accepting input the moment a field is collected, so its
+     * row stops carrying a caret then. A caret blinking on a row whose
+     * keystrokes are declined advertises an editable row that is not one — the
+     * more so because typing into the field resets the shared phase, which
+     * would blink the dead caret in lockstep with the live one. The cell stays
+     * blank rather than disappearing, so the panel keeps its width. */
+    const filterCaret = showPhase && !collectingField;
     /** The bar blinks off on the flash's off phases and is restored on the
      * frame the flash settles on, so the last thing left on screen is the
      * option that was taken rather than the gap where it was. */
@@ -339,7 +355,7 @@ export function createSelectView<T>(
       panelRows.push({
         key: "filter",
         prefix: `${filterPrompt} `,
-        text: withCaret(filterText, showPhase),
+        text: withCaret(filterText, filterCaret),
         tail: true,
       });
     }

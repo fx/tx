@@ -250,21 +250,29 @@ function consumer(
   };
 }
 
-/** How long `until` waits by default: long enough for a confirmation flash to
- * run its course and the dialog to settle behind it, and no longer, so a
- * genuinely stuck dialog still fails quickly. Written in the constant the
- * dialogs animate on rather than a literal, so a wait can never come to race
- * the animation it is waiting on. */
-const SETTLE_BUDGET = flashDuration * 4;
+/**
+ * How long `until` waits by default: for a dialog to open, to put its first
+ * frame on screen, or to settle behind a flash.
+ *
+ * Deliberately generous, because none of those is an animation. A runner with
+ * twenty test files in flight can be slow to produce a first frame long after
+ * the dialogs themselves are correct, and this loop previously counted
+ * iterations rather than milliseconds, so it had no wall-clock bound at all.
+ * Bounding it tightly would trade a hang for a flake. It is still written in
+ * the constant the dialogs animate on rather than as a bare number, so it can
+ * never come to race the animation it is waiting behind.
+ */
+const DIALOG_BUDGET = animationInterval * 20;
 
-/** The budget a wait on the caret's or the indicator's phase needs: two full
- * phases plus the room to observe the second, again in the constant the
- * dialogs blink on. */
+/** The budget a wait on the caret's or the indicator's own phase gets: two full
+ * phases plus the room to observe the second. Tight on purpose, unlike the
+ * default — a phase that never arrives is exactly the defect these tests exist
+ * to catch, so this one has to fail rather than keep waiting. */
 const PHASE_BUDGET = animationInterval * 3;
 
 async function until(
   predicate: () => boolean,
-  budget = SETTLE_BUDGET,
+  budget = DIALOG_BUDGET,
 ): Promise<void> {
   const deadline = performance.now() + budget;
   for (;;) {
@@ -1853,9 +1861,12 @@ describe("select viewport and extended navigation", () => {
     // Every chrome row the collecting constant counts, on screen at once: the
     // panel and its filter, one indicator, the field's own panel, and the
     // hints. The window gave a row back to make room for that second panel.
+    // The filter keeps its row and its prompt but not its caret: it stops
+    // answering keystrokes the moment a field is collected, and only the row
+    // being typed into carries one.
     expect(collecting).toEqual([
       "╔═ Pick one ═╗",
-      "║ › █        ║",
+      "║ ›          ║",
       "║ ▲ 29 more  ║",
       "║ Other…     ║",
       "╚════════════╝",
@@ -1965,7 +1976,7 @@ describe("select viewport and extended navigation", () => {
     // drawn rather than two and the frame stays under the terminal.
     expect(collecting).toEqual([
       "╔═ Pick one ═╗",
-      "║ › █        ║",
+      "║ ›          ║",
       "║ ▼ 31 more  ║",
       "╚════════════╝",
       "┌─ Branch ─┐",
@@ -3166,6 +3177,81 @@ describe("dialog animations", () => {
     // The bar is back on the option that was taken by the time the dialog
     // leaves the screen.
     expect(activeRow(result.stderr)).toBe("Beta");
+  });
+
+  test("stops the filter's caret once the row stops taking input", async () => {
+    let choosing = "";
+    let collecting: readonly string[] = [];
+    const result = await runSelection(
+      [
+        { label: "Known", value: "known" },
+        {
+          label: "Other…",
+          value: "other",
+          fields: [{ type: "text", name: "branch", message: "Branch name" }],
+        },
+      ],
+      [
+        DOWN,
+        async (stderr) => {
+          await until(() => stderr.text().includes("Other…"));
+          await until(() => filterRow(stderr).includes(CARET), PHASE_BUDGET);
+          choosing = filterRow(stderr);
+        },
+        CARRIAGE_RETURN,
+        "abc",
+        async (stderr) => {
+          await until(() => stderr.text().includes("abc"));
+          collecting = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      true,
+    );
+
+    expect(result.value).toBe("other");
+    expect(result.values).toEqual({ branch: "abc" });
+    // While the filter still answers keystrokes it carries a caret.
+    expect(choosing).toContain(CARET);
+    // Once a field is collected the filter declines every edit, so its row
+    // keeps its text and gives up its caret — one caret on screen, on the row
+    // that is actually being typed into. Typing into the field resets the
+    // shared phase, so a filter caret would otherwise blink in lockstep with
+    // the field's on a row whose keystrokes are dropped.
+    const filter = collecting[1] as string;
+    const field = collecting.at(-3) as string;
+    expect(filter).toContain("›");
+    expect(filter).not.toContain(CARET);
+    expect(field).toContain(`abc${CARET}`);
+    // The cell the caret gave up is still there, so the panel kept its width.
+    expect(filter).toHaveLength((collecting[0] as string).length);
+  });
+
+  test("settles at once when the terminal leaves no bar to flash", async () => {
+    let elapsed = 0;
+    const result = await runSelection(
+      listed(30),
+      [
+        async (stderr, stdin) => {
+          await until(() => stderr.text().includes("▼ 30 more"));
+          // No option row fits, so no cursor bar is drawn.
+          expect(invertedRows(lastFrame(stderr))).toEqual([]);
+          const confirmedAt = performance.now();
+          stdin.write(CARRIAGE_RETURN);
+          await until(() => stdin.rawModes.includes(false));
+          elapsed = performance.now() - confirmedAt;
+        },
+      ],
+      undefined,
+      // One row short of what a choosing select needs for its first option
+      // row, so the window collapses to nothing.
+      terminalOfRows(7),
+    );
+
+    expect(result.value).toBe(1);
+    // Flashing a bar that is not on screen would be dead time with every key
+    // ignored, so the outcome settles without waiting one out.
+    expect(elapsed).toBeLessThan(flashDuration);
   });
 
   test("writes nothing while a static select idles", async () => {

@@ -21,12 +21,24 @@ export const animationInterval = 500;
  * rather than blink faster. */
 export const flashInterval = 60;
 
-/** How long the confirmation flash runs before the dialog settles: three of its
- * frames, which leaves the settlement well inside the 250 milliseconds the spec
- * allows even when the last tick arrives late. Elapsed time is what ends the
- * flash, never a frame number, precisely because a tick inside the render
- * throttle is dropped rather than delivered. */
-export const flashDuration = 180;
+/**
+ * How long the confirmation flash runs before the dialog settles: two of its
+ * frames, which is one whole blink — the bar inverted, dark, and inverted again
+ * on the frame it settles on.
+ *
+ * The spec gives a confirmed select 250 milliseconds to settle in, and that
+ * budget has to cover more than the flash. Settlement fires on the first tick
+ * whose elapsed time crosses this duration, which is itself a render after the
+ * Enter, and the dialog then unmounts and restores the terminal before the
+ * caller observes anything. A tick coalesced inside the render throttle pushes
+ * the crossing tick a whole interval late, so three frames would put the
+ * crossing at 240 milliseconds and miss the budget outright; two leave the
+ * teardown room to spare even then.
+ *
+ * Elapsed time is what ends the flash, never a frame number, precisely because
+ * a tick inside the render throttle is dropped rather than delivered.
+ */
+export const flashDuration = 120;
 
 /**
  * Whether an element blinking at `interval` is on the phase it shows itself
