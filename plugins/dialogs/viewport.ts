@@ -25,17 +25,18 @@ export const selectChromeHeight = 6;
  * terminal as full-screen and clears the terminal when such output is replaced
  * or unmounted, so the dialog stays strictly shorter than the terminal to keep
  * Ink in its ordinary incremental mode. One row is the floor wherever the
- * terminal can afford one — and where it cannot, the count is none at all,
- * because a row the terminal cannot afford is exactly the row that would push
- * the frame to full height and clear the screen on the way out. Staying under
- * that ceiling is the stronger promise: a window the reader cannot see beats a
- * terminal wiped out from under them. */
+ * terminal can afford one and there is an option to show — and where the
+ * terminal cannot afford a row, or there is nothing visible to fill it, the
+ * count is none at all, because a row the terminal cannot afford is exactly
+ * the row that would push the frame to full height and clear the screen on
+ * the way out. Staying under that ceiling is the stronger promise: a window
+ * the reader cannot see beats a terminal wiped out from under them. */
 export function optionRowCount(
   visibleCount: number,
   terminalRows: number,
 ): number {
   const affordable = terminalRows - selectChromeHeight - 1;
-  if (affordable < 1) return 0;
+  if (affordable < 1 || visibleCount < 1) return 0;
   return Math.max(1, Math.min(maximumOptionRows, affordable, visibleCount));
 }
 

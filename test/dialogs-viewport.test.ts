@@ -57,7 +57,35 @@ describe("select viewport height", () => {
     for (const rows of [selectChromeHeight + 2, selectChromeHeight + 3]) {
       expect(optionRowCount(30, rows)).toBeGreaterThanOrEqual(1);
     }
-    expect(optionRowCount(0, ROOMY)).toBe(1);
+  });
+
+  /**
+   * `Math.max(1, …)` used to override a genuine zero back to one, so a select
+   * with nothing visible reported a renderable row it did not have. There is
+   * nothing to floor: no options means no option rows, at any terminal size,
+   * including a roomy one where the old bug was most visible.
+   */
+  test("shows no option rows when nothing is visible", () => {
+    for (const rows of [
+      0,
+      1,
+      selectChromeHeight + 1,
+      selectChromeHeight + 2,
+      ROOMY,
+      500,
+    ]) {
+      expect(optionRowCount(0, rows)).toBe(0);
+    }
+  });
+
+  test("never claims more option rows than there are options", () => {
+    for (let visibleCount = 0; visibleCount <= 15; visibleCount++) {
+      for (let rows = 0; rows <= 60; rows += 3) {
+        expect(optionRowCount(visibleCount, rows)).toBeLessThanOrEqual(
+          visibleCount,
+        );
+      }
+    }
   });
 });
 
@@ -141,7 +169,7 @@ describe("select option window", () => {
   test("hides nothing when nothing is visible", () => {
     expect(optionWindow(0, 0, 0, ROOMY)).toEqual({
       start: 0,
-      count: 1,
+      count: 0,
       hiddenAbove: 0,
       hiddenBelow: 0,
     });
