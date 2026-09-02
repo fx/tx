@@ -65,15 +65,36 @@ export function optionRowCount(
   return Math.max(1, Math.min(maximumOptionRows, affordable, visibleCount));
 }
 
-/** The slice of the visible options a select renders, and what it hides. */
+/**
+ * The slice of the visible options a select renders, and what it hides.
+ *
+ * The window carries two starts because a terminal too short to draw it must
+ * not cost it its place in the list. Wherever a row is drawn the two are the
+ * same number; they part only when the window has collapsed to no rows at all,
+ * which is a state of the terminal rather than a move the user made.
+ */
 export type OptionWindow = {
-  /** Position within the visible list of the first rendered option. */
-  readonly start: number;
-  /** How many options are rendered, starting there. */
+  /** Position within the visible list of the first option this frame draws, and
+   * so the position the view slices and numbers its rows from. A collapsed
+   * window draws from the top, because there is no row for anything to sit
+   * above. */
+  readonly renderedStart: number;
+  /** How many options are rendered, starting at `renderedStart`. */
   readonly count: number;
-  /** Visible options before the window, so the indicator can count them. */
+  /** The start to carry into the next frame, which is where the window returns
+   * to when it has rows again. It survives a collapse — the terminal took the
+   * rows away, and the user did not give up the place they had scrolled to, so
+   * growing the terminal back reopens the window there rather than dragging the
+   * whole list under a cursor bar that never moved. */
+  readonly rememberedStart: number;
+  /** Visible options before the drawn window, so the indicator can count them.
+   * A collapsed window reports none, whatever it remembers: counting options as
+   * hidden above rows that are not there would spend one of the few rows left
+   * on a second indicator, and that is the row that takes the frame to the
+   * terminal's own height. */
   readonly hiddenAbove: number;
-  /** Visible options after the window. */
+  /** Visible options after the drawn window, so a collapsed one reports the
+   * whole list. */
   readonly hiddenBelow: number;
 };
 
@@ -87,6 +108,11 @@ export type OptionWindow = {
  * where a centered-cursor window would move every row on every keystroke. A
  * window sitting past the end of a list the filter has just shortened is pulled
  * back so it stays full.
+ *
+ * A window with no rows to draw is the one case where what is drawn and what is
+ * remembered come apart: it draws from the top, so it spends no row on an
+ * indicator counting options above rows that are not there, and it remembers
+ * the place it held, so the terminal growing back returns it there.
  */
 export function optionWindow(
   visibleCount: number,
@@ -97,22 +123,24 @@ export function optionWindow(
 ): OptionWindow {
   const count = optionRowCount(visibleCount, terminalRows, collecting);
   const furthestStart = Math.max(0, visibleCount - count);
-  let start = Math.min(Math.max(0, previousStart), furthestStart);
+  // Clamped against the list as it stands, so a start left over from a longer
+  // list is pulled back rather than remembered past the end of this one.
+  let rememberedStart = Math.min(Math.max(0, previousStart), furthestStart);
   if (count > 0) {
-    if (activeIndex < start) start = activeIndex;
-    else if (activeIndex > start + count - 1) start = activeIndex - count + 1;
-  } else {
-    // A collapsed window has no rows for anything to sit above, and nowhere to
-    // bring the active option back to. A start left over from a taller terminal
-    // would count options as hidden above rows that are not there and spend one
-    // of the few rows left saying so, which is the row that pushes the frame to
-    // the terminal's own height.
-    start = 0;
+    if (activeIndex < rememberedStart) rememberedStart = activeIndex;
+    else if (activeIndex > rememberedStart + count - 1) {
+      rememberedStart = activeIndex - count + 1;
+    }
   }
+  // A collapsed window has no row for anything to sit above, and no edge to
+  // bring the active option back to, so it draws from the top whatever it
+  // remembers.
+  const renderedStart = count > 0 ? rememberedStart : 0;
   return {
-    start,
+    renderedStart,
     count,
-    hiddenAbove: start,
-    hiddenBelow: Math.max(0, visibleCount - start - count),
+    rememberedStart,
+    hiddenAbove: renderedStart,
+    hiddenBelow: Math.max(0, visibleCount - renderedStart - count),
   };
 }

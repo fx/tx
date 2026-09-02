@@ -239,7 +239,11 @@ export function createSelectView<T>(
       rows,
       collectingField,
     );
-    windowStart.current = viewport.start;
+    // The remembered start, not the rendered one: a terminal too short to draw
+    // the window collapses it to nothing and renders from the top, and storing
+    // that would lose the place the user scrolled to the moment the terminal
+    // grew back.
+    windowStart.current = viewport.rememberedStart;
 
     const panelRows: PanelRow[] = [];
     if (filtering) {
@@ -261,12 +265,12 @@ export function createSelectView<T>(
         });
       }
       const windowed = visible.slice(
-        viewport.start,
-        viewport.start + viewport.count,
+        viewport.renderedStart,
+        viewport.renderedStart + viewport.count,
       );
       for (const [offset, index] of windowed.entries()) {
         const option = options[index] as SelectOption<T>;
-        const position = viewport.start + offset;
+        const position = viewport.renderedStart + offset;
         panelRows.push({
           key: `option-${index}`,
           text: option.label,

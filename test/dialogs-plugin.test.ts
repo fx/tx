@@ -1498,6 +1498,7 @@ describe("select filter", () => {
 });
 
 describe("select viewport and extended navigation", () => {
+  const UP = `${ESCAPE}[A`;
   const DOWN = `${ESCAPE}[B`;
   const HOME = `${ESCAPE}[H`;
   const END = `${ESCAPE}[F`;
@@ -1645,6 +1646,83 @@ describe("select viewport and extended navigation", () => {
 
     expect(result.value).toBe(1);
     expect(frameRows(result.stderr)).toEqual(shortTerminalFrame);
+  });
+
+  /**
+   * A terminal too short to draw the window does not cost the window its place
+   * in the list. Scroll so it holds a start of its own, leave the cursor bar in
+   * the middle of it, shrink the terminal until no option row fits at all, and
+   * grow it back: the window must reopen where the user left it. Collapsing it
+   * used to throw the remembered start away along with the drawn one, so the
+   * window came back at the edge the active option drags it to from the top of
+   * the list — four rows short of where it was, with the whole list shifted
+   * under a cursor bar the user never moved.
+   */
+  test("reopens a collapsed window where it was, not at the active option", async () => {
+    let collapsed: readonly string[] = [];
+    let reopened: readonly string[] = [];
+    const result = await runSelection(
+      listed(30),
+      [
+        END,
+        UP,
+        UP,
+        UP,
+        UP,
+        async (stderr) => {
+          // The window has to have reached a start of its own on screen before
+          // the terminal shrinks; that start is what the collapse must keep.
+          await until(() => stderr.text().includes("▲ 20 more"));
+          stderr.rows = selectChromeHeight + 1;
+          stderr.emit("resize");
+        },
+        async (stderr) => {
+          await until(() => stderr.text().includes("▼ 30 more"));
+          collapsed = frameRows(stderr);
+          stderr.rows = 40;
+          stderr.emit("resize");
+        },
+        async (stderr) => {
+          // The collapsed frame is the only one short enough to have no option
+          // row in it, so growing past it is the signal, whatever the window
+          // then does with its start.
+          await until(() => frameRows(stderr).length > collapsed.length);
+          reopened = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(26);
+    // Nothing sits above rows that are not there, so the collapsed frame still
+    // carries one indicator rather than two.
+    expect(collapsed).toEqual([
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▼ 30 more  ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    ]);
+    expect(reopened).toEqual([
+      "╔═ Pick one ═╗",
+      "║ › █        ║",
+      "║ ▲ 20 more  ║",
+      "║ Option 21  ║",
+      "║ Option 22  ║",
+      "║ Option 23  ║",
+      "║ Option 24  ║",
+      "║ Option 25  ║",
+      "║ Option 26  ║",
+      "║ Option 27  ║",
+      "║ Option 28  ║",
+      "║ Option 29  ║",
+      "║ Option 30  ║",
+      "╚════════════╝",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    ]);
+    expect(activeRow(result.stderr)).toBe("Option 26");
   });
 
   test("jumps to the last and the first visible option", async () => {

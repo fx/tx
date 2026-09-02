@@ -67,8 +67,9 @@ describe("select viewport height", () => {
   test("draws a short list whole in a ten-row terminal", () => {
     expect(optionRowCount(3, 10, false)).toBe(3);
     expect(optionWindow(3, 0, 0, 10, false)).toEqual({
-      start: 0,
+      renderedStart: 0,
       count: 3,
+      rememberedStart: 0,
       hiddenAbove: 0,
       hiddenBelow: 0,
     });
@@ -165,8 +166,9 @@ describe("select viewport height", () => {
 describe("select option window", () => {
   test("opens at the top and counts what it hides below", () => {
     expect(optionWindow(30, 0, 0, ROOMY, false)).toEqual({
-      start: 0,
+      renderedStart: 0,
       count: 10,
+      rememberedStart: 0,
       hiddenAbove: 0,
       hiddenBelow: 20,
     });
@@ -174,27 +176,30 @@ describe("select option window", () => {
 
   test("stays still while the active option is inside it", () => {
     for (const active of [0, 5, 9]) {
-      expect(optionWindow(30, active, 0, ROOMY, false).start).toBe(0);
+      expect(optionWindow(30, active, 0, ROOMY, false).renderedStart).toBe(0);
     }
-    expect(optionWindow(30, 12, 5, ROOMY, false).start).toBe(5);
+    expect(optionWindow(30, 12, 5, ROOMY, false).renderedStart).toBe(5);
   });
 
   test("moves only as far as bringing the active option back needs", () => {
     expect(optionWindow(30, 10, 0, ROOMY, false)).toEqual({
-      start: 1,
+      renderedStart: 1,
       count: 10,
+      rememberedStart: 1,
       hiddenAbove: 1,
       hiddenBelow: 19,
     });
     expect(optionWindow(30, 29, 0, ROOMY, false)).toEqual({
-      start: 20,
+      renderedStart: 20,
       count: 10,
+      rememberedStart: 20,
       hiddenAbove: 20,
       hiddenBelow: 0,
     });
     expect(optionWindow(30, 4, 10, ROOMY, false)).toEqual({
-      start: 4,
+      renderedStart: 4,
       count: 10,
+      rememberedStart: 4,
       hiddenAbove: 4,
       hiddenBelow: 16,
     });
@@ -202,20 +207,22 @@ describe("select option window", () => {
 
   test("pulls a window sitting past the end of a shortened list back", () => {
     expect(optionWindow(12, 11, 20, ROOMY, false)).toEqual({
-      start: 2,
+      renderedStart: 2,
       count: 10,
+      rememberedStart: 2,
       hiddenAbove: 2,
       hiddenBelow: 0,
     });
     expect(optionWindow(3, 0, 20, ROOMY, false)).toEqual({
-      start: 0,
+      renderedStart: 0,
       count: 3,
+      rememberedStart: 0,
       hiddenAbove: 0,
       hiddenBelow: 0,
     });
   });
 
-  /** A collapsed window keeps no start of its own. Nothing sits above rows that
+  /** A collapsed window draws no start of its own. Nothing sits above rows that
    * are not there, so the whole list counts as hidden below and the frame draws
    * one indicator rather than two — which is the row that would otherwise take
    * the frame to the terminal's own height in exactly the terminals that have
@@ -223,29 +230,90 @@ describe("select option window", () => {
   test("renders no rows and counts the whole list as hidden below", () => {
     const boundary = selectChromeHeight + 1;
     expect(optionWindow(30, 0, 0, boundary, false)).toEqual({
-      start: 0,
+      renderedStart: 0,
       count: 0,
+      rememberedStart: 0,
       hiddenAbove: 0,
       hiddenBelow: 30,
     });
     expect(optionWindow(30, 29, 4, boundary, false)).toEqual({
-      start: 0,
+      renderedStart: 0,
       count: 0,
+      rememberedStart: 4,
       hiddenAbove: 0,
       hiddenBelow: 30,
     });
     expect(optionWindow(0, 0, 0, boundary, false)).toEqual({
-      start: 0,
+      renderedStart: 0,
       count: 0,
+      rememberedStart: 0,
       hiddenAbove: 0,
       hiddenBelow: 0,
     });
   });
 
+  /**
+   * Collapsing the window is the terminal's doing, not the user's, so the place
+   * they scrolled to outlives it: the drawn start goes to the top while the
+   * remembered start stays where it was, and the next terminal tall enough to
+   * draw a row opens the window there. Storing the drawn start instead sent the
+   * window back to whatever edge the active option dragged it to from the top
+   * of the list.
+   */
+  test("remembers the start it had while it has no rows to draw it at", () => {
+    // Seven rows while choosing and ten while collecting are the heights at
+    // which the window gives up its last row. Written as literals, so a chrome
+    // constant that grows fails here rather than moving the case with it.
+    const collapsed = optionWindow(30, 25, 20, 7, false);
+    expect(collapsed.count).toBe(0);
+    expect(collapsed.renderedStart).toBe(0);
+    expect(collapsed.rememberedStart).toBe(20);
+    expect(collapsed.hiddenAbove).toBe(0);
+    expect(collapsed.hiddenBelow).toBe(30);
+    // The terminal grows back, and the window carries that remembered start in
+    // rather than the zero it drew from.
+    expect(
+      optionWindow(30, 25, collapsed.rememberedStart, ROOMY, false),
+    ).toEqual({
+      renderedStart: 20,
+      count: 10,
+      rememberedStart: 20,
+      hiddenAbove: 20,
+      hiddenBelow: 0,
+    });
+    // Collection collapses the window the same way a short terminal does.
+    const collecting = optionWindow(30, 25, 20, 10, true);
+    expect(collecting.count).toBe(0);
+    expect(collecting.renderedStart).toBe(0);
+    expect(collecting.rememberedStart).toBe(20);
+  });
+
+  /** What it remembers is still a position in the list it is remembering it
+   * over, so a filter that shortens the list under a collapsed window pulls the
+   * remembered start back with it rather than storing a start past the end. */
+  test("clamps what a collapsed window remembers to the list it has", () => {
+    expect(optionWindow(12, 0, 20, 7, false)).toEqual({
+      renderedStart: 0,
+      count: 0,
+      rememberedStart: 12,
+      hiddenAbove: 0,
+      hiddenBelow: 12,
+    });
+    expect(optionWindow(0, 0, 20, 7, false)).toEqual({
+      renderedStart: 0,
+      count: 0,
+      rememberedStart: 0,
+      hiddenAbove: 0,
+      hiddenBelow: 0,
+    });
+    expect(optionWindow(30, 0, -5, 7, false).rememberedStart).toBe(0);
+  });
+
   test("hides nothing when nothing is visible", () => {
     expect(optionWindow(0, 0, 0, ROOMY, false)).toEqual({
-      start: 0,
+      renderedStart: 0,
       count: 0,
+      rememberedStart: 0,
       hiddenAbove: 0,
       hiddenBelow: 0,
     });
@@ -253,14 +321,16 @@ describe("select option window", () => {
 
   test("re-derives itself against the terminal's current height", () => {
     expect(optionWindow(30, 12, 3, 12, false)).toEqual({
-      start: 8,
+      renderedStart: 8,
       count: 5,
+      rememberedStart: 8,
       hiddenAbove: 8,
       hiddenBelow: 17,
     });
     expect(optionWindow(30, 12, 10, ROOMY, false)).toEqual({
-      start: 10,
+      renderedStart: 10,
       count: 10,
+      rememberedStart: 10,
       hiddenAbove: 10,
       hiddenBelow: 10,
     });
