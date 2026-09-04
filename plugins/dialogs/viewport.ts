@@ -148,7 +148,12 @@ export function optionWindow(
   collecting: boolean,
   extraRows = 0,
 ): OptionWindow {
-  const count = optionRowCount(visibleCount, terminalRows, collecting, extraRows);
+  const count = optionRowCount(
+    visibleCount,
+    terminalRows,
+    collecting,
+    extraRows,
+  );
   const furthestStart = Math.max(0, visibleCount - count);
   // Clamped against the list as it stands, so a start left over from a longer
   // list is pulled back rather than remembered past the end of this one.
