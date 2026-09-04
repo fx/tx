@@ -2973,30 +2973,116 @@ describe("cascading sub-dialogs", () => {
 
     // End to end, a nested completion carries the path's values: the nested
     // option's fields resolve with the whole stack's inputs, deeper winning.
-    const carried = await runSelection(
+    // The field entry subscribes on its mount effect, so the test waits for
+    // its frame before typing rather than racing it.
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let carried: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
       [
-        {
-          label: "Category",
-          value: "category",
-          dialog: {
-            message: "Nested",
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          carried = await dialogs.select({
+            message: "Pick one",
             options: [
               {
-                label: "Custom",
-                value: "custom",
+                label: "Category",
+                value: "category",
+                dialog: {
+                  message: "Nested",
+                  options: [
+                    {
+                      label: "Custom",
+                      value: "custom",
+                      fields: [
+                        {
+                          type: "text",
+                          name: "owner",
+                          message: "Which account?",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+            filter: false,
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Nested"));
+    stdin.write(CARRIAGE_RETURN);
+    await until(() => stripped(stderr.text()).includes("Which account?"));
+    stdin.write("fx");
+    await until(() => stripped(stderr.text()).includes("fx"));
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(carried?.value).toBe("custom");
+    expect(carried?.values).toEqual({ owner: "fx" });
+  });
+
+  test("carries inputs from two levels with deeper winning a repeated name", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [
+              {
+                label: "Category",
+                value: "category",
                 fields: [
                   { type: "text", name: "owner", message: "Which account?" },
                 ],
+                dialog: {
+                  message: "Nested",
+                  options: [
+                    {
+                      label: "Custom",
+                      value: "custom",
+                      fields: [
+                        {
+                          type: "text",
+                          name: "owner",
+                          message: "Which account below?",
+                        },
+                      ],
+                    },
+                  ],
+                },
               },
             ],
-          },
-        },
+            filter: false,
+          });
+        }),
       ],
-      [CTRL_ENTER, CARRIAGE_RETURN, "fx", CARRIAGE_RETURN],
-      false,
+      context(stdin, stderr),
     );
-    expect(carried.value).toBe("custom");
-    expect(carried.values).toEqual({ owner: "fx" });
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    // Open the nested level first: the field collected there completes the
+    // level, and the root's own collection must no longer be reachable.
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Nested"));
+    stdin.write(CARRIAGE_RETURN);
+    await until(() => stripped(stderr.text()).includes("Which account below?"));
+    stdin.write("deep");
+    await until(() => stripped(stderr.text()).includes("deep"));
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("custom");
+    expect(result?.values).toEqual({ owner: "deep" });
   });
 
   test("keeps the parent filter and active option across push and pop", async () => {

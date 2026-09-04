@@ -433,6 +433,12 @@ export function createSelectView<T>(
         | InputLevel<T>
       )[];
       windowStarts.current = [...windowStarts.current, 0];
+      // The child answers keys through its own frame: clear any collection
+      // the parent began so its stale record never blocks the new level.
+      collecting.current = undefined;
+      field.current = 0;
+      setFieldIndex(-1);
+      collected.current = Object.create(null) as Record<string, string>;
       entered.current = "";
       active.current = 0;
       setFilterText("");
@@ -441,7 +447,10 @@ export function createSelectView<T>(
     };
 
     /** Pop the top level above the root and restore the parent's filter text
-     * and active position exactly as they were: they never left its level. */
+     * and active position exactly as they were: they never left its level.
+     * A collection abandoned mid-flight is discarded with its level, so the
+     * parent answers keys again instead of declining them as post-Enter
+     * input. */
     const popLevel = (): void => {
       if (levels.current.length <= 1) {
         cancel();
@@ -452,6 +461,10 @@ export function createSelectView<T>(
       ] as SelectLevel<T>;
       levels.current = levels.current.slice(0, -1);
       windowStarts.current = windowStarts.current.slice(0, -1);
+      collecting.current = undefined;
+      field.current = 0;
+      setFieldIndex(-1);
+      collected.current = Object.create(null) as Record<string, string>;
       entered.current = parent.entered;
       active.current = parent.active;
       setFilterText(parent.entered);
@@ -506,8 +519,11 @@ export function createSelectView<T>(
       // pass, so this list keeps receiving input after the Enter that began
       // collection, before the field entry has mounted. Everything but
       // cancellation is declined from then on — filter edits included;
-      // cancellation is answered above, at every stage.
-      if (collecting.current) return;
+      // cancellation is answered above, at every stage. The guard is the
+      // root's own collection only: a nested level's collection answers
+      // through its own entry while the root's stale record must not block
+      // the levels above it.
+      if (collecting.current && levels.current.length <= 1) return;
       // While a leaf is on top the select list beneath it stays rendered
       // and ignores input.
       if ("field" in uppermost) return;
@@ -571,12 +587,19 @@ export function createSelectView<T>(
         field.current = next;
         setFieldIndex(next);
       } else {
+        // The collection completes its level, which resolves the whole
+        // session: the chosen value plus every input along the path — the
+        // level's base first, this collection's submissions over it, so a
+        // deeper submission wins a repeated name. The root settles exactly
+        // as a flat dialog does.
+        const path = topSelect();
+        let merged = path.collected;
+        for (const [name, text] of Object.entries(collected.current)) {
+          merged = stackedValues(merged, name, text);
+        }
         settle({
           type: "completed",
-          value: {
-            value: collection.value,
-            values: { ...collected.current },
-          },
+          value: { value: collection.value, values: { ...merged } },
         });
       }
     };
@@ -755,8 +778,12 @@ export function createSelectView<T>(
     // changing the element the whole view hangs from and remounting it.
     let fieldPanel: DialogElement | undefined;
     if (collectingField) {
+      // A stacked field entry measures against the columns right of its own
+      // offset, so its frame never passes the terminal's edge; a flat one
+      // measures against the whole terminal exactly as today.
       const collection = collecting.current as Collection<T>;
       const pending = collection.fields[fieldIndex] as TextField;
+      const entryIndex = stacked ? depthNow : 0;
       fieldPanel = react.createElement(Entry, {
         key: `field-${fieldIndex}`,
         message: pending.message,
@@ -765,6 +792,9 @@ export function createSelectView<T>(
         onEdit: reset,
         onSubmit: (value: string) => submitField(fieldIndex, value),
         onCancel: cancel,
+        availableColumns: stacked
+          ? Math.max(1, columns - entryIndex * stackedOffsetColumns)
+          : undefined,
       });
     } else if (leaf !== undefined) {
       // A text leaf reuses the existing entry logic: its editing is the same
@@ -772,6 +802,7 @@ export function createSelectView<T>(
       // cancel pops one level rather than cancelling the session, so Escape
       // above the root and Escape on a leaf stay distinct.
       const activeLeaf = leaf;
+      const entryIndex = stacked ? depthNow - 1 : 0;
       fieldPanel = react.createElement(Entry, {
         key: "leaf",
         message: activeLeaf.field.message,
@@ -780,6 +811,9 @@ export function createSelectView<T>(
         onEdit: reset,
         onSubmit: (value: string) => submitLeaf(activeLeaf, value),
         onCancel: () => popLevel(),
+        availableColumns: stacked
+          ? Math.max(1, columns - entryIndex * stackedOffsetColumns)
+          : undefined,
       });
     }
     if (!stacked) {
@@ -848,8 +882,8 @@ export function createSelectView<T>(
       });
     }
     if (fieldPanel !== undefined) {
-      // The entry sizes itself against the whole terminal, so its shadow is
-      // cut to what is right of its own offset rather than to its width.
+      // The entry already measures itself against the columns right of its
+      // offset, so its recorded width is what the shadow is cut to.
       const entryIndex = leaf !== undefined ? depthNow - 1 : depthNow;
       const entryWidth = Math.max(
         1,

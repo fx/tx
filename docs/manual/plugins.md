@@ -350,21 +350,7 @@ type Dialogs = {
   }): Promise<string | undefined>
   select<T>(request: {
     readonly message: string
-    readonly options: readonly {
-      readonly label: string
-      readonly value: T
-      readonly fields?: readonly TextField[]
-      readonly dialog?: {
-        readonly message: string
-        readonly options: readonly {
-          readonly label: string
-          readonly value: T
-          readonly fields?: readonly TextField[]
-          readonly dialog?: unknown
-        }[]
-        readonly filter?: boolean | "auto"
-      } | TextField
-    }[]
+    readonly options: readonly SubDialogOption<T>[]
     readonly filter?: boolean | "auto"
   }): Promise<
     | {
@@ -374,6 +360,19 @@ type Dialogs = {
     | undefined
   >
 }
+
+type SubDialogOption<T> = {
+  readonly label: string
+  readonly value: T
+  readonly fields?: readonly TextField[]
+  readonly dialog?: SubDialogRequest<T> | TextField
+}
+
+type SubDialogRequest<T> = {
+  readonly message: string
+  readonly options: readonly SubDialogOption<T>[]
+  readonly filter?: boolean | "auto"
+ }
 ```
 
 A bundled consumer declares that compatible type locally and reads `registrations<Dialogs>("dialogs")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`; an absent capability and multiple registered providers remain the consumer's responsibility, and tx defines no winner semantics.
