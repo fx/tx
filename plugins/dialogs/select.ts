@@ -507,8 +507,14 @@ export function createSelectView<T>(
         | SelectLevel<T>
         | InputLevel<T>;
       if (key.escape || (key.ctrl && value === "c")) {
+        // A collection open on a nested level pops that level like any other
+        // top: the spec's pop rule holds at every stack depth, and only the
+        // root's own collection cancels the session. The collected-field
+        // entry answers the same key through its own handler, but this one
+        // runs first in the emit, so it owns the decision.
         if (collecting.current) {
-          cancel();
+          if (levels.current.length > 1) popLevel();
+          else cancel();
           return;
         }
         if ("field" in uppermost) return;
@@ -791,7 +797,13 @@ export function createSelectView<T>(
         caret: showPhase,
         onEdit: reset,
         onSubmit: (value: string) => submitField(fieldIndex, value),
-        onCancel: cancel,
+        // The main handler answers the same key first in the emit and pops a
+        // nested collection; this fires second, so it acts only while a
+        // collection is still open. At the root that means a harmless second
+        // cancel; above the root the pop already cleared it into a no-op.
+        onCancel: () => {
+          if (collecting.current) cancel();
+        },
         availableColumns: stacked
           ? Math.max(1, columns - entryIndex * stackedOffsetColumns)
           : undefined,

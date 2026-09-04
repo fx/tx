@@ -3085,6 +3085,68 @@ describe("cascading sub-dialogs", () => {
     expect(result?.values).toEqual({ owner: "deep" });
   });
 
+  test("pops a nested field collection instead of cancelling the session", async () => {
+    const nestedStdin = new TerminalInput();
+    const nestedStderr = new CapturedOutput();
+    let nestedResult: SelectResult<string> | undefined;
+    const nestedRunning = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          nestedResult = await dialogs.select({
+            message: "Pick one",
+            options: [
+              {
+                label: "Category",
+                value: "category",
+                dialog: {
+                  message: "Nested",
+                  options: [
+                    {
+                      label: "Custom",
+                      value: "custom",
+                      fields: [
+                        {
+                          type: "text",
+                          name: "owner",
+                          message: "Which account?",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+            filter: false,
+          });
+        }),
+      ],
+      context(nestedStdin, nestedStderr),
+    );
+    await until(() => nestedStdin.rawModes.includes(true));
+    await until(() => stripped(nestedStderr.text()).includes("Category"));
+    nestedStdin.write(CTRL_ENTER);
+    await until(() => stripped(nestedStderr.text()).includes("Nested"));
+    nestedStdin.write(CARRIAGE_RETURN);
+    await until(() => stripped(nestedStderr.text()).includes("Which account?"));
+    nestedStdin.write(ESCAPE);
+    await until(() => {
+      try {
+        return (
+          activeRow(nestedStderr) === "Category" &&
+          !stripped(lastFrame(nestedStderr)).includes("Nested")
+        );
+      } catch {
+        return false;
+      }
+    });
+    nestedStdin.write(CARRIAGE_RETURN);
+    expect(await nestedRunning).toBe(0);
+    expect(nestedResult?.value).toBe("category");
+    expect(nestedResult?.values).toEqual({});
+  });
+
   test("keeps the parent filter and active option across push and pop", async () => {
     const stdin = new TerminalInput();
     const stderr = new CapturedOutput();
