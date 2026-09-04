@@ -366,4 +366,15 @@ describe("stacked dialog budget", () => {
       1,
     );
   });
+
+  test("keeps one top row however deep the stack on however short a terminal", () => {
+    // A stack deeper than the budget still renders the top level: the floor
+    // is the top's own row, not the room the shadows leave.
+    expect(optionRowCount(30, 10, false, stackedExtraRows(4))).toBe(1);
+    expect(optionWindow(30, 5, 0, 10, false, stackedExtraRows(4)).count).toBe(
+      1,
+    );
+    // Flat dialogs keep the old floor: no room means no row.
+    expect(optionRowCount(30, 7, false)).toBe(0);
+  });
 });

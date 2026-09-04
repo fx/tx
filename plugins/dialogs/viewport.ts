@@ -86,8 +86,12 @@ export function optionRowCount(
   collecting: boolean,
   extraRows = 0,
 ): number {
+  if (visibleCount < 1) return 0;
   const affordable = terminalRows - chromeHeight(collecting) - extraRows - 1;
-  if (affordable < 1 || visibleCount < 1) return 0;
+  // A stack deeper than the budget still renders the top level with one row:
+  // lower levels may be covered, the top never is. A flat dialog with no
+  // room still draws nothing rather than clearing the terminal.
+  if (affordable < 1) return extraRows > 0 ? 1 : 0;
   return Math.max(1, Math.min(maximumOptionRows, affordable, visibleCount));
 }
 

@@ -115,6 +115,7 @@ function movedPosition(
   current: number,
   visibleCount: number,
   terminalRows: number,
+  extraRows = 0,
 ): number | undefined {
   let target: number | undefined;
   if (key.home) target = 0;
@@ -123,8 +124,9 @@ function movedPosition(
   else if (key.downArrow) target = current + 1;
   else if (key.pageUp || key.pageDown) {
     // Navigation is refused once collection begins, so the window this pages
-    // by is always the choosing one.
-    const page = optionRowCount(visibleCount, terminalRows, false);
+    // by is always the choosing one — shrunk by the stacked shadow budget
+    // while a sub-dialog is open, exactly like the rendered window.
+    const page = optionRowCount(visibleCount, terminalRows, false, extraRows);
     target = current + (key.pageUp ? -page : page);
   }
   if (target === undefined || visibleCount === 0) return undefined;
@@ -559,7 +561,13 @@ export function createSelectView<T>(
         }
         return;
       }
-      const moved = movedPosition(key, current.active, shown.length, rows);
+      const moved = movedPosition(
+        key,
+        current.active,
+        shown.length,
+        rows,
+        stackedExtraRows(levels.current.length),
+      );
       if (moved !== undefined) {
         syncTop({ ...current, active: moved });
         // The caret goes back to its visible phase on the frame the movement

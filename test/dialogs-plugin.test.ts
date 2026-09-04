@@ -1837,6 +1837,28 @@ describe("select viewport and extended navigation", () => {
     expect(result.value).toBe(6);
   });
 
+  test("pages by the reduced window while a sub-dialog is open", async () => {
+    const expand = `${ESCAPE}[13;5u`;
+    const options: readonly SelectOption<number>[] = [
+      ...listed(29),
+      {
+        label: "Category",
+        value: 30,
+        dialog: { message: "Nested", options: listed(30) },
+      },
+    ];
+    // Twelve rows leave five option rows flat and four with the open level's
+    // shadow row, so one page from the nested first option lands on its
+    // fifth option's value.
+    const result = await runSelection(
+      options,
+      [END, expand, PAGE_DOWN, CARRIAGE_RETURN],
+      false,
+      terminalOfRows(12),
+    );
+    expect(result.value).toBe(5);
+  });
+
   test("leaves room for a collected field in a short terminal", async () => {
     let collecting: readonly string[] = [];
     const result = await runSelection(
