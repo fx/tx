@@ -215,7 +215,7 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 - The active option MUST always be among the rendered options, and the rendered window MUST move only as far as needed to keep it there.
 - When visible options exist above or below the rendered window, the dialog MUST indicate that on that side together with how many are hidden there.
 - After the terminal is resized, the rendered window MUST reflect the new row count.
-- With levels stacked, the option rows of every visible level and the rows their shadows add MUST count toward that same budget, so the union of the stacked frames stays shorter than the terminal.
+- With levels stacked, the option rows of every visible level and the rows their shadows add MUST count toward that same budget, so the union of the stacked frames stays shorter than the terminal. A stack deeper than the budget allows MUST still render the top level with at least one option row; the levels beneath it MAY be covered by the top level and its shadow.
 
 #### Scenario: Long list opens at the top
 
@@ -357,7 +357,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Frame edges, the title, the key hints, the overflow indicators, and the filter prompt MUST be rendered dimmed relative to option labels and entered text.
 - The active option MUST be rendered as an inverted bar spanning the frame's full inner width.
 - A dialog MUST use only the terminal's default foreground and background, their dimmed form, and their inversion; it MUST NOT emit any hue.
-- A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys. A select level whose visible options include one declaring a sub-dialog MUST also name the key that opens it.
+- A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys. A select level whose visible options include one declaring a sub-dialog MUST append `· Ctrl+Enter expand` to that line.
 - Each stacked sub-dialog MUST use the frame its kind calls for: a nested select in a double-line frame, a text-field sub-dialog in a single-line frame.
 - Stacked levels MUST overlap: each level above the root MUST render offset down and right from its parent, with a dimmed block-fill shadow box behind it, clamped so the union of the stacked frames stays within the terminal width and stays strictly shorter than the terminal height.
 - A frame MUST fit its content and MUST NOT exceed the terminal width; a title or label wider than the inner width MUST be truncated at its end with an ellipsis rather than wrapped, and filter text or a value under entry wider than the inner width MUST keep its end visible, so the caret is never cut off.
@@ -370,7 +370,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Every animation timer MUST be stopped before the dialog settles.
 - A request rejected before rendering MUST still render nothing, frame included.
 
-The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled; the input hint line reads `Enter submit · Esc cancel`.
+The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled and with ` · Ctrl+Enter expand` appended exactly when a visible option declares a sub-dialog; the input hint line reads `Enter submit · Esc cancel`.
 
 Reference rendering of a filter-enabled select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves three option rows because the dialog's other six rows — the two frame edges, the filter prompt, both overflow indicators, and the hint line — must fit alongside them and still stay strictly under the terminal height. Only one indicator has anything to count here, so the frame drawn is eight rows of the ten:
 

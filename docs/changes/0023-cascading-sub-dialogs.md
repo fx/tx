@@ -100,14 +100,13 @@ The select view gains a stack of levels, each level holding what the flat dialog
 - [ ] Stacked presentation and manual
   - [ ] Render stacked levels as overlapping offset panels with a dimmed block-fill shadow behind each panel above the root, clamped to the terminal, greyscale only
   - [ ] Make the viewport row budget overlay-aware so a stacked dialog stays strictly shorter than the terminal
-  - [ ] Add Bun tests for the overlap offset, the shadow's dimmed rendering in one dedicated raw-output test, clamping on a narrow terminal, and the shrunken window on a short terminal with a stack open
+  - [ ] Add Bun tests for the overlap offset, the shadow's dimmed rendering in one dedicated raw-output test, clamping on a narrow terminal, the shrunken window on a short terminal with a stack open, and a deep stack keeping the top level's option row on screen with lower levels covered
   - [ ] Document the declaration, trigger, popping, resolution, and stacked look in `docs/manual/plugins.md`
   - [ ] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
 
 ## Open Questions
 
 - [ ] How Ctrl+Enter is delivered on terminals without an enhanced keyboard protocol — the input layer's key report decides: if the chord arrives indistinguishable from Enter there, the implementation either enables the renderer's opt-in keyboard protocol or records the terminals where the trigger cannot work. The spec names the chord without naming the mechanism, so either outcome honors it.
-- [ ] Whether a stacked dialog wants a maximum depth — the offsets clamp whatever the depth, so this is a usability question for real hierarchies, not a layout one.
 
 ## References
 
