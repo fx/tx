@@ -6,7 +6,7 @@
 
 [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) implements the generic registry that carries the internal capability and the namespace-free bundled provider that supplies `select`. [Change 0017](../../changes/0017-add-dialog-text-input-and-composition.md) implements the text `input` dialog and the user-provided option that composes the two. Those requirements are implemented.
 
-[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented. [Change 0023](../../changes/0023-cascading-sub-dialogs.md) desires the [Cascading Sub-Dialogs](#cascading-sub-dialogs) section and the stacked-panels rules in [Presentation](#presentation). Those requirements are unimplemented.
+[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented. [Change 0023](../../changes/0023-cascading-sub-dialogs.md) implements the [Cascading Sub-Dialogs](#cascading-sub-dialogs) section and the stacked-panels rules in [Presentation](#presentation). Those requirements are implemented.
 
 ## Background
 
@@ -313,7 +313,7 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 
 ### Cascading Sub-Dialogs
 
-An option MAY declare a sub-dialog holding a nested select request or a single text field. Desired behavior, unimplemented until [Change 0023](../../changes/0023-cascading-sub-dialogs.md) lands:
+An option MAY declare a sub-dialog holding a nested select request or a single text field:
 
 - Ctrl+Enter on an option declaring a sub-dialog MUST open that sub-dialog as a new level stacked over its parent inside the same render session, and MUST do nothing on an option declaring none.
 - Only the top level MUST answer keys; the levels beneath it MUST stay rendered and ignore input until the top level closes.
@@ -523,3 +523,4 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-02 | Implemented the select filter with its `filter` request setting, term matching, and pinned user-provided options, and the bounded viewport with its overflow indicators and Home, End, and Page navigation | [0020-add-select-filter-and-viewport](../../changes/0020-add-select-filter-and-viewport.md) |
 | 2026-09-02 | Implemented the Norton Commander presentation: greyscale framed panels with their message set into the top edge, the inverted cursor bar, dimmed chrome and key hints, width-aware truncation, and the bounded caret blink, indicator pulse, and confirmation flash | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |
 | 2026-09-04 | Desired cascading sub-dialogs with the Ctrl+Enter trigger, one-session stacking, Escape popping, whole-stack resolution, and overlapping shadowed panels | [0023-cascading-sub-dialogs](../../changes/0023-cascading-sub-dialogs.md) |
+| 2026-09-04 | Implemented cascading sub-dialogs with the Ctrl+Enter trigger, one-session stacking, Escape popping, whole-stack resolution, and overlapping shadowed panels | [0023-cascading-sub-dialogs](../../changes/0023-cascading-sub-dialogs.md) |
