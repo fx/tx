@@ -37,16 +37,17 @@ type SelectOption<T> = {
   readonly fields?: readonly TextField[];
   readonly dialog?: SelectRequest<T> | TextField;
 };
+type InputRequest = {
+  readonly message: string;
+  readonly initialValue?: string;
+};
+type SelectResult<T> = {
+  readonly value: T;
+  readonly values: Readonly<Record<string, string>>;
+};
 type Dialogs = {
-  input(request: {
-    message: string;
-    initialValue?: string;
-  }): Promise<string | undefined>;
-  select<T>(request: {
-    message: string;
-    options: readonly SelectOption<T>[];
-    filter?: boolean | "auto";
-  }): Promise<{ value: T; values: Record<string, string> } | undefined>;
+  input(request: InputRequest): Promise<string | undefined>;
+  select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
 };
 
 const branches = [
