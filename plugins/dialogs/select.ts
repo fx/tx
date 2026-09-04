@@ -27,7 +27,14 @@ import type {
   SelectResult,
   TextField,
 } from "./types.ts";
-import { optionRowCount, optionWindow } from "./viewport.ts";
+import {
+  optionRowCount,
+  type OptionWindow,
+  optionWindow,
+  stackedExtraRows,
+  stackedOffsetColumns,
+  stackedShadowRows,
+} from "./viewport.ts";
 
 /** The prompt the filter row carries, so the row the user types into is
  * distinguishable from the option rows under it. */
@@ -225,10 +232,13 @@ export function createSelectView<T>(
     const [revision, setRevision] = react.useState(0);
     const refresh = () => setRevision((current) => current + 1);
     void revision;
-    /** Where the window sat on the previous frame. It is derived rather than
-     * driven: every input that could move it already re-renders, and the
-     * terminal's own height changes without any input at all. */
-    const windowStart = react.useRef(0);
+    /** Where each level's window sat on the previous frame, keyed by depth:
+     * a child opened over a scrolled parent starts at its own top without
+     * disturbing the parent's, and popping restores exactly what the parent
+     * showed. Derived rather than driven: every input that could move it
+     * already re-renders, and the terminal's own height changes without any
+     * input at all. */
+    const windowStarts = react.useRef<readonly number[]>([0]);
     const active = react.useRef(0);
     const entered = react.useRef("");
     /** The top level's filter text as state, so typing re-renders: the stack
@@ -319,23 +329,33 @@ export function createSelectView<T>(
       setFilterText(next.entered);
       setActiveIndex(next.active);
     };
-
     // Derived while rendering, and remembered only so the next frame can move
-    // it as little as possible; the window is never state of its own. Deriving
-    // it against the state the frame is actually in is what lets the window
-    // give back rows to the field's panel the moment collection begins.
+    // each window as little as possible; no window is state of its own.
+    // Deriving the top one against the state the frame is actually in is what
+    // lets it give back rows to the field's panel the moment collection
+    // begins. The shadow row each stacked level above the root adds counts
+    // toward the same budget, so the union of the stacked frames stays
+    // strictly shorter than the terminal; a stack deeper than the budget still
+    // renders the top level with at least one option row, covering whatever
+    // of the lower levels it overlaps.
+    const depth = levels.current.length;
+    const stackedBudget = stackedExtraRows(depth);
+    const topStart = windowStarts.current[depth - 1] ?? 0;
     const viewport = optionWindow(
       visible.length,
       activeIndex,
-      windowStart.current,
+      topStart,
       rows,
       collectingField,
+      stackedBudget,
     );
     // The remembered start, not the rendered one: a terminal too short to draw
     // the window collapses it to nothing and renders from the top, and storing
     // that would lose the place the user scrolled to the moment the terminal
     // grew back.
-    windowStart.current = viewport.rememberedStart;
+    windowStarts.current = windowStarts.current.map((start, index) =>
+      index === depth - 1 ? viewport.rememberedStart : start,
+    );
     /** Visible options the window has no room for, whichever side of it they
      * fall on: an indicator is on screen exactly while this is positive, and it
      * is also the largest count either indicator can ever carry. */
@@ -383,6 +403,7 @@ export function createSelectView<T>(
           | SelectLevel<T>
           | InputLevel<T>
         )[];
+        windowStarts.current = [...windowStarts.current, 0];
         refresh();
         return;
       }
@@ -400,6 +421,7 @@ export function createSelectView<T>(
         | SelectLevel<T>
         | InputLevel<T>
       )[];
+      windowStarts.current = [...windowStarts.current, 0];
       entered.current = "";
       active.current = 0;
       setFilterText("");
@@ -418,6 +440,7 @@ export function createSelectView<T>(
         levels.current.length - 2
       ] as SelectLevel<T>;
       levels.current = levels.current.slice(0, -1);
+      windowStarts.current = windowStarts.current.slice(0, -1);
       entered.current = parent.entered;
       active.current = parent.active;
       setFilterText(parent.entered);
