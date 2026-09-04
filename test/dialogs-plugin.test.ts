@@ -3157,6 +3157,53 @@ describe("cascading sub-dialogs", () => {
     expect(result?.value).toBe("custom");
     expect(result?.values).toEqual({ owner: "deep" });
   });
+  test("keeps the retained parent row as an inverted bar", async () => {
+    const options: readonly SelectOption<string>[] = [
+      { label: "Known", value: "known" },
+      {
+        label: "ParentActiveOptionIsLong",
+        value: "category",
+        dialog: {
+          message: "Child",
+          options: [
+            { label: "x", value: "x" },
+            { label: "y", value: "y" },
+          ],
+        },
+      },
+    ];
+    const result = await runSelection(
+      options,
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("x");
+    // The parent's retained row keeps its bar: inverted and padded across
+    // the minimum's inner width, exactly as the top level's bar spans its.
+    const bars = invertedRows(lastFrame(result.stderr));
+    expect(bars.length).toBe(2);
+    expect(bars).toContain("x");
+    // The child overlaps the parent's bar, so only its tail peeks out right
+    // of the overlap — the same tail the offset test asserts on.
+    expect(bars.some((bar) => bar.includes("eOptionIsLong"))).toBe(true);
+  });
+
+  test("cuts a stacked entry shadow to its panel rather than the terminal", async () => {
+    const result = await runSelection(
+      [{ label: "Tagged", value: "tagged", dialog: tag }],
+      [CTRL_ENTER, "nightly", CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(40),
+    );
+    expect(result.value).toBe("tagged");
+    const raw = lastFrame(result.stderr);
+    // The shadow is the entry's own width: the dimmed block run after the
+    // leaf's frame is shorter than the full forty columns.
+    const shadowed = raw.split(`${DIM_OPEN}█`)[1] ?? "";
+    const run = shadowed.slice(0, shadowed.indexOf(`${DIM_CLOSE}`));
+    expect(run.length).toBeGreaterThan(0);
+    expect(run.length).toBeLessThan(40);
+  });
 
   test("pops a nested field collection instead of cancelling the session", async () => {
     const nestedStdin = new TerminalInput();

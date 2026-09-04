@@ -878,6 +878,7 @@ export function createSelectView<T>(
         panelWidth(parent.message, displayWidth(minimumText), avail),
         avail,
       );
+      const inner = innerWidth(minimumWidth);
       panels.push({
         element: react.createElement(
           Frame,
@@ -889,10 +890,15 @@ export function createSelectView<T>(
             columns,
             hint: undefined,
           },
+          // The retained row keeps the active bar it had when the child
+          // opened: inverted and padded across the minimum's inner width,
+          // exactly as the top level's own bar spans its panel.
           react.createElement(
             ink.Text,
-            { key: "option", wrap: "truncate-end" },
-            minimumText,
+            { key: "option", wrap: "truncate-end", inverse: true },
+            minimumText.padEnd(
+              minimumText.length + inner - displayWidth(minimumText),
+            ),
           ),
         ),
         index,
@@ -902,12 +908,16 @@ export function createSelectView<T>(
       });
     }
     if (fieldPanel !== undefined) {
-      // The entry already measures itself against the columns right of its
-      // offset, so its recorded width is what the shadow is cut to.
+      // The shadow is cut to the entry's own width. The entry knows it: it
+      // measured itself against the columns right of its offset and recorded
+      // the frame it drew. Read it back from the panel element's props
+      // rather than re-deriving the remaining columns here.
       const entryIndex = leaf !== undefined ? depthNow - 1 : depthNow;
+      const entryElement = fieldPanel as { props?: { width?: number } };
       const entryWidth = Math.max(
         1,
-        columns - entryIndex * stackedOffsetColumns,
+        entryElement.props?.width ??
+          columns - entryIndex * stackedOffsetColumns,
       );
       panels.push({
         element: fieldPanel,
