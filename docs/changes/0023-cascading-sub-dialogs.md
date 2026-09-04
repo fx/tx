@@ -5,7 +5,7 @@
 Give the bundled `select` dialog cascading sub-dialogs: an option MAY declare a nested select or a single text input that Ctrl+Enter opens as an overlapping panel stacked over its parent, Escape pops one level while anything is stacked and cancels only at the root, and completing any level resolves the whole stack with the chosen value and the inputs collected along the way. [Dialogs](../specs/dialogs/) owns the observable behavior.
 
 **Specs:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** [0021](./0021-restyle-dialogs-as-norton-commander.md)
 
 ## Motivation
@@ -97,12 +97,12 @@ The select view gains a stack of levels, each level holding what the flat dialog
   - [x] Name the expand key in the select hint exactly while a visible option declares a sub-dialog
   - [x] Add Bun tests for the trigger as a no-op without a declaration, push and pop, root cancel, whole-stack resolution from a nested select and from an input leaf, values merging with a colliding name, filter text preserved across push and pop, and unchanged empty output on every pre-render rejection
   - [x] Verify 100% coverage and `bun run check`
-- [ ] Stacked presentation and manual
-  - [ ] Render stacked levels as overlapping offset panels with a dimmed block-fill shadow behind each panel above the root, clamped to the terminal, greyscale only
-  - [ ] Make the viewport row budget overlay-aware so a stacked dialog stays strictly shorter than the terminal
-  - [ ] Add Bun tests for the overlap offset, the shadow's dimmed rendering in one dedicated raw-output test, clamping on a narrow terminal, the shrunken window on a short terminal with a stack open, and a deep stack keeping the top level's option row on screen with lower levels covered
-  - [ ] Document the declaration, trigger, popping, resolution, and stacked look in `docs/manual/plugins.md`
-  - [ ] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
+- [x] Stacked presentation and manual
+  - [x] Render stacked levels as overlapping offset panels with a dimmed block-fill shadow behind each panel above the root, clamped to the terminal, greyscale only
+  - [x] Make the viewport row budget overlay-aware so a stacked dialog stays strictly shorter than the terminal
+  - [x] Add Bun tests for the overlap offset, the shadow's dimmed rendering in one dedicated raw-output test, clamping on a narrow terminal, the shrunken window on a short terminal with a stack open, and a deep stack keeping the top level's option row on screen with lower levels covered
+  - [x] Document the declaration, trigger, popping, resolution, and stacked look in `docs/manual/plugins.md`
+  - [x] Verify 100% coverage and `bun run check`, then set this document's status to complete and sync `docs/index.yml` and `docs/index.md`
 
 ## Open Questions
 

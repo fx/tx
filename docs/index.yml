@@ -201,6 +201,6 @@ changes:
     path: changes/0023-cascading-sub-dialogs.md
     description: Let a select option declare a nested select or text input that Ctrl+Enter opens as an overlapping shadowed panel, with Escape popping and whole-stack resolution.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0021"

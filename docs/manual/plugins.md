@@ -354,6 +354,16 @@ type Dialogs = {
       readonly label: string
       readonly value: T
       readonly fields?: readonly TextField[]
+      readonly dialog?: {
+        readonly message: string
+        readonly options: readonly {
+          readonly label: string
+          readonly value: T
+          readonly fields?: readonly TextField[]
+          readonly dialog?: unknown
+        }[]
+        readonly filter?: boolean | "auto"
+      } | TextField
     }[]
     readonly filter?: boolean | "auto"
   }): Promise<
@@ -373,6 +383,10 @@ Every dialog requires both the provider's injected standard input and standard e
 `select` additionally rejects an empty options list before rendering, and renders the message plus the label of every option the filter leaves visible that its viewport has room for, in supplied order. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
 
 Up and Down move one position among the visible options and clamp at the first and last of them. Home and End make the first and the last visible option active, and Page Up and Page Down move by the number of option rows on screen, clamped the same way. Enter on a plain option resolves `{ value, values }`, where `value` is that option's exact value and `values` is empty. Escape and Ctrl-C return `undefined` at every stage; the provider does not terminate the process, assign an exit code, or print the selected value. Input the dialog has no meaning for is ignored, and while the filter is disabled that includes printable characters.
+
+An option may declare a sub-dialog under `dialog`: either a nested select request (its own message, options, and optional filter) or a single text field. Ctrl+Enter opens the active option's declared sub-dialog as an overlapping panel stacked over its parent; without a declaration the chord is a no-op and the filter text is left untouched, while typed or pasted text never opens anything. Plain Enter on such an option still confirms it as a plain option. Every level keeps its own filter text and active position, so opening a child starts it blank on its first option while the parent waits underneath, and popping restores exactly what the parent showed. Escape pops one level while anything is stacked and cancels only at the root; Ctrl-C does the same. Completing any level resolves the whole stack: the finally-Entered option's value plus every input value collected along the path, merged by field name with deeper submissions winning collisions. A text leaf resolves with its opening option's value and its submitted text under its field's name. Every reachable sub-request is validated before rendering alongside the existing rejections — an empty nested list, an empty field list, or a repeated field name within one nested option renders nothing. While a visible option declares a sub-dialog the select hint names the expand key exactly: `↑↓ move · Enter select · Esc cancel · Ctrl+Enter expand` (with the filter phrase when the filter is on). Stacked levels are still one render session with the same cleanup contract.
+
+Stacked levels render as overlapping offset panels, each one row down and two columns right of its parent, in greyscale only. Every level below the top renders at minimum — its full double-line frame and title with exactly its active option's row, no filter row, no overflow indicators, and no hint — while the top level renders fully as a flat dialog does (filter row when filtering, windowed options with indicators, hint) with its viewport shrunk by one shadow row per level above the root. A text leaf's entry renders as itself on top. A dimmed `█` block-fill shadow sits behind each panel above the root, one row down and one column right of the panel it shades. Each panel is clamped so its left edge plus its width stays inside the terminal, and the union stays strictly shorter than the terminal; on a short terminal with a stack open the top still keeps at least one option row while lower levels may be covered, and on a narrow terminal a panel never overflows its remaining columns.
 
 `filter` decides whether the dialog offers a type-to-filter prompt: `true` and `false` decide whatever the option count, and an omitted setting means `"auto"`, which turns the filter on exactly when the request carries more than eight options. So a caller that never thinks about the filter still gets one when the list is long, and a caller whose short list is best unfiltered can say so.
 
