@@ -1,0 +1,249 @@
+#!/usr/bin/env bun
+/**
+ * Shippable demo showcasing every dialogs-plugin feature.
+ *
+ *   ./demo              # every scenario, one after another
+ *   bun demo            # same via bun
+ *   ./demo input        # standalone input: blinking caret
+ *   ./demo select       # short list: no filter, confirmation flash
+ *   ./demo filter       # long list: type-to-filter + ▲/▼ overflow
+ *   ./demo nofilter     # long list with the filter forced off
+ *   ./demo fields       # select whose option collects input fields
+ *   ./demo nested       # select whose option opens a nested select (Ctrl+Enter)
+ *   ./demo leaf         # select whose option opens a text input leaf (Ctrl+Enter)
+ *
+ * Dialogs render on stderr, results are printed on stdout, so
+ * `./demo select > /dev/null` still shows the dialog.
+ */
+
+import dialogsPlugin from "./plugins/dialogs/index.ts";
+import { main } from "./src/cli.ts";
+import type { CommandContext, PluginDefinition } from "./src/plugin.ts";
+
+type TextField = {
+  readonly type: "text";
+  readonly name: string;
+  readonly message: string;
+  readonly initialValue?: string;
+};
+type SelectRequest<T> = {
+  readonly message: string;
+  readonly options: readonly SelectOption<T>[];
+  readonly filter?: boolean | "auto";
+};
+type SelectOption<T> = {
+  readonly label: string;
+  readonly value: T;
+  readonly fields?: readonly TextField[];
+  readonly dialog?: SelectRequest<T> | TextField;
+};
+type Dialogs = {
+  input(request: {
+    message: string;
+    initialValue?: string;
+  }): Promise<string | undefined>;
+  select<T>(request: {
+    message: string;
+    options: readonly SelectOption<T>[];
+    filter?: boolean | "auto";
+  }): Promise<{ value: T; values: Record<string, string> } | undefined>;
+};
+
+const branches = [
+  "main",
+  "release/1.4",
+  "release/1.5",
+  "release/2.0-rc",
+  "feature/dialog-animation",
+  "feature/dialog-filter",
+  "feature/norton-panel",
+  "feature/select-viewport",
+  "fix/caret-phase",
+  "fix/overflow-indicator",
+  "fix/raw-mode-restore",
+  "chore/bump-ink",
+  "chore/coverage",
+  "docs/plugins",
+  "docs/dialogs-spec",
+  "spike/wide-glyphs-😀-and-CJK-漢字",
+];
+
+const scenarios: Record<
+  string,
+  (dialogs: Dialogs) => Promise<unknown | undefined>
+> = {
+  async input(dialogs) {
+    return await dialogs.input({
+      message: "What should the release be called?",
+      initialValue: "spring",
+    });
+  },
+
+  async select(dialogs) {
+    return await dialogs.select({
+      message: "Pick a bump",
+      options: [
+        { label: "patch", value: "patch" },
+        { label: "minor", value: "minor" },
+        { label: "major", value: "major" },
+        { label: "prerelease", value: "prerelease" },
+      ],
+    });
+  },
+
+  async filter(dialogs) {
+    return await dialogs.select({
+      message: "Pick a branch",
+      options: branches.map((label) => ({ label, value: label })),
+    });
+  },
+
+  async nofilter(dialogs) {
+    return await dialogs.select({
+      message: "Pick a branch (filter off)",
+      options: branches.map((label) => ({ label, value: label })),
+      filter: false,
+    });
+  },
+
+  async fields(dialogs) {
+    return await dialogs.select({
+      message: "Where should this go?",
+      options: [
+        { label: "origin", value: "origin" },
+        { label: "upstream", value: "upstream" },
+        { label: "fork", value: "fork" },
+        {
+          label: "Somewhere else…",
+          value: "custom",
+          fields: [
+            { type: "text", name: "name", message: "Remote name" },
+            {
+              type: "text",
+              name: "url",
+              message: "Remote URL",
+              initialValue: "https://",
+            },
+          ],
+        },
+      ],
+      // Four options is under the auto threshold, so ask for the filter
+      // explicitly to see it alongside the "Somewhere else…" escape hatch,
+      // which stays visible however hard you filter.
+      filter: true,
+    });
+  },
+
+  async nested(dialogs) {
+    return await dialogs.select({
+      message: "Pick a category",
+      options: [
+        {
+          label: "fruit",
+          value: "fruit",
+          dialog: {
+            message: "Pick a fruit",
+            options: [
+              { label: "apple", value: "apple" },
+              { label: "banana", value: "banana" },
+            ],
+          },
+        },
+        { label: "color", value: "color" },
+      ],
+    });
+  },
+
+  async leaf(dialogs) {
+    return await dialogs.select({
+      message: "Pick a tag",
+      options: [
+        { label: "stable", value: "stable" },
+        {
+          label: "custom…",
+          value: "custom",
+          dialog: { type: "text", name: "tag", message: "Tag name" },
+        },
+      ],
+    });
+  },
+};
+
+const order = [
+  "input",
+  "select",
+  "filter",
+  "nofilter",
+  "fields",
+  "nested",
+  "leaf",
+] as const;
+
+function report(context: CommandContext, name: string, result: unknown): void {
+  context.stdout.write(`${name}: ${JSON.stringify(result) ?? "cancelled"}\n`);
+}
+
+const usage = `Usage: demo [scenario]
+
+Showcase every dialog: input, select, filter, nofilter, fields, nested, leaf.
+
+  input     standalone input with an initial value
+  select    short list with no filter
+  filter    long list with type-to-filter
+  nofilter  long list with the filter forced off
+  fields    select whose option collects input fields
+  nested    select whose option opens a nested select
+  leaf      select whose option opens a text input leaf
+
+Press Ctrl+Enter on an option declaring a sub-dialog to expand it.`;
+
+type CommandLike = {
+  error(message: string, options?: { exitCode?: number; code?: string }): never;
+};
+
+const demoPlugin: PluginDefinition = {
+  identity: { name: "demo" },
+  load:
+    () =>
+    ({ command, context, registrations }) => {
+      const run = async (names: readonly string[]) => {
+        const [dialogs] = registrations<Dialogs>("dialogs");
+        if (!dialogs) throw new Error("dialogs capability missing");
+        for (const name of names) {
+          const scenario = scenarios[name];
+          if (!scenario) throw new Error(`unknown scenario: ${name}`);
+          report(context, name, await scenario(dialogs));
+        }
+      };
+      command((namespace) => {
+        namespace
+          .description("Showcase every dialogs-plugin feature")
+          .argument("[scenario]", `one of: ${order.join(", ")}`)
+          .addHelpText("after", `\n${usage}\n`)
+          .action(
+            async (
+              scenario: string | undefined,
+              _flags: Record<string, unknown>,
+              cmd: CommandLike,
+            ) => {
+              if (scenario === undefined) {
+                await run(order);
+                return;
+              }
+              if (!(order as readonly string[]).includes(scenario)) {
+                cmd.error(`${usage}\n\none of: ${order.join(", ")}`, {
+                  exitCode: 1,
+                  code: "commander.invalidArgument",
+                });
+              }
+              await run([scenario]);
+            },
+          );
+      });
+    },
+};
+
+process.exitCode = await main(
+  ["demo", ...Bun.argv.slice(2)],
+  [dialogsPlugin, demoPlugin],
+);
