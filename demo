@@ -69,8 +69,24 @@ const branches = [
   "spike/wide-glyphs-😀-and-CJK-漢字",
 ];
 
+const order = [
+  "input",
+  "select",
+  "filter",
+  "nofilter",
+  "fields",
+  "nested",
+  "leaf",
+] as const;
+
+type ScenarioName = (typeof order)[number];
+
+function isScenario(value: string): value is ScenarioName {
+  return (order as readonly string[]).includes(value);
+}
+
 const scenarios: Record<
-  string,
+  ScenarioName,
   (dialogs: Dialogs) => Promise<unknown | undefined>
 > = {
   async input(dialogs) {
@@ -170,16 +186,6 @@ const scenarios: Record<
   },
 };
 
-const order = [
-  "input",
-  "select",
-  "filter",
-  "nofilter",
-  "fields",
-  "nested",
-  "leaf",
-] as const;
-
 function report(context: CommandContext, name: string, result: unknown): void {
   context.stdout.write(`${name}: ${JSON.stringify(result) ?? "cancelled"}\n`);
 }
@@ -207,13 +213,11 @@ const demoPlugin: PluginDefinition = {
   load:
     () =>
     ({ command, context, registrations }) => {
-      const run = async (names: readonly string[]) => {
+      const run = async (names: readonly ScenarioName[]) => {
         const [dialogs] = registrations<Dialogs>("dialogs");
         if (!dialogs) throw new Error("dialogs capability missing");
         for (const name of names) {
-          const scenario = scenarios[name];
-          if (!scenario) throw new Error(`unknown scenario: ${name}`);
-          report(context, name, await scenario(dialogs));
+          report(context, name, await scenarios[name](dialogs));
         }
       };
       command((namespace) => {
@@ -231,11 +235,14 @@ const demoPlugin: PluginDefinition = {
                 await run(order);
                 return;
               }
-              if (!(order as readonly string[]).includes(scenario)) {
-                cmd.error(`${usage}\n\none of: ${order.join(", ")}`, {
-                  exitCode: 1,
-                  code: "commander.invalidArgument",
-                });
+              if (!isScenario(scenario)) {
+                cmd.error(
+                  `unknown scenario: "${scenario}"\n\n${usage}\n\none of: ${order.join(", ")}`,
+                  {
+                    exitCode: 1,
+                    code: "commander.invalidArgument",
+                  },
+                );
               }
               await run([scenario]);
             },
