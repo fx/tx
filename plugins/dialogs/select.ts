@@ -488,7 +488,10 @@ export function createSelectView<T>(
     ): void => {
       const outcome: SelectResult<T> = {
         value,
-        values: { ...values },
+        values: Object.assign(
+          Object.create(null) as Record<string, string>,
+          values,
+        ),
       };
       if (viewport.count === 0) {
         settle({ type: "completed", value: outcome });
@@ -615,7 +618,13 @@ export function createSelectView<T>(
         }
         settle({
           type: "completed",
-          value: { value: collection.value, values: { ...merged } },
+          value: {
+            value: collection.value,
+            values: Object.assign(
+              Object.create(null) as Record<string, string>,
+              merged,
+            ),
+          },
         });
       }
     };
@@ -786,7 +795,7 @@ export function createSelectView<T>(
         width,
         columns,
         hint: topHint,
-        hintWidth: stacked ? Math.max(1, topAvail - 1) : undefined,
+        hintWidth: stacked ? Math.max(1, topAvail) : undefined,
       },
       children,
     );

@@ -155,7 +155,7 @@ export function createEntry(
         width,
         columns,
         hint: entryHint,
-        hintWidth: Math.max(1, measured - 1),
+        hintWidth: Math.max(1, measured),
       },
       react.createElement(
         ink.Text,

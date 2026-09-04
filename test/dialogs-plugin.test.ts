@@ -3514,6 +3514,22 @@ describe("cascading sub-dialogs", () => {
       expect(rejected.stdin.rawModes).toEqual([]);
     }
   });
+
+  test("renders a cyclic sub-dialog graph without overflowing", async () => {
+    type Loose = {
+      readonly label: string;
+      readonly value: number;
+      dialog?: { readonly message: string; readonly options: Loose[] };
+    };
+    const loop: Loose = { label: "Loop", value: 1 };
+    const nested = { message: "Nested", options: [loop] };
+    loop.dialog = nested;
+    // The cycle guard skips the back-edge, so validation passes and the
+    // dialog renders the reachable first visit instead of overflowing.
+    const result = await runSelection([loop], [CARRIAGE_RETURN], false);
+    expect(result.value).toBe(1);
+    expect(result.values).toEqual({});
+  });
 });
 
 describe("Norton Commander presentation", () => {

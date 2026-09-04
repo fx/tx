@@ -230,27 +230,40 @@ function requireInteractiveStreams(
  * any terminal state changes: an empty list at any depth asks for nothing.
  * Every level of the stack renders inside the one session, so every depth is
  * reachable and every depth is validated alongside the existing rejections.
+ * A `seen` set stops on a repeated list: a cyclic request graph is a caller
+ * bug, and a second visit would recurse until the stack overflows instead of
+ * rejecting or rendering. Only the cycle back-edge is skipped; every
+ * first visit is still validated.
  */
-function requireNonEmptyOptions<T>(options: readonly SelectOption<T>[]): void {
+function requireNonEmptyOptions<T>(
+  options: readonly SelectOption<T>[],
+  seen: Set<readonly SelectOption<T>[]> = new Set(),
+): void {
+  if (seen.has(options)) return;
+  seen.add(options);
   if (options.length === 0) {
     throw new Error("A select dialog requires at least one option");
   }
   for (const { dialog } of options) {
     if (dialog !== undefined && "options" in dialog) {
-      requireNonEmptyOptions(dialog.options);
+      requireNonEmptyOptions(dialog.options, seen);
     }
   }
 }
-
 /** Rejects a declaration that could never be collected, before any terminal
  * state changes: an option marked user-provided by an empty field list asks for
  * nothing, and a repeated name would let one field overwrite another's value.
  * Names only have to be unique within the option declaring them, because only
  * one option is ever collected. Every reachable sub-dialog is validated, so a
- * declaration no path walks to can still never render. */
+ * declaration no path walks to can still never render. A `seen` set stops on
+ * a repeated list for the same cycle reason as above.
+ */
 function requireCollectableFields<T>(
   options: readonly SelectOption<T>[],
+  seen: Set<readonly SelectOption<T>[]> = new Set(),
 ): void {
+  if (seen.has(options)) return;
+  seen.add(options);
   for (const { fields } of options) {
     if (!fields) continue;
     if (fields.length === 0) {
@@ -268,7 +281,7 @@ function requireCollectableFields<T>(
   }
   for (const { dialog } of options) {
     if (dialog !== undefined && "options" in dialog) {
-      requireCollectableFields(dialog.options);
+      requireCollectableFields(dialog.options, seen);
     }
   }
 }
