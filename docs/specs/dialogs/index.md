@@ -6,7 +6,7 @@
 
 [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) implements the generic registry that carries the internal capability and the namespace-free bundled provider that supplies `select`. [Change 0017](../../changes/0017-add-dialog-text-input-and-composition.md) implements the text `input` dialog and the user-provided option that composes the two. Those requirements are implemented.
 
-[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented.
+[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented. [Change 0023](../../changes/0023-cascading-sub-dialogs.md) desires the [Cascading Sub-Dialogs](#cascading-sub-dialogs) section and the stacked-panels rules in [Presentation](#presentation). Those requirements are unimplemented.
 
 ## Background
 
@@ -38,6 +38,7 @@ type SelectOption<T> = {
   readonly label: string
   readonly value: T
   readonly fields?: readonly TextField[]
+  readonly dialog?: SelectRequest<T> | TextField
 }
 
 type SelectRequest<T> = {
@@ -214,6 +215,7 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 - The active option MUST always be among the rendered options, and the rendered window MUST move only as far as needed to keep it there.
 - When visible options exist above or below the rendered window, the dialog MUST indicate that on that side together with how many are hidden there.
 - After the terminal is resized, the rendered window MUST reflect the new row count.
+- With levels stacked, the option rows of every visible level and the rows their shadows add MUST count toward that same budget, so the union of the stacked frames stays shorter than the terminal. A stack deeper than the budget allows MUST still render the top level with at least one option row; the levels beneath it MAY be covered by the top level and its shadow.
 
 #### Scenario: Long list opens at the top
 
@@ -309,6 +311,43 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 - **WHEN** the user presses Escape or Ctrl-C
 - **THEN** `select` resolves with `undefined`, the already collected value is discarded, and the option list is not presented again
 
+### Cascading Sub-Dialogs
+
+An option MAY declare a sub-dialog holding a nested select request or a single text field. Desired behavior, unimplemented until [Change 0023](../../changes/0023-cascading-sub-dialogs.md) lands:
+
+- Ctrl+Enter on an option declaring a sub-dialog MUST open that sub-dialog as a new level stacked over its parent inside the same render session, and MUST do nothing on an option declaring none.
+- Only the top level MUST answer keys; the levels beneath it MUST stay rendered and ignore input until the top level closes.
+- Escape or Ctrl-C with more than one level open MUST close only the top level and return to its parent with the parent's state unchanged; at the root level it MUST cancel the dialog and resolve with `undefined`.
+- Completing a nested select level MUST resolve the whole `select` with a result carrying the completing option's exact value and every input value collected along the path, keyed by field name with the deeper submission winning a repeated name.
+- Submitting a text-field sub-dialog MUST resolve the whole `select` with a result carrying the opening option's exact value and every input value collected along the path including the submitted text under its field's name, keyed by field name with the deeper submission winning a repeated name.
+- Entering a sub-dialog MUST NOT change its parent's filter text or active option, and leaving it MUST restore exactly what the parent showed before it opened.
+- The trigger MUST be answered from the modified key report rather than from typed or pasted text, so a multi-character chunk MUST NOT open a sub-dialog.
+- `select` MUST reject before rendering when any reachable sub-dialog declares an empty options list, or when any reachable option declares an empty field list or repeats a field name within itself.
+
+#### Scenario: Drill into a nested select
+
+- **GIVEN** the active option declares a nested select whose second option is plain
+- **WHEN** the user presses Ctrl+Enter, then Down, then Enter
+- **THEN** the nested select opens over its parent and `select` resolves with the second nested option's value
+
+#### Scenario: Submit a text leaf
+
+- **GIVEN** the active option declares a text-field sub-dialog named `tag`
+- **WHEN** the user presses Ctrl+Enter, types `nightly`, and presses Enter
+- **THEN** `select` resolves with the opening option's value and the collected value `nightly` under `tag`
+
+#### Scenario: Pop back to the parent
+
+- **GIVEN** a sub-dialog is open over its parent
+- **WHEN** the user presses Escape
+- **THEN** the sub-dialog closes, the parent shows the same filter text and active option as before, and `select` stays open
+
+#### Scenario: Trigger without a declaration does nothing
+
+- **GIVEN** the active option declares no sub-dialog
+- **WHEN** the user presses Ctrl+Enter
+- **THEN** nothing opens and the dialog stays on the same option
+
 ### Presentation
 
 The look is Norton Commander's: framed panels, a title set into the frame, a full-width cursor bar, and a key bar underneath — in greyscale.
@@ -318,7 +357,9 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Frame edges, the title, the key hints, the overflow indicators, and the filter prompt MUST be rendered dimmed relative to option labels and entered text.
 - The active option MUST be rendered as an inverted bar spanning the frame's full inner width.
 - A dialog MUST use only the terminal's default foreground and background, their dimmed form, and their inversion; it MUST NOT emit any hue.
-- A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys.
+- A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys. A select level whose visible options include one declaring a sub-dialog MUST append `· Ctrl+Enter expand` to that line.
+- Each stacked sub-dialog MUST use the frame its kind calls for: a nested select in a double-line frame, a text-field sub-dialog in a single-line frame.
+- Stacked levels MUST overlap: each level above the root MUST render offset down and right from its parent, with a dimmed block-fill shadow box behind it, clamped so the union of the stacked frames stays within the terminal width and stays strictly shorter than the terminal height.
 - A frame MUST fit its content and MUST NOT exceed the terminal width; a title or label wider than the inner width MUST be truncated at its end with an ellipsis rather than wrapped, and filter text or a value under entry wider than the inner width MUST keep its end visible, so the caret is never cut off.
 - Twenty columns is the narrowest supported terminal: below it, a dialog MUST lay itself out as if the terminal were twenty columns wide, and how the terminal wraps the result is unspecified.
 - Text entry and the filter MUST show a caret after the current text, and the caret SHOULD alternate between visible and hidden at an interval between 400 and 600 milliseconds while the dialog waits for input.
@@ -329,7 +370,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Every animation timer MUST be stopped before the dialog settles.
 - A request rejected before rendering MUST still render nothing, frame included.
 
-The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled; the input hint line reads `Enter submit · Esc cancel`.
+The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled and with ` · Ctrl+Enter expand` appended exactly when a visible option declares a sub-dialog; the input hint line reads `Enter submit · Esc cancel`.
 
 Reference rendering of a filter-enabled select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves three option rows because the dialog's other six rows — the two frame edges, the filter prompt, both overflow indicators, and the hint line — must fit alongside them and still stay strictly under the terminal height. Only one indicator has anything to count here, so the frame drawn is eight rows of the ten:
 
@@ -380,7 +421,7 @@ Reference rendering of a filter-enabled select in a terminal of 80 columns and 1
 - A dialog MUST render its prompts, options, and entered values only to the dialogs provider's injected standard-error stream, leaving standard output untouched for the consumer's data.
 - A dialog MUST reject before rendering when its injected standard-input or standard-error stream is not an interactive terminal; it MUST NOT provide a non-interactive fallback.
 - A dialog MUST restore the injected terminal's prior state and finish unmounting before its promise settles after completion, cancellation, or rendering failure.
-- A `select` that collects fields MUST be one dialog: it MUST NOT restore terminal state, unmount, or settle between its selection and field stages.
+- A `select` that collects fields MUST be one dialog: it MUST NOT restore terminal state, unmount, or settle between its selection and field stages. A `select` that opens sub-dialogs MUST be one dialog on the same terms: it MUST NOT restore terminal state, unmount, or settle between its levels.
 - If an injected `setRawMode(false)`, `unref()`, or renderer `unmount()` method persistently throws, restoration or teardown through that API is impossible: a dialog MUST retry finitely, reject with the first applicable cleanup failure, and permit incomplete restoration or renderer teardown only on that exceptional path rather than hanging indefinitely.
 - A rendering or interaction failure MUST reject the dialog and MUST NOT terminate the process directly.
 
@@ -443,10 +484,10 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - `text` is the only field type. Dropdown, checkbox, numeric, masked, and multi-line fields are out of scope, as is a form that presents several fields at once with focus movement between them.
 - Field validation, required-field policy, defaults beyond an initial value, error messages, and re-prompting after a rejected value are out of scope; a caller validates what it receives.
 - Caret movement, word or line deletion, clipboard integration, paste-specific handling, entry history, completion, and character masking are out of scope for text entry and for the filter; a terminal paste arrives as ordinary input and is appended as such.
-- Returning to an earlier stage, partial results, and any back-navigation key are out of scope.
 - Fuzzy or prefix matching, match ranking, match highlighting, matching against option values, a caller-supplied matcher, an initial filter text, and a filter on `input` are out of scope.
+- Returning to an earlier stage, partial results, and any back-navigation key are out of scope, except that Escape MUST close the top stacked level of a cascading sub-dialog and return to its parent.
 - Multi-select, disabled or grouped options, custom option rendering, mouse input, configurable themes or palettes, color hues, and layout APIs are out of scope.
-- Non-interactive fallback, concurrent or nested dialogs, global serialization, persistence, and terminal accessibility policy are out of scope.
+- Non-interactive fallback, concurrent dialogs, independently nested dialogs in separate render sessions, global serialization, persistence, and terminal accessibility policy are out of scope. Stacked cascading sub-dialog levels are not nested dialogs in this sense: they are one dialog in one render session.
 - Registry collision policy, provider priority, deduplication, ownership metadata, and version negotiation are owned by neither this spec nor the initial implementation.
 
 ## Open Questions
@@ -481,3 +522,4 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-01 | Desired Norton Commander presentation: framed dialogs with titles, greyscale palette, inverted cursor bar, key hints, truncation, and bounded animations | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |
 | 2026-09-02 | Implemented the select filter with its `filter` request setting, term matching, and pinned user-provided options, and the bounded viewport with its overflow indicators and Home, End, and Page navigation | [0020-add-select-filter-and-viewport](../../changes/0020-add-select-filter-and-viewport.md) |
 | 2026-09-02 | Implemented the Norton Commander presentation: greyscale framed panels with their message set into the top edge, the inverted cursor bar, dimmed chrome and key hints, width-aware truncation, and the bounded caret blink, indicator pulse, and confirmation flash | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |
+| 2026-09-04 | Desired cascading sub-dialogs with the Ctrl+Enter trigger, one-session stacking, Escape popping, whole-stack resolution, and overlapping shadowed panels | [0023-cascading-sub-dialogs](../../changes/0023-cascading-sub-dialogs.md) |
