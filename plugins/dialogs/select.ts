@@ -919,7 +919,10 @@ export function createSelectView<T>(
     }
     // The union of the offset frames: each panel's bottom plus one shadow row
     // above the root, clamped strictly shorter than the terminal. Clamping
-    // may cover lower levels entirely; the top keeps its viewport row.
+    // may cover lower levels entirely; the top keeps its viewport row. The
+    // container clips, because absolutely positioned panels would otherwise
+    // paint past its height, and each offset is clamped, because a deep
+    // stack's own margin would otherwise push it past the terminal's edge.
     let union = 0;
     for (const sized of panels) {
       union = Math.max(
@@ -932,6 +935,11 @@ export function createSelectView<T>(
     const unionHeight = Math.min(union, Math.max(1, rows - 1));
     const placed: DialogElement[] = [];
     for (const stackedPanel of panels) {
+      const left = Math.min(
+        stackedPanel.index * stackedOffsetColumns,
+        Math.max(0, columns - 1),
+      );
+      const top = Math.min(stackedPanel.index, Math.max(0, unionHeight - 1));
       if (stackedPanel.index > 0) {
         const filler = "█".repeat(stackedPanel.width);
         const shadowRows: DialogElement[] = [];
@@ -950,8 +958,8 @@ export function createSelectView<T>(
             {
               key: `shadow-${stackedPanel.index}`,
               position: "absolute",
-              marginTop: stackedPanel.index + 1,
-              marginLeft: stackedPanel.index * stackedOffsetColumns + 1,
+              marginTop: Math.min(top + 1, Math.max(0, unionHeight - 1)),
+              marginLeft: Math.min(left + 1, Math.max(0, columns - 1)),
               width: stackedPanel.width,
               flexDirection: "column",
             },
@@ -965,8 +973,8 @@ export function createSelectView<T>(
           {
             key: `level-${stackedPanel.index}`,
             position: "absolute",
-            marginTop: stackedPanel.index,
-            marginLeft: stackedPanel.index * stackedOffsetColumns,
+            marginTop: top,
+            marginLeft: left,
           },
           stackedPanel.element,
         ),
@@ -979,6 +987,7 @@ export function createSelectView<T>(
         flexDirection: "column",
         width: columns,
         height: unionHeight,
+        overflow: "hidden",
       },
       placed,
     );

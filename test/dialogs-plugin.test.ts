@@ -1858,6 +1858,57 @@ describe("select viewport and extended navigation", () => {
     );
     expect(result.value).toBe(5);
   });
+  test("clips a stack deeper than the terminal inside its bounds", async () => {
+    const expand = `${ESCAPE}[13;5u`;
+    const deep: readonly SelectOption<number>[] = [
+      { label: "Known", value: 0 },
+      {
+        label: "Category",
+        value: 1,
+        dialog: {
+          message: "Middle",
+          options: [
+            { label: "First", value: 2 },
+            {
+              label: "Sub",
+              value: 3,
+              dialog: {
+                message: "Deeper",
+                options: [
+                  { label: "Leaf", value: 4 },
+                  {
+                    label: "Down",
+                    value: 5,
+                    dialog: {
+                      message: "Deepest",
+                      options: [{ label: "End", value: 6 }],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const terminalRows = 10;
+    const columns = 30;
+    const stderr = terminalOfRows(terminalRows);
+    stderr.columns = columns;
+    const result = await runSelection(
+      deep,
+      [DOWN, expand, DOWN, expand, DOWN, expand, CARRIAGE_RETURN],
+      false,
+      stderr,
+    );
+    expect(result.value).toBe(6);
+    const rows = frameRows(result.stderr);
+    expect(rows.length).toBeLessThan(terminalRows);
+    for (const row of rows) {
+      expect(row.length).toBeLessThanOrEqual(columns);
+    }
+    expect(activeRow(result.stderr, "Deepest")).toBe("End");
+  });
 
   test("leaves room for a collected field in a short terminal", async () => {
     let collecting: readonly string[] = [];
