@@ -38,13 +38,38 @@ export const selectChromeHeight = 6;
  */
 export const collectingChromeHeight = 9;
 
+/** The columns each stacked level sits right of its parent, so levels above
+ * the root read as overlapping offset panels rather than as panels underneath.
+ * Kept in one place with the shadow budget below, because the view's clamping
+ * and the tests' overlap assertions read the same numbers the layout draws. */
+export const stackedOffsetColumns = 2;
+
+/** The rows one stacked level's shadow costs the viewport budget: the shadow
+ * is a dimmed block-fill box behind each panel above the root, one column and
+ * one row down and right from its parent, so exactly one row of it stays
+ * visible beneath the panel it backs. The panel rows themselves overlap their
+ * parent's, which is why the shadow row is the only thing a level above the
+ * root adds to the height. */
+export const stackedShadowRows = 1;
+
+/** The rows the whole dialog may take beyond one level's chrome: one shadow
+ * row per stacked level above the root. A flat stack is the root alone and
+ * adds nothing; deeper stacks add one row per level, because every panel above
+ * the root carries its own dimmed block-fill box. Separate from the chrome
+ * heights because these rows belong to the stack rather than to the choosing
+ * state — a flat dialog never draws them. */
+export function stackedExtraRows(depth: number): number {
+  return Math.max(0, depth - 1) * stackedShadowRows;
+}
+
 /** The rows a select's chrome takes in the state it is in. */
 function chromeHeight(collecting: boolean): number {
   return collecting ? collectingChromeHeight : selectChromeHeight;
 }
 
 /** The option rows a select renders, given what is visible, how tall the
- * terminal is, and whether a field is being collected under the list. The `- 1`
+ * terminal is, whether a field is being collected under the list, and how many
+ * shadow rows the stacked levels above the root add. The `- 1`
  * is load-bearing: Ink treats output as tall as the terminal as full-screen and
  * clears the terminal when such output is replaced or unmounted, so the dialog
  * stays strictly shorter than the terminal to keep Ink in its ordinary
@@ -59,9 +84,14 @@ export function optionRowCount(
   visibleCount: number,
   terminalRows: number,
   collecting: boolean,
+  extraRows = 0,
 ): number {
-  const affordable = terminalRows - chromeHeight(collecting) - 1;
-  if (affordable < 1 || visibleCount < 1) return 0;
+  if (visibleCount < 1) return 0;
+  const affordable = terminalRows - chromeHeight(collecting) - extraRows - 1;
+  // A stack deeper than the budget still renders the top level with one row:
+  // lower levels may be covered, the top never is. A flat dialog with no
+  // room still draws nothing rather than clearing the terminal.
+  if (affordable < 1) return extraRows > 0 ? 1 : 0;
   return Math.max(1, Math.min(maximumOptionRows, affordable, visibleCount));
 }
 
@@ -120,8 +150,14 @@ export function optionWindow(
   previousStart: number,
   terminalRows: number,
   collecting: boolean,
+  extraRows = 0,
 ): OptionWindow {
-  const count = optionRowCount(visibleCount, terminalRows, collecting);
+  const count = optionRowCount(
+    visibleCount,
+    terminalRows,
+    collecting,
+    extraRows,
+  );
   const furthestStart = Math.max(0, visibleCount - count);
   // Clamped against the list as it stands, so a start left over from a longer
   // list is pulled back rather than remembered past the end of this one.

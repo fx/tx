@@ -69,6 +69,10 @@ type FrameProps = {
   /** The key hint line drawn under the panel, or nothing when another panel
    * follows this one and carries the hints that actually apply. */
   readonly hint: string | undefined;
+  /** The columns the hint line may run to: a stacked panel sits right of its
+   * offset and caps its hint there so the line stays inside the terminal.
+   * Omitted on every flat dialog, which caps against the terminal. */
+  readonly hintWidth?: number | undefined;
   readonly children?: DialogElement | readonly DialogElement[];
 };
 
@@ -92,6 +96,7 @@ export function createFrame(
     width,
     columns,
     hint,
+    hintWidth,
     children,
   }: FrameProps) {
     /** The title starts two columns in, over the first border segment, and may
@@ -129,7 +134,10 @@ export function createFrame(
       children,
     );
     // The hint line is capped like the panel is: a hint wide enough to wrap
-    // would add a row the viewport's arithmetic never counted.
+    // would add a row the viewport's arithmetic never counted. A stacked
+    // panel's own hint stops at its available columns rather than the
+    // terminal's, so the line stays inside the terminal.
+    const hintCap = layoutColumns(hintWidth ?? columns) - 1;
     const hints =
       hint === undefined
         ? undefined
@@ -138,7 +146,7 @@ export function createFrame(
             {
               key: "hint",
               marginLeft: 1,
-              width: Math.max(1, layoutColumns(columns) - 1),
+              width: Math.max(1, hintCap),
             },
             react.createElement(
               ink.Text,

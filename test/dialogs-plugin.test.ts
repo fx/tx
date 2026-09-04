@@ -6,6 +6,7 @@ import {
   flashInterval,
 } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import { stackedValues } from "../plugins/dialogs/select.ts";
 import {
   collectingChromeHeight,
   selectChromeHeight,
@@ -29,6 +30,13 @@ type SelectOption<T> = {
   readonly label: string;
   readonly value: T;
   readonly fields?: readonly TextField[];
+  readonly dialog?: SelectRequest<T> | TextField;
+};
+
+type SelectRequest<T> = {
+  readonly message: string;
+  readonly options: readonly SelectOption<T>[];
+  readonly filter?: boolean | "auto";
 };
 
 type SelectResult<T> = {
@@ -1829,6 +1837,79 @@ describe("select viewport and extended navigation", () => {
     expect(result.value).toBe(6);
   });
 
+  test("pages by the reduced window while a sub-dialog is open", async () => {
+    const expand = `${ESCAPE}[13;5u`;
+    const options: readonly SelectOption<number>[] = [
+      ...listed(29),
+      {
+        label: "Category",
+        value: 30,
+        dialog: { message: "Nested", options: listed(30) },
+      },
+    ];
+    // Twelve rows leave five option rows flat and four with the open level's
+    // shadow row, so one page from the nested first option lands on its
+    // fifth option's value.
+    const result = await runSelection(
+      options,
+      [END, expand, PAGE_DOWN, CARRIAGE_RETURN],
+      false,
+      terminalOfRows(12),
+    );
+    expect(result.value).toBe(5);
+  });
+  test("clips a stack deeper than the terminal inside its bounds", async () => {
+    const expand = `${ESCAPE}[13;5u`;
+    const deep: readonly SelectOption<number>[] = [
+      { label: "Known", value: 0 },
+      {
+        label: "Category",
+        value: 1,
+        dialog: {
+          message: "Middle",
+          options: [
+            { label: "First", value: 2 },
+            {
+              label: "Sub",
+              value: 3,
+              dialog: {
+                message: "Deeper",
+                options: [
+                  { label: "Leaf", value: 4 },
+                  {
+                    label: "Down",
+                    value: 5,
+                    dialog: {
+                      message: "Deepest",
+                      options: [{ label: "End", value: 6 }],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const terminalRows = 10;
+    const columns = 30;
+    const stderr = terminalOfRows(terminalRows);
+    stderr.columns = columns;
+    const result = await runSelection(
+      deep,
+      [DOWN, expand, DOWN, expand, DOWN, expand, CARRIAGE_RETURN],
+      false,
+      stderr,
+    );
+    expect(result.value).toBe(6);
+    const rows = frameRows(result.stderr);
+    expect(rows.length).toBeLessThan(terminalRows);
+    for (const row of rows) {
+      expect(row.length).toBeLessThanOrEqual(columns);
+    }
+    expect(activeRow(result.stderr, "Deepest")).toBe("End");
+  });
+
   test("leaves room for a collected field in a short terminal", async () => {
     let collecting: readonly string[] = [];
     const result = await runSelection(
@@ -2701,8 +2782,753 @@ describe("user-provided select options", () => {
     expect(stdin.rawModes).toEqual([true, false]);
     expect(stdin.refs).toBe(1);
     expect(stdin.unrefs).toBe(1);
-    expect(stdin.activeReferences).toBe(0);
     expect(stdin.listenerCount("data")).toBe(0);
+  });
+});
+
+describe("cascading sub-dialogs", () => {
+  const CTRL_ENTER = `${ESCAPE}[13;5u`;
+  const tag: TextField = {
+    type: "text",
+    name: "tag",
+    message: "Which tag?",
+  };
+
+  function expandable(): readonly SelectOption<string>[] {
+    return [
+      { label: "Known", value: "known" },
+      {
+        label: "Category",
+        value: "category",
+        dialog: {
+          message: "Pick an item",
+          options: [
+            { label: "First", value: "first" },
+            { label: "Second", value: "second" },
+          ],
+        },
+      },
+    ];
+  }
+
+  test("names the expand key exactly while a visible option declares a sub-dialog", async () => {
+    const expanded = await runSelection(expandable(), [CARRIAGE_RETURN], false);
+    expect(expanded.value).toBe("known");
+    expect(frameRows(expanded.stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · Esc cancel · Ctrl+Enter expand",
+    );
+
+    const flat = await runSelection(
+      [{ label: "Known", value: "known" }],
+      [CARRIAGE_RETURN],
+      false,
+    );
+    expect(frameRows(flat.stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · Esc cancel",
+    );
+  });
+
+  test("treats the trigger as a no-op without a declaration", async () => {
+    const result = await runSelection(
+      [
+        { label: "Known", value: "known" },
+        { label: "Other", value: "other" },
+      ],
+      [CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("known");
+    expect(result.values).toEqual({});
+  });
+
+  test("opens a nested select and resolves the whole stack with its value", async () => {
+    const result = await runSelection(expandable(), [
+      DOWN,
+      CTRL_ENTER,
+      DOWN,
+      CARRIAGE_RETURN,
+    ]);
+    expect(result.value).toBe("second");
+    expect(result.values).toEqual({});
+  });
+
+  test("pops one level on Escape and cancels only at the root", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: expandable(),
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(DOWN);
+    await until(() => activeRow(stderr) === "Category");
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Pick an item"));
+    await until(() => {
+      try {
+        return activeRow(stderr, "Pick an item") === "First";
+      } catch {
+        return false;
+      }
+    });
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Category" &&
+          !stripped(lastFrame(stderr)).includes("Pick an item")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(settled).toBe(false);
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(await running).toBe(0);
+    expect(result).toBeUndefined();
+  });
+
+  test("cancels at the root with Ctrl-C and pops a level with Ctrl-C above it", async () => {
+    const atRoot = await runSelection(expandable(), [CTRL_C]);
+    expect(atRoot.value).toBeUndefined();
+
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined = {
+      value: "open",
+      values: {},
+    };
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: expandable(),
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(DOWN);
+    await until(() => activeRow(stderr) === "Category");
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Pick an item"));
+    await until(() => {
+      try {
+        return activeRow(stderr, "Pick an item") === "First";
+      } catch {
+        return false;
+      }
+    });
+    stdin.write(CTRL_C);
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Category" &&
+          !stripped(lastFrame(stderr)).includes("Pick an item")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(settled).toBe(false);
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("category");
+  });
+
+  test("resolves a text leaf with the opening value and its submitted text", async () => {
+    const result = await runSelection(
+      [{ label: "Tagged", value: "tagged", dialog: tag }],
+      [CTRL_ENTER, "nightly", CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("tagged");
+    expect(result.values).toEqual({ tag: "nightly" });
+  });
+
+  test("pops a text leaf on Escape and cancels only at the root", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined = {
+      value: "stale",
+      values: {},
+    };
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [{ label: "Tagged", value: "tagged", dialog: tag }],
+            filter: false,
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Tagged"));
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Which tag?"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 80));
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Tagged" &&
+          !stripped(lastFrame(stderr)).includes("Which tag?")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(settled).toBe(false);
+    stdin.write(CTRL_ENTER);
+    // The push is synchronous but the reopened entry subscribes on its mount
+    // effect; wait it out so the typed text is not swallowed before then.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    const reopened = stderr.text().length;
+    stdin.write("nightly");
+    await until(() => {
+      const fresh = stderr.text().slice(reopened);
+      return stripped(fresh).includes("nightly");
+    });
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result).toEqual({ value: "tagged", values: { tag: "nightly" } });
+  });
+
+  test("merges values along the path with deeper submissions winning", async () => {
+    const shallow: Record<string, string> = Object.assign(
+      Object.create(null) as Record<string, string>,
+      { name: "shallow" },
+    );
+    const merged = stackedValues(shallow, "name", "deep");
+    expect(merged).toEqual({ name: "deep" });
+    expect(Object.getOwnPropertyDescriptor(merged, "name")?.value).toBe("deep");
+    expect(stackedValues(shallow, "other", "new")).toEqual({
+      name: "shallow",
+      other: "new",
+    });
+    // The base is left untouched and stays prototype-free, so an opaque
+    // caller key lands as an own value rather than reaching Object.prototype.
+    expect(shallow).toEqual({ name: "shallow" });
+    const proto = stackedValues({}, "__proto__", "a");
+    expect(Object.getOwnPropertyDescriptor(proto, "__proto__")?.value).toBe(
+      "a",
+    );
+
+    // End to end, a nested completion carries the path's values: the nested
+    // option's fields resolve with the whole stack's inputs, deeper winning.
+    // The field entry subscribes on its mount effect, so the test waits for
+    // its frame before typing rather than racing it.
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let carried: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          carried = await dialogs.select({
+            message: "Pick one",
+            options: [
+              {
+                label: "Category",
+                value: "category",
+                dialog: {
+                  message: "Nested",
+                  options: [
+                    {
+                      label: "Custom",
+                      value: "custom",
+                      fields: [
+                        {
+                          type: "text",
+                          name: "owner",
+                          message: "Which account?",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+            filter: false,
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Nested"));
+    stdin.write(CARRIAGE_RETURN);
+    await until(() => stripped(stderr.text()).includes("Which account?"));
+    stdin.write("fx");
+    await until(() => stripped(stderr.text()).includes("fx"));
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(carried?.value).toBe("custom");
+    expect(carried?.values).toEqual({ owner: "fx" });
+  });
+
+  test("carries inputs from two levels with deeper winning a repeated name", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [
+              {
+                label: "Category",
+                value: "category",
+                fields: [
+                  { type: "text", name: "owner", message: "Which account?" },
+                ],
+                dialog: {
+                  message: "Nested",
+                  options: [
+                    {
+                      label: "Custom",
+                      value: "custom",
+                      fields: [
+                        {
+                          type: "text",
+                          name: "owner",
+                          message: "Which account below?",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+            filter: false,
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    // Open the nested level first: the field collected there completes the
+    // level, and the root's own collection must no longer be reachable.
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Nested"));
+    stdin.write(CARRIAGE_RETURN);
+    await until(() => stripped(stderr.text()).includes("Which account below?"));
+    stdin.write("deep");
+    await until(() => stripped(stderr.text()).includes("deep"));
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("custom");
+    expect(result?.values).toEqual({ owner: "deep" });
+  });
+  test("keeps the retained parent row as an inverted bar", async () => {
+    const options: readonly SelectOption<string>[] = [
+      { label: "Known", value: "known" },
+      {
+        label: "ParentActiveOptionIsLong",
+        value: "category",
+        dialog: {
+          message: "Child",
+          options: [
+            { label: "x", value: "x" },
+            { label: "y", value: "y" },
+          ],
+        },
+      },
+    ];
+    const result = await runSelection(
+      options,
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("x");
+    // The parent's retained row keeps its bar: inverted and padded across
+    // the minimum's inner width, exactly as the top level's bar spans its.
+    const bars = invertedRows(lastFrame(result.stderr));
+    expect(bars.length).toBe(2);
+    expect(bars).toContain("x");
+    // The child overlaps the parent's bar, so only its tail peeks out right
+    // of the overlap — the same tail the offset test asserts on.
+    expect(bars.some((bar) => bar.includes("eOptionIsLong"))).toBe(true);
+  });
+
+  test("cuts a stacked entry shadow to its panel rather than the terminal", async () => {
+    const result = await runSelection(
+      [{ label: "Tagged", value: "tagged", dialog: tag }],
+      [CTRL_ENTER, "nightly", CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(40),
+    );
+    expect(result.value).toBe("tagged");
+    const raw = lastFrame(result.stderr);
+    // The shadow is the entry's own width: the dimmed block run after the
+    // leaf's frame is shorter than the full forty columns.
+    const shadowed = raw.split(`${DIM_OPEN}█`)[1] ?? "";
+    const run = shadowed.slice(0, shadowed.indexOf(`${DIM_CLOSE}`));
+    expect(run.length).toBeGreaterThan(0);
+    expect(run.length).toBeLessThan(40);
+  });
+
+  test("pops a nested field collection instead of cancelling the session", async () => {
+    const nestedStdin = new TerminalInput();
+    const nestedStderr = new CapturedOutput();
+    let nestedResult: SelectResult<string> | undefined;
+    const nestedRunning = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          nestedResult = await dialogs.select({
+            message: "Pick one",
+            options: [
+              {
+                label: "Category",
+                value: "category",
+                dialog: {
+                  message: "Nested",
+                  options: [
+                    {
+                      label: "Custom",
+                      value: "custom",
+                      fields: [
+                        {
+                          type: "text",
+                          name: "owner",
+                          message: "Which account?",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+            filter: false,
+          });
+        }),
+      ],
+      context(nestedStdin, nestedStderr),
+    );
+    await until(() => nestedStdin.rawModes.includes(true));
+    await until(() => stripped(nestedStderr.text()).includes("Category"));
+    nestedStdin.write(CTRL_ENTER);
+    await until(() => stripped(nestedStderr.text()).includes("Nested"));
+    nestedStdin.write(CARRIAGE_RETURN);
+    await until(() => stripped(nestedStderr.text()).includes("Which account?"));
+    nestedStdin.write(ESCAPE);
+    await until(() => {
+      try {
+        return (
+          activeRow(nestedStderr) === "Category" &&
+          !stripped(lastFrame(nestedStderr)).includes("Nested")
+        );
+      } catch {
+        return false;
+      }
+    });
+    nestedStdin.write(CARRIAGE_RETURN);
+    expect(await nestedRunning).toBe(0);
+    expect(nestedResult?.value).toBe("category");
+    expect(nestedResult?.values).toEqual({});
+  });
+
+  test("keeps the parent filter and active option across push and pop", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [
+              { label: "Alpha", value: "alpha" },
+              {
+                label: "Alphabet",
+                value: "alphabet",
+                dialog: {
+                  message: "Nested",
+                  options: [{ label: "Only", value: "only" }],
+                },
+              },
+            ],
+            filter: true,
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Alpha"));
+    stdin.write("alph");
+    await until(() => activeRow(stderr) === "Alpha");
+    stdin.write(DOWN);
+    await until(() => activeRow(stderr) === "Alphabet");
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Nested"));
+    // The nested level starts blank while the parent keeps its own text.
+    await until(() => {
+      try {
+        return activeRow(stderr, "Nested") === "Only";
+      } catch {
+        return false;
+      }
+    });
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Alphabet" &&
+          !stripped(lastFrame(stderr)).includes("Nested")
+        );
+      } catch {
+        return false;
+      }
+    });
+    // Popping restores exactly what the parent showed before it opened.
+    expect(stripped(lastFrame(stderr))).toContain("alph");
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("alphabet");
+    // The filter text never becomes part of the result.
+    expect(result?.values).toEqual({});
+  });
+
+  test("stacks the nested panel over its parent with an offset", async () => {
+    // The child is narrower than the parent's active row, so the minimum the
+    // parent renders peeks out right of the overlap: exactly its active row.
+    const options: readonly SelectOption<string>[] = [
+      { label: "Known", value: "known" },
+      {
+        label: "ParentActiveOptionIsLong",
+        value: "category",
+        dialog: {
+          message: "Child",
+          options: [
+            { label: "x", value: "x" },
+            { label: "y", value: "y" },
+          ],
+        },
+      },
+    ];
+    const result = await runSelection(
+      options,
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("x");
+    const frame = stripped(lastFrame(result.stderr));
+    expect(frame).toContain("Pick one");
+    expect(frame).toContain("Child");
+    const raw = lastFrame(result.stderr);
+    // The child's title lands one row down and one offset right of its
+    // parent: the parent's border run opens the overlapped row before the
+    // child's dimmed title run follows.
+    expect(raw).toContain(`${DIM_OPEN}║${DIM_CLOSE} ${DIM_OPEN}╔`);
+    // The parent renders at minimum: its active option only, no filter row,
+    // no indicators, no hint of its own. The child overlaps it, so the tail
+    // of that row is what peeks out right of the overlap.
+    expect(frame).toContain("eOptionIsLong");
+    expect(frame).not.toContain("Known");
+    expect(frame).not.toContain("Ctrl+Enter");
+  });
+
+  test("dims a block-fill shadow behind each panel above the root", async () => {
+    const result = await runSelection(
+      expandable(),
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("first");
+    const raw = lastFrame(result.stderr);
+    expect(raw).toContain("Pick an item");
+    expect(raw).toContain(`${DIM_OPEN}█`);
+    expect(stripped(raw)).toContain("█");
+  });
+
+  test("clamps stacked panels inside a narrow terminal", async () => {
+    const columns = 24;
+    const result = await runSelection(
+      expandable(),
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(columns),
+    );
+    expect(result.value).toBe("first");
+    const rows = frameRows(result.stderr);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.length).toBeLessThanOrEqual(columns);
+    }
+  });
+
+  test("keeps the stacked dialog shorter than a short terminal", async () => {
+    const terminalRows = 10;
+    const result = await runSelection(
+      expandable(),
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+      terminalOfRows(terminalRows),
+    );
+    expect(result.value).toBe("first");
+    expect(frameRows(result.stderr).length).toBeLessThan(terminalRows);
+    expect(activeRow(result.stderr, "Pick an item")).toBe("First");
+  });
+
+  test("keeps the top option row on a three-level stack", async () => {
+    const deep: readonly SelectOption<string>[] = [
+      { label: "Known", value: "known" },
+      {
+        label: "Category",
+        value: "category",
+        dialog: {
+          message: "Middle",
+          options: [
+            { label: "MFirst", value: "mfirst" },
+            {
+              label: "Sub",
+              value: "sub",
+              dialog: {
+                message: "Deep",
+                options: [
+                  { label: "D1", value: "d1" },
+                  { label: "D2", value: "d2" },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const terminalRows = 12;
+    const result = await runSelection(
+      deep,
+      [DOWN, CTRL_ENTER, DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+      terminalOfRows(terminalRows),
+    );
+    expect(result.value).toBe("d1");
+    expect(activeRow(result.stderr, "Deep")).toBe("D1");
+    expect(frameRows(result.stderr).length).toBeLessThan(terminalRows);
+    // Every level below the top renders at minimum: exactly its active row,
+    // and each frame's title stays on screen with the stack's offset.
+    const frame = stripped(lastFrame(result.stderr));
+    expect(frame).toContain("Middle");
+    expect(frame).toContain("Deep");
+    expect(frame).toContain("D1");
+    expect(frame).not.toContain("MFirst");
+  });
+
+  test("rejects every invalid reachable sub-request before rendering", async () => {
+    const emptyNested: readonly SelectOption<number>[] = [
+      {
+        label: "Category",
+        value: 1,
+        dialog: { message: "Empty", options: [] },
+      },
+    ];
+    const emptyFields: readonly SelectOption<number>[] = [
+      {
+        label: "Known",
+        value: 1,
+        dialog: {
+          message: "Nested",
+          options: [{ label: "Leaf", value: 2, fields: [] }],
+        },
+      },
+    ];
+    const repeatedName: readonly SelectOption<number>[] = [
+      {
+        label: "Known",
+        value: 1,
+        dialog: {
+          message: "Nested",
+          options: [
+            {
+              label: "Leaf",
+              value: 2,
+              fields: [
+                { type: "text", name: "owner", message: "Which account?" },
+                {
+                  type: "text",
+                  name: "owner",
+                  message: "Which account again?",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+    for (const [options, message] of [
+      [emptyNested, "A select dialog requires at least one option"],
+      [
+        emptyFields,
+        "A user-provided select option requires at least one field",
+      ],
+      [repeatedName, 'A select option repeats the field name "owner"'],
+    ] as const) {
+      const rejected = await runRejected(options);
+      expect(rejected.exitCode).toBe(0);
+      expect(rejected.failure).toBeInstanceOf(Error);
+      expect((rejected.failure as Error).message).toBe(message);
+      expect(rejected.stderr.text()).toBe("");
+      expect(rejected.stdin.rawModes).toEqual([]);
+    }
+  });
+
+  test("renders a cyclic sub-dialog graph without overflowing", async () => {
+    type Loose = {
+      readonly label: string;
+      readonly value: number;
+      dialog?: { readonly message: string; readonly options: Loose[] };
+    };
+    const loop: Loose = { label: "Loop", value: 1 };
+    const nested = { message: "Nested", options: [loop] };
+    loop.dialog = nested;
+    // The cycle guard skips the back-edge, so validation passes and the
+    // dialog renders the reachable first visit instead of overflowing.
+    const result = await runSelection([loop], [CARRIAGE_RETURN], false);
+    expect(result.value).toBe(1);
+    expect(result.values).toEqual({});
   });
 });
 

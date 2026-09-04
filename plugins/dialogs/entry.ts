@@ -87,6 +87,10 @@ type EntryProps = {
   readonly onEdit: () => void;
   readonly onSubmit: (value: string) => void;
   readonly onCancel: () => void;
+  /** The columns the entry may measure against. A stacked entry sits right of
+   * its parent, so it measures against what is right of its offset rather
+   * than the whole terminal; a standalone entry uses the whole terminal. */
+  readonly availableColumns?: number | undefined;
 };
 
 /**
@@ -107,8 +111,15 @@ export function createEntry(
     onEdit,
     onSubmit,
     onCancel,
-  }: EntryProps) {
+    availableColumns,
+    onMeasure,
+  }: EntryProps & {
+    /** Receives the frame width the entry drew, so a stacked shadow behind
+     * it is cut to its panel rather than to the remaining columns. */
+    readonly onMeasure?: (width: number) => void;
+  }) {
     const { columns } = ink.useWindowSize();
+    const measured = availableColumns ?? columns;
     const entered = react.useRef(initialValue ?? "");
     const [value, setValue] = react.useState(entered.current);
     ink.useInput((entry, key) => {
@@ -129,10 +140,23 @@ export function createEntry(
     // The caret rides with the value in one text, so start truncation keeps
     // the tail of a long value and the caret itself in view together.
     const entry = withCaret(value, caret);
-    const width = panelWidth(message, displayWidth(entry), columns);
+    const width = Math.min(
+      panelWidth(message, displayWidth(entry), measured),
+      Math.max(1, measured),
+    );
+    react.useEffect(() => {
+      onMeasure?.(width);
+    }, [width, onMeasure]);
     return react.createElement(
       Frame,
-      { title: message, double: false, width, columns, hint: entryHint },
+      {
+        title: message,
+        double: false,
+        width,
+        columns,
+        hint: entryHint,
+        hintWidth: Math.max(1, measured),
+      },
       react.createElement(
         ink.Text,
         { key: "value", wrap: "truncate-start" },
