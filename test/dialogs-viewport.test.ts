@@ -5,6 +5,9 @@ import {
   optionRowCount,
   optionWindow,
   selectChromeHeight,
+  stackedExtraRows,
+  stackedOffsetColumns,
+  stackedShadowRows,
 } from "../plugins/dialogs/viewport.ts";
 
 /** A terminal with room to spare, so a test about one bound is not answered by
@@ -334,5 +337,33 @@ describe("select option window", () => {
       hiddenAbove: 10,
       hiddenBelow: 10,
     });
+  });
+});
+
+describe("stacked dialog budget", () => {
+  test("costs nothing flat and one shadow row per level above the root", () => {
+    expect(stackedExtraRows(1)).toBe(0);
+    expect(stackedExtraRows(2)).toBe(stackedShadowRows);
+    expect(stackedExtraRows(3)).toBe(2 * stackedShadowRows);
+    expect(stackedOffsetColumns).toBe(2);
+  });
+
+  test("shrinks the top window by the shadow rows the stack adds", () => {
+    expect(optionRowCount(30, ROOMY, false)).toBe(maximumOptionRows);
+    const rows = selectChromeHeight + maximumOptionRows + 1;
+    expect(optionRowCount(30, rows, false)).toBe(maximumOptionRows);
+    expect(optionRowCount(30, rows, false, stackedExtraRows(2))).toBe(
+      maximumOptionRows - stackedShadowRows,
+    );
+    expect(optionWindow(30, 0, 0, rows, false, stackedExtraRows(2)).count).toBe(
+      maximumOptionRows - stackedShadowRows,
+    );
+  });
+  test("keeps a top option row with a stack open in a short terminal", () => {
+    const rows = selectChromeHeight + stackedShadowRows + 2;
+    expect(optionRowCount(30, rows, false, stackedExtraRows(2))).toBe(1);
+    expect(optionWindow(30, 0, 0, rows, false, stackedExtraRows(2)).count).toBe(
+      1,
+    );
   });
 });

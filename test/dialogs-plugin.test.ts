@@ -3064,20 +3064,129 @@ describe("cascading sub-dialogs", () => {
     expect(result?.values).toEqual({});
   });
 
-  test("never opens a sub-dialog from typed or pasted text", async () => {
-    const pasted = await runSelection(
-      expandable(),
-      ["ab", CARRIAGE_RETURN],
+  test("stacks the nested panel over its parent with an offset", async () => {
+    // The child is narrower than the parent's active row, so the minimum the
+    // parent renders peeks out right of the overlap: exactly its active row.
+    const options: readonly SelectOption<string>[] = [
+      { label: "Known", value: "known" },
+      {
+        label: "ParentActiveOptionIsLong",
+        value: "category",
+        dialog: {
+          message: "Child",
+          options: [
+            { label: "x", value: "x" },
+            { label: "y", value: "y" },
+          ],
+        },
+      },
+    ];
+    const result = await runSelection(
+      options,
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
       false,
     );
-    expect(pasted.value).toBe("known");
-    expect(pasted.values).toEqual({});
+    expect(result.value).toBe("x");
+    const frame = stripped(lastFrame(result.stderr));
+    expect(frame).toContain("Pick one");
+    expect(frame).toContain("Child");
+    const raw = lastFrame(result.stderr);
+    // The child's title lands one row down and one offset right of its
+    // parent: the parent's border run opens the overlapped row before the
+    // child's dimmed title run follows.
+    expect(raw).toContain(`${DIM_OPEN}║${DIM_CLOSE} ${DIM_OPEN}╔`);
+    // The parent renders at minimum: its active option only, no filter row,
+    // no indicators, no hint of its own. The child overlaps it, so the tail
+    // of that row is what peeks out right of the overlap.
+    expect(frame).toContain("eOptionIsLong");
+    expect(frame).not.toContain("Known");
+    expect(frame).not.toContain("Ctrl+Enter");
+  });
 
-    // Plain Enter on an option declaring a sub-dialog confirms it as a plain
-    // option rather than opening anything: only the modified key report opens.
-    const plain = await runSelection(expandable(), [DOWN, CARRIAGE_RETURN]);
-    expect(plain.value).toBe("category");
-    expect(plain.values).toEqual({});
+  test("dims a block-fill shadow behind each panel above the root", async () => {
+    const result = await runSelection(
+      expandable(),
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("first");
+    const raw = lastFrame(result.stderr);
+    expect(raw).toContain("Pick an item");
+    expect(raw).toContain(`${DIM_OPEN}█`);
+    expect(stripped(raw)).toContain("█");
+  });
+
+  test("clamps stacked panels inside a narrow terminal", async () => {
+    const columns = 24;
+    const result = await runSelection(
+      expandable(),
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(columns),
+    );
+    expect(result.value).toBe("first");
+    const rows = frameRows(result.stderr);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.length).toBeLessThanOrEqual(columns);
+    }
+  });
+
+  test("keeps the stacked dialog shorter than a short terminal", async () => {
+    const terminalRows = 10;
+    const result = await runSelection(
+      expandable(),
+      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+      terminalOfRows(terminalRows),
+    );
+    expect(result.value).toBe("first");
+    expect(frameRows(result.stderr).length).toBeLessThan(terminalRows);
+    expect(activeRow(result.stderr, "Pick an item")).toBe("First");
+  });
+
+  test("keeps the top option row on a three-level stack", async () => {
+    const deep: readonly SelectOption<string>[] = [
+      { label: "Known", value: "known" },
+      {
+        label: "Category",
+        value: "category",
+        dialog: {
+          message: "Middle",
+          options: [
+            { label: "MFirst", value: "mfirst" },
+            {
+              label: "Sub",
+              value: "sub",
+              dialog: {
+                message: "Deep",
+                options: [
+                  { label: "D1", value: "d1" },
+                  { label: "D2", value: "d2" },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const terminalRows = 12;
+    const result = await runSelection(
+      deep,
+      [DOWN, CTRL_ENTER, DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+      terminalOfRows(terminalRows),
+    );
+    expect(result.value).toBe("d1");
+    expect(activeRow(result.stderr, "Deep")).toBe("D1");
+    expect(frameRows(result.stderr).length).toBeLessThan(terminalRows);
+    // Every level below the top renders at minimum: exactly its active row,
+    // and each frame's title stays on screen with the stack's offset.
+    const frame = stripped(lastFrame(result.stderr));
+    expect(frame).toContain("Middle");
+    expect(frame).toContain("Deep");
+    expect(frame).toContain("D1");
+    expect(frame).not.toContain("MFirst");
   });
 
   test("rejects every invalid reachable sub-request before rendering", async () => {

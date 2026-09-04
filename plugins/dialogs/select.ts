@@ -29,7 +29,6 @@ import type {
 } from "./types.ts";
 import {
   optionRowCount,
-  type OptionWindow,
   optionWindow,
   stackedExtraRows,
   stackedOffsetColumns,
@@ -78,6 +77,18 @@ type PanelRow = {
   /** Text whose tail matters more than its head — entered text — so a row too
    * wide for the panel keeps its end and its caret rather than its start. */
   readonly tail?: boolean;
+};
+/** One level placed in a stacked dialog: its framed element already wrapped in
+ * its absolutely positioned box, plus the measurements the union height and
+ * the shadow behind it are derived from. `panelHeight` is the frame without
+ * its hint line; `levelHeight` includes the hint, which only the top level
+ * carries. */
+type StackedPanel = {
+  readonly element: DialogElement;
+  readonly index: number;
+  readonly width: number;
+  readonly panelHeight: number;
+  readonly levelHeight: number;
 };
 
 /** The parts of Ink's key report a movement reads. */
@@ -606,6 +617,19 @@ export function createSelectView<T>(
       | SelectLevel<T>
       | InputLevel<T>;
     const leaf = "field" in uppermost ? uppermost : undefined;
+    const depthNow = levels.current.length;
+    const stacked = depthNow > 1;
+    // The top select level's place in the stack: the uppermost level when no
+    // text leaf sits above it, the one beneath the leaf otherwise. Lower
+    // levels render as minima, so only this index gets the full treatment and
+    // the clamped width below.
+    const topSelectIndex = leaf !== undefined ? depthNow - 2 : depthNow - 1;
+    // While a field is collected the entry's own panel follows this one and
+    // carries the hints that apply; naming navigation and selection here
+    // would name keys the dialog has stopped answering. A text leaf answers
+    // through its own entry the same way. The hint lives on the top panel
+    // only, so stacked parents carry none.
+    const topHint = collectingField || leaf !== undefined ? undefined : hint;
 
     const panelRows: PanelRow[] = [];
     if (renderFiltering) {
@@ -667,7 +691,22 @@ export function createSelectView<T>(
     if (renderFiltering) measure(`${filterPrompt} ${filterText}${caretGlyph}`);
     if (visible.length === 0) measure(noMatch);
     if (hidden > 0) measure(`${hiddenAboveGlyph} ${hidden} more`);
-    const width = panelWidth(renderMessage, content, columns);
+    // A stacked panel leaves room for the levels above it: measured against
+    // the columns right of its own offset, so its left edge plus its width
+    // never passes the terminal's edge. A flat dialog sits at offset zero, so
+    // it measures against the whole terminal exactly as today. The extra cut
+    // caps what the frame's own twenty-column floor would otherwise let
+    // through on a narrow terminal; flat dialogs keep that floor.
+    const topAvail = Math.max(
+      1,
+      columns - topSelectIndex * stackedOffsetColumns,
+    );
+    const measured = panelWidth(
+      renderMessage,
+      content,
+      stacked ? topAvail : columns,
+    );
+    const width = stacked ? Math.min(measured, topAvail) : measured;
     const inner = innerWidth(width);
     const children: DialogElement[] = panelRows.map((panelRow) =>
       react.createElement(
@@ -706,11 +745,8 @@ export function createSelectView<T>(
         double: true,
         width,
         columns,
-        // While a field is collected the entry's own panel follows this one
-        // and carries the hints that apply; naming navigation and selection
-        // here would name keys the dialog has stopped answering. A text leaf
-        // answers through its own entry the same way.
-        hint: collectingField || leaf !== undefined ? undefined : hint,
+        hint: topHint,
+        hintWidth: stacked ? Math.max(1, topAvail - 1) : undefined,
       },
       children,
     );
@@ -746,11 +782,151 @@ export function createSelectView<T>(
         onCancel: () => popLevel(),
       });
     }
+    if (!stacked) {
+      return react.createElement(
+        ink.Box,
+        { flexDirection: "column" },
+        panel,
+        fieldPanel,
+      );
+    }
+    // Every level below the top renders at minimum: no filter row, no
+    // overflow indicators, exactly the one active option row, in its full
+    // double-line frame. The top level renders fully as above, and a text
+    // leaf's entry renders as itself above that. Each sits one row down and
+    // one offset right of its parent, with a dimmed block-fill shadow behind
+    // every panel above the root.
+    const panels: StackedPanel[] = [];
+    const selectLevels =
+      leaf !== undefined ? levels.current.slice(0, -1) : levels.current;
+    for (const [index, level] of selectLevels.entries()) {
+      if (index === topSelectIndex) {
+        panels.push({
+          element: panel,
+          index,
+          width,
+          panelHeight: panelRows.length + 2,
+          levelHeight: panelRows.length + 2 + (topHint !== undefined ? 1 : 0),
+        });
+        continue;
+      }
+      // The parent's filter text and active position froze when this level
+      // was pushed — pushing needs a visible option to open — so the active
+      // position still names a visible option and the minimum is exactly its
+      // row.
+      const parent = level as SelectLevel<T>;
+      const shown = visibleOptionIndices(parent.options, parent.entered);
+      const at = Math.min(parent.active, shown.length - 1);
+      const labelled = parent.options[shown[at] as number] as SelectOption<T>;
+      const minimumText = labelled.label;
+      const avail = Math.max(1, columns - index * stackedOffsetColumns);
+      const minimumWidth = Math.min(
+        panelWidth(parent.message, displayWidth(minimumText), avail),
+        avail,
+      );
+      panels.push({
+        element: react.createElement(
+          Frame,
+          {
+            key: `select-${index}`,
+            title: parent.message,
+            double: true,
+            width: minimumWidth,
+            columns,
+            hint: undefined,
+          },
+          react.createElement(
+            ink.Text,
+            { key: "option", wrap: "truncate-end" },
+            minimumText,
+          ),
+        ),
+        index,
+        width: minimumWidth,
+        panelHeight: 3,
+        levelHeight: 3,
+      });
+    }
+    if (fieldPanel !== undefined) {
+      // The entry sizes itself against the whole terminal, so its shadow is
+      // cut to what is right of its own offset rather than to its width.
+      const entryIndex = leaf !== undefined ? depthNow - 1 : depthNow;
+      const entryWidth = Math.max(
+        1,
+        columns - entryIndex * stackedOffsetColumns,
+      );
+      panels.push({
+        element: fieldPanel,
+        index: entryIndex,
+        width: entryWidth,
+        panelHeight: 3,
+        levelHeight: 4,
+      });
+    }
+    // The union of the offset frames: each panel's bottom plus one shadow row
+    // above the root, clamped strictly shorter than the terminal. Clamping
+    // may cover lower levels entirely; the top keeps its viewport row.
+    let union = 0;
+    for (const sized of panels) {
+      union = Math.max(
+        union,
+        sized.index +
+          sized.levelHeight +
+          (sized.index > 0 ? stackedShadowRows : 0),
+      );
+    }
+    const unionHeight = Math.min(union, Math.max(1, rows - 1));
+    const placed: DialogElement[] = [];
+    for (const stackedPanel of panels) {
+      if (stackedPanel.index > 0) {
+        const filler = "█".repeat(stackedPanel.width);
+        const shadowRows: DialogElement[] = [];
+        for (let row = 0; row < stackedPanel.panelHeight; row += 1) {
+          shadowRows.push(
+            react.createElement(
+              ink.Text,
+              { key: `shade-${row}`, dimColor: true, wrap: "truncate-end" },
+              filler,
+            ),
+          );
+        }
+        placed.push(
+          react.createElement(
+            ink.Box,
+            {
+              key: `shadow-${stackedPanel.index}`,
+              position: "absolute",
+              marginTop: stackedPanel.index + 1,
+              marginLeft: stackedPanel.index * stackedOffsetColumns + 1,
+              width: stackedPanel.width,
+              flexDirection: "column",
+            },
+            shadowRows,
+          ),
+        );
+      }
+      placed.push(
+        react.createElement(
+          ink.Box,
+          {
+            key: `level-${stackedPanel.index}`,
+            position: "absolute",
+            marginTop: stackedPanel.index,
+            marginLeft: stackedPanel.index * stackedOffsetColumns,
+          },
+          stackedPanel.element,
+        ),
+      );
+    }
     return react.createElement(
       ink.Box,
-      { flexDirection: "column" },
-      panel,
-      fieldPanel,
+      {
+        position: "relative",
+        flexDirection: "column",
+        width: columns,
+        height: unionHeight,
+      },
+      placed,
     );
   };
 }
