@@ -318,8 +318,8 @@ An option MAY declare a sub-dialog holding a nested select request or a single t
 - Ctrl+Enter on an option declaring a sub-dialog MUST open that sub-dialog as a new level stacked over its parent inside the same render session, and MUST do nothing on an option declaring none.
 - Only the top level MUST answer keys; the levels beneath it MUST stay rendered and ignore input until the top level closes.
 - Escape or Ctrl-C with more than one level open MUST close only the top level and return to its parent with the parent's state unchanged; at the root level it MUST cancel the dialog and resolve with `undefined`.
-- Completing any level MUST resolve the whole `select` with a result carrying the completing option's exact value and every input value collected along the path, keyed by field name with the deeper submission winning a repeated name.
-- A text-field sub-dialog MUST collect exactly as a [text input](#text-input) value and MUST submit under its field's name.
+- Completing a nested select level MUST resolve the whole `select` with a result carrying the completing option's exact value and every input value collected along the path, keyed by field name with the deeper submission winning a repeated name.
+- Submitting a text-field sub-dialog MUST resolve the whole `select` with a result carrying the opening option's exact value and every input value collected along the path including the submitted text under its field's name, keyed by field name with the deeper submission winning a repeated name.
 - Entering a sub-dialog MUST NOT change its parent's filter text or active option, and leaving it MUST restore exactly what the parent showed before it opened.
 - The trigger MUST be answered from the modified key report rather than from typed or pasted text, so a multi-character chunk MUST NOT open a sub-dialog.
 - `select` MUST reject before rendering when any reachable sub-dialog declares an empty options list, or when any reachable option declares an empty field list or repeats a field name within itself.
@@ -330,11 +330,11 @@ An option MAY declare a sub-dialog holding a nested select request or a single t
 - **WHEN** the user presses Ctrl+Enter, then Down, then Enter
 - **THEN** the nested select opens over its parent and `select` resolves with the second nested option's value
 
-#### Scenario: Collect one value on the way down
+#### Scenario: Submit a text leaf
 
-- **GIVEN** the active option declares a text-field sub-dialog named `tag` and the next level's plain option is active after opening it
-- **WHEN** the user presses Ctrl+Enter, submits `nightly`, and confirms that option
-- **THEN** `select` resolves with that option's value and the collected value `nightly` under `tag`
+- **GIVEN** the active option declares a text-field sub-dialog named `tag`
+- **WHEN** the user presses Ctrl+Enter, types `nightly`, and presses Enter
+- **THEN** `select` resolves with the opening option's value and the collected value `nightly` under `tag`
 
 #### Scenario: Pop back to the parent
 

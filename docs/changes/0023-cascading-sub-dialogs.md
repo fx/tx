@@ -39,12 +39,8 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 What implementing them requires of this change:
 
 - **The capability stays internal and structural.** The sub-dialog declaration joins the provider's local request type; no dialog vocabulary enters `src/` or `@fx/tx/plugin`, and no dialogs module is exported.
-- **One render session, one input handler.** The stack lives inside the single `select` session with the existing cleanup-before-settlement contract; opening, popping, and resolving never unmount, restore terminal state, or settle between levels. Only the top level answers keys.
-- **The trigger is Ctrl+Enter and nothing else.** Bare letters stay filter text while the filter is enabled and stay ignored while it is disabled; function keys are not read. The trigger MUST be detected on the modified key report rather than on pasted or typed text, so a chunk carrying several keys cannot open a sub-dialog by accident.
-- **Terminal delivery of Ctrl+Enter is verified, not assumed.** On a terminal without an enhanced keyboard protocol, Ctrl+Enter arrives indistinguishable from Enter. The implementation MUST confirm what the injected input layer actually reports for the chord and enable what it needs to distinguish it, or record the terminals where the trigger cannot work — see the open question below.
-- **Validation still precedes rendering.** Every pre-render rejection — empty options at any depth, invalid fields, invalid sub-dialog declarations — happens before any frame is drawn, so the existing tests asserting an empty error stream on rejection keep passing unmodified.
+- **Terminal delivery of Ctrl+Enter is verified, not assumed.** The implementation confirms what the injected input layer reports for the chord and enables what distinguishes it, or records the terminals where the trigger cannot work — see the open question below.
 - **Leaf inputs reuse text entry.** An input sub-dialog's editing is the existing entry logic, not a second implementation, so the control-sequence rule in `REVIEW.md` keeps holding once rather than twice.
-- **The viewport budget goes overlay-aware.** Stacked panels share rows instead of summing them; the row arithmetic counts the union of the stacked frames, and offsets clamp against the terminal size, so a stacked dialog stays strictly shorter than the terminal exactly as a flat one does.
 - **The manual follows the implementation.** `docs/manual/plugins.md` documents the declaration, the trigger, popping, resolution, and the stacked look in the PR that ships them.
 
 #### Scenario: Existing flat behavior is unchanged
@@ -57,9 +53,7 @@ What implementing them requires of this change:
 
 ### Approach
 
-The select view gains a stack of levels, each level holding what the flat dialog already holds: its request slice, its filter text, its active index, and its window start. The root level is the caller's request; pushing appends the active option's declared sub-dialog. Rendering draws every level's panel with a cascading offset and a shadow box behind each panel above the root; the input handler routes keys to the top level only, with Ctrl+Enter pushing, Escape popping or cancelling by depth, and any completion settling the whole session with the merged result. An input sub-dialog is one text field collected with the existing entry: submitting it resolves the stack carrying the opening option's value and the submitted text under the field's name.
-
-Matching and viewport arithmetic stay pure and directly tested; the stack composition lives in the view. `index.ts` keeps the adapters, the render session, and registration. The `require("node:stream")` loader stays exactly as it is, for the coverage reason `REVIEW.md` records.
+The select view gains a stack of levels, each level holding what the flat dialog already holds: its request slice, its filter text, its active index, and its window start. Matching and viewport arithmetic stay pure and directly tested; the stack composition lives in the view. `index.ts` keeps the adapters, the render session, and registration. The `require("node:stream")` loader stays exactly as it is, for the coverage reason `REVIEW.md` records.
 
 ### Decisions
 
