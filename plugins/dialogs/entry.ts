@@ -112,7 +112,12 @@ export function createEntry(
     onSubmit,
     onCancel,
     availableColumns,
-  }: EntryProps) {
+    onMeasure,
+  }: EntryProps & {
+    /** Receives the frame width the entry drew, so a stacked shadow behind
+     * it is cut to its panel rather than to the remaining columns. */
+    readonly onMeasure?: (width: number) => void;
+  }) {
     const { columns } = ink.useWindowSize();
     const measured = availableColumns ?? columns;
     const entered = react.useRef(initialValue ?? "");
@@ -139,6 +144,9 @@ export function createEntry(
       panelWidth(message, displayWidth(entry), measured),
       Math.max(1, measured),
     );
+    react.useEffect(() => {
+      onMeasure?.(width);
+    }, [width, onMeasure]);
     return react.createElement(
       Frame,
       {

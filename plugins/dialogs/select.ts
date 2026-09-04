@@ -277,7 +277,10 @@ export function createSelectView<T>(
      * its presence is what makes every one of those keys too late. */
     const confirmed = react.useRef<SelectResult<T> | undefined>(undefined);
     const [flashing, setFlashing] = react.useState(false);
-
+    /** The width each stacked entry drew, recorded through its measure
+     * callback so the shadow behind it is cut to its panel. A ref, because
+     * the callback fires after render while the shadow reads it during. */
+    const entryWidths = react.useRef<Record<number, number>>({});
     /** The top select level: every key routes here, and the levels beneath it
      * stay rendered and ignore input until it closes. At most one text leaf
      * can sit on top — nothing pushes above it, since the trigger returns
@@ -527,11 +530,10 @@ export function createSelectView<T>(
       // pass, so this list keeps receiving input after the Enter that began
       // collection, before the field entry has mounted. Everything but
       // cancellation is declined from then on — filter edits included;
-      // cancellation is answered above, at every stage. The guard is the
-      // root's own collection only: a nested level's collection answers
-      // through its own entry while the root's stale record must not block
-      // the levels above it.
-      if (collecting.current && levels.current.length <= 1) return;
+      // cancellation is answered above, at every stage. A collection is
+      // always answered through its own entry at whatever depth it began,
+      // so the select ignores everything but cancellation while one is open.
+      if (collecting.current) return;
       // While a leaf is on top the select list beneath it stays rendered
       // and ignores input.
       if ("field" in uppermost) return;
@@ -656,10 +658,11 @@ export function createSelectView<T>(
     const leaf = "field" in uppermost ? uppermost : undefined;
     const depthNow = levels.current.length;
     const stacked = depthNow > 1;
-    // The top select level's place in the stack: the uppermost level when no
-    // text leaf sits above it, the one beneath the leaf otherwise. Lower
-    // levels render as minima, so only this index gets the full treatment and
-    // the clamped width below.
+    // The fully rendered select level: none while a text leaf sits above its
+    // parent — the parent renders as a minimum like every other covered
+    // level, and the leaf's entry is the top. Otherwise the top select
+    // level, which gets the full treatment and the clamped width below.
+    const fullSelectIndex = leaf !== undefined ? -1 : depthNow - 1;
     const topSelectIndex = leaf !== undefined ? depthNow - 2 : depthNow - 1;
     // While a field is collected the entry's own panel follows this one and
     // carries the hints that apply; naming navigation and selection here
@@ -787,9 +790,6 @@ export function createSelectView<T>(
       },
       children,
     );
-    // The column stays the root whether or not a field is on screen, so
-    // beginning collection adds a panel under the existing one rather than
-    // changing the element the whole view hangs from and remounting it.
     let fieldPanel: DialogElement | undefined;
     if (collectingField) {
       // A stacked field entry measures against the columns right of its own
@@ -815,6 +815,9 @@ export function createSelectView<T>(
         availableColumns: stacked
           ? Math.max(1, columns - entryIndex * stackedOffsetColumns)
           : undefined,
+        onMeasure: (measured) => {
+          entryWidths.current[entryIndex] = measured;
+        },
       });
     } else if (leaf !== undefined) {
       // A text leaf reuses the existing entry logic: its editing is the same
@@ -834,6 +837,9 @@ export function createSelectView<T>(
         availableColumns: stacked
           ? Math.max(1, columns - entryIndex * stackedOffsetColumns)
           : undefined,
+        onMeasure: (measured) => {
+          entryWidths.current[entryIndex] = measured;
+        },
       });
     }
     if (!stacked) {
@@ -854,7 +860,7 @@ export function createSelectView<T>(
     const selectLevels =
       leaf !== undefined ? levels.current.slice(0, -1) : levels.current;
     for (const [index, level] of selectLevels.entries()) {
-      if (index === topSelectIndex) {
+      if (index === fullSelectIndex) {
         panels.push({
           element: panel,
           index,
@@ -908,16 +914,16 @@ export function createSelectView<T>(
       });
     }
     if (fieldPanel !== undefined) {
-      // The shadow is cut to the entry's own width. The entry knows it: it
-      // measured itself against the columns right of its offset and recorded
-      // the frame it drew. Read it back from the panel element's props
-      // rather than re-deriving the remaining columns here.
+      // The shadow is cut to the entry's own frame. The entry reports its
+      // measured width through the callback above; until that first report
+      // lands, the remaining columns are the bound. The callback fires after
+      // render without re-rendering, so the shadow tightens on the frame
+      // after the entry's first paint — one frame of overhang at most.
       const entryIndex = leaf !== undefined ? depthNow - 1 : depthNow;
-      const entryElement = fieldPanel as { props?: { width?: number } };
+      const recorded = entryWidths.current[entryIndex];
       const entryWidth = Math.max(
         1,
-        entryElement.props?.width ??
-          columns - entryIndex * stackedOffsetColumns,
+        recorded ?? columns - entryIndex * stackedOffsetColumns,
       );
       panels.push({
         element: fieldPanel,
