@@ -321,6 +321,11 @@ async function runDialog<T>(
       exitOnCtrlC: false,
       interactive: true,
       patchConsole: false,
+      // No kittyKeyboard option on purpose: the sub-dialog trigger reads
+      // the CSI 13;5u chord the terminal delivers, and enabling the kitty
+      // protocol writes its own sequences to the same error stream the
+      // frames render on. A terminal without the protocol delivers plain
+      // Enter, where the trigger stays a no-op, as before.
     });
     exited = renderer.waitUntilExit();
     renderer.rerender(react.createElement(View));
