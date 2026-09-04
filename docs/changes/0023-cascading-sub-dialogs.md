@@ -106,7 +106,7 @@ The select view gains a stack of levels, each level holding what the flat dialog
 
 ## Open Questions
 
-- [x] How Ctrl+Enter is delivered on terminals without an enhanced keyboard protocol — answered: the trigger reads whatever the terminal delivers as CSI 13;5u (verified against Ink's own parser, which reports it as a modified return with no protocol enabled), so no provider-side opt-in is needed or wanted — enabling Ink's kitty protocol was tried and reverted because its enable/disable sequences pollute the error-stream frames and its auto mode replays buffered keys as text. On a terminal that cannot deliver the chord — tmux 3.4 here, `extended-keys off` — Ctrl+Enter arrives as plain Enter and confirms the option, exactly what the user's `bun demo nested` report showed.
+- [x] How Ctrl+Enter is delivered on terminals without an enhanced keyboard protocol — superseded by [0024](./0024-sub-dialog-trigger-tab.md): the trigger is Tab, which arrives as one keystroke on every terminal with no protocol needed. (Earlier answer preserved for the record: enabling Ink's kitty protocol was tried and reverted — its enable/disable sequences pollute the error-stream frames and its auto mode replays buffered keys as text — and on a terminal that cannot deliver the chord, e.g. tmux 3.4 with `extended-keys off`, Ctrl+Enter arrived as plain Enter and confirmed the option.)
 
 ## References
 

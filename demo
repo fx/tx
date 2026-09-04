@@ -9,8 +9,8 @@
  *   ./demo filter       # long list: type-to-filter + ▲/▼ overflow
  *   ./demo nofilter     # long list with the filter forced off
  *   ./demo fields       # select whose option collects input fields
- *   ./demo nested       # select whose option opens a nested select (Ctrl+Enter)
- *   ./demo leaf         # select whose option opens a text input leaf (Ctrl+Enter)
+ *   ./demo nested       # select whose option opens a nested select (Tab)
+ *   ./demo leaf         # select whose option opens a text input leaf (Tab)
  *
  * Dialogs render on stderr, results are printed on stdout, so
  * `./demo select > /dev/null` still shows the dialog.
@@ -202,7 +202,7 @@ Showcase every dialog: input, select, filter, nofilter, fields, nested, leaf.
   nested    select whose option opens a nested select
   leaf      select whose option opens a text input leaf
 
-Press Ctrl+Enter on an option declaring a sub-dialog to expand it.`;
+Press Tab on an option declaring a sub-dialog to expand it.`;
 
 type CommandLike = {
   error(message: string, options?: { exitCode?: number; code?: string }): never;
