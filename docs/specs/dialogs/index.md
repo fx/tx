@@ -487,7 +487,7 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - Fuzzy or prefix matching, match ranking, match highlighting, matching against option values, a caller-supplied matcher, an initial filter text, and a filter on `input` are out of scope.
 - Returning to an earlier stage, partial results, and any back-navigation key are out of scope, except that Escape MUST close the top stacked level of a cascading sub-dialog and return to its parent.
 - Multi-select, disabled or grouped options, custom option rendering, mouse input, configurable themes or palettes, color hues, and layout APIs are out of scope.
-- Non-interactive fallback, concurrent or nested dialogs, global serialization, persistence, and terminal accessibility policy are out of scope.
+- Non-interactive fallback, concurrent dialogs, independently nested dialogs in separate render sessions, global serialization, persistence, and terminal accessibility policy are out of scope. Stacked cascading sub-dialog levels are not nested dialogs in this sense: they are one dialog in one render session.
 - Registry collision policy, provider priority, deduplication, ownership metadata, and version negotiation are owned by neither this spec nor the initial implementation.
 
 ## Open Questions
