@@ -226,11 +226,28 @@ function requireInteractiveStreams(
   }
 }
 
+/** Rejects every reachable options list that could never be chosen, before
+ * any terminal state changes: an empty list at any depth asks for nothing.
+ * Every level of the stack renders inside the one session, so every depth is
+ * reachable and every depth is validated alongside the existing rejections.
+ */
+function requireNonEmptyOptions<T>(options: readonly SelectOption<T>[]): void {
+  if (options.length === 0) {
+    throw new Error("A select dialog requires at least one option");
+  }
+  for (const { dialog } of options) {
+    if (dialog !== undefined && "options" in dialog) {
+      requireNonEmptyOptions(dialog.options);
+    }
+  }
+}
+
 /** Rejects a declaration that could never be collected, before any terminal
  * state changes: an option marked user-provided by an empty field list asks for
  * nothing, and a repeated name would let one field overwrite another's value.
  * Names only have to be unique within the option declaring them, because only
- * one option is ever collected. */
+ * one option is ever collected. Every reachable sub-dialog is validated, so a
+ * declaration no path walks to can still never render. */
 function requireCollectableFields<T>(
   options: readonly SelectOption<T>[],
 ): void {
@@ -247,6 +264,11 @@ function requireCollectableFields<T>(
         throw new Error(`A select option repeats the field name "${name}"`);
       }
       names.add(name);
+    }
+  }
+  for (const { dialog } of options) {
+    if (dialog !== undefined && "options" in dialog) {
+      requireCollectableFields(dialog.options);
     }
   }
 }
@@ -370,9 +392,7 @@ const definition: PluginDefinition = Object.freeze({
         },
 
         async select<T>({ message, options, filter }: SelectRequest<T>) {
-          if (options.length === 0) {
-            throw new Error("A select dialog requires at least one option");
-          }
+          requireNonEmptyOptions(options);
           requireCollectableFields(options);
           requireInteractiveStreams(context, "A select dialog");
 

@@ -11,7 +11,7 @@ import {
   editedText,
   withCaret,
 } from "./entry.ts";
-import { visibleOptionIndices } from "./filter.ts";
+import { filterIsEnabled, visibleOptionIndices } from "./filter.ts";
 import {
   displayWidth,
   type FrameComponent,
@@ -23,6 +23,7 @@ import type {
   DialogView,
   Outcome,
   SelectOption,
+  SelectRequest,
   SelectResult,
   TextField,
 } from "./types.ts";
@@ -40,13 +41,16 @@ const noMatch = "no match";
 const hiddenAboveGlyph = "▲";
 const hiddenBelowGlyph = "▼";
 
-/** The select's key hint line, written out either way rather than assembled,
- * so each reads as the spec fixes it. The filter phrase is there exactly when
- * the filter is, so the line never names a key the dialog would ignore. */
-function selectHint(filtering: boolean): string {
-  return filtering
+/** The select's key hint line, written out rather than assembled, so each
+ * reads as the spec fixes it. The filter phrase is there exactly when the
+ * filter is, so the line never names a key the dialog would ignore, and the
+ * expand phrase is there exactly when a visible option declares a sub-dialog.
+ */
+function selectHint(filtering: boolean, expandable: boolean): string {
+  const base = filtering
     ? "↑↓ move · Enter select · type to filter · Esc cancel"
     : "↑↓ move · Enter select · Esc cancel";
+  return expandable ? `${base} · Ctrl+Enter expand` : base;
 }
 
 /** One rendered row of the panel, described before it is measured: the panel's
@@ -116,6 +120,62 @@ type Collection<T> = {
   readonly fields: readonly TextField[];
 };
 
+/** One select level on the stack: the request slice it renders plus the
+ * runtime state the flat dialog already holds — filter text and active
+ * position — kept per level so entering and leaving a sub-dialog leaves every
+ * parent exactly as it was. `collected` carries the input values submitted on
+ * the way down to this level, outer levels first; `opener` is the value of
+ * the option that opened this level, which a text leaf resolves with. */
+type SelectLevel<T> = {
+  readonly message: string;
+  readonly options: readonly SelectOption<T>[];
+  readonly filtering: boolean;
+  readonly entered: string;
+  readonly active: number;
+  readonly collected: Readonly<Record<string, string>>;
+  readonly opener: T | undefined;
+};
+
+/** A text-field level: the field under entry, the opening option's value the
+ * whole session resolves with, and the values collected above it. */
+type InputLevel<T> = {
+  readonly field: TextField;
+  readonly opener: T;
+  readonly collected: Readonly<Record<string, string>>;
+};
+
+/** Read the active option's declaration: a nested select carries `options`,
+ * a text leaf is the field itself. The `in` check narrows the union, so no
+ * unchecked shape is trusted for the access. */
+function declaredSubDialog<T>(
+  option: SelectOption<T>,
+):
+  | { readonly select: SelectRequest<T> }
+  | { readonly field: TextField }
+  | undefined {
+  const dialog = option.dialog;
+  if (dialog === undefined) return undefined;
+  if ("options" in dialog) return { select: dialog };
+  return { field: dialog };
+}
+
+/** Merge one submitted input into the values collected along the path:
+ * prototype-free, because a field name is an opaque caller key, with the
+ * deeper submission winning a repeated name. Pure, so the merge rule is
+ * directly tested whatever path the session walked to reach it. */
+export function stackedValues(
+  collected: Readonly<Record<string, string>>,
+  name: string,
+  value: string,
+): Record<string, string> {
+  const merged: Record<string, string> = Object.assign(
+    Object.create(null) as Record<string, string>,
+    collected,
+  );
+  merged[name] = value;
+  return merged;
+}
+
 type SelectViewRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
@@ -140,20 +200,43 @@ export function createSelectView<T>(
   settle: (outcome: Outcome<SelectResult<T>>) => void,
 ): DialogView {
   const cancel = () => settle({ type: "cancelled" });
-  // Neither the request nor the filter setting changes for the life of the
-  // dialog, so its hint line is settled here rather than on every keystroke.
-  const hint = selectHint(filtering);
 
   return function Select() {
     const { columns, rows } = ink.useWindowSize();
-    const active = react.useRef(0);
-    const [activeIndex, setActiveIndex] = react.useState(0);
+    /** The stack of open levels inside the single render session: the root is
+     * the caller's request, Ctrl+Enter pushes the active option's sub-dialog
+     * over it, and Escape pops one level above the root. It lives in a ref so
+     * a chunk carrying several keys is handled before any of them has
+     * re-rendered; every push, pop, and edit bumps `revision` to show the
+     * frame the refs now hold. Each level keeps its own filter text and
+     * active position, so the trigger never alters a parent and popping
+     * restores exactly what it showed. */
+    const levels = react.useRef<readonly (SelectLevel<T> | InputLevel<T>)[]>([
+      {
+        message,
+        options,
+        filtering,
+        entered: "",
+        active: 0,
+        collected: {},
+        opener: undefined,
+      },
+    ]);
+    const [revision, setRevision] = react.useState(0);
+    const refresh = () => setRevision((current) => current + 1);
+    void revision;
     /** Where the window sat on the previous frame. It is derived rather than
      * driven: every input that could move it already re-renders, and the
      * terminal's own height changes without any input at all. */
     const windowStart = react.useRef(0);
+    const active = react.useRef(0);
     const entered = react.useRef("");
+    /** The top level's filter text as state, so typing re-renders: the stack
+     * ref holds the same text for the input handler to read mid-chunk. */
     const [filterText, setFilterText] = react.useState("");
+    /** The top level's active position as state, so movement re-renders: the
+     * stack ref holds the same position for the input handler mid-chunk. */
+    const [activeIndex, setActiveIndex] = react.useState(0);
     /** Set the moment a user-provided option is chosen; its presence is what
      * makes the option list and the filter stop accepting input. */
     const collecting = react.useRef<Collection<T> | undefined>(undefined);
@@ -172,15 +255,31 @@ export function createSelectView<T>(
     const confirmed = react.useRef<SelectResult<T> | undefined>(undefined);
     const [flashing, setFlashing] = react.useState(false);
 
+    /** The top select level: every key routes here, and the levels beneath it
+     * stay rendered and ignore input until it closes. At most one text leaf
+     * can sit on top — nothing pushes above it, since the trigger returns
+     * early while a leaf is on top — so the top select level is either the
+     * uppermost level or the one right beneath it, with the root guaranteeing
+     * a select level exists. */
+    const topSelect = (): SelectLevel<T> => {
+      const uppermost = levels.current[levels.current.length - 1] as
+        | SelectLevel<T>
+        | InputLevel<T>;
+      if (!("field" in uppermost)) return uppermost;
+      return levels.current[levels.current.length - 2] as SelectLevel<T>;
+    };
     const collectingField = fieldIndex >= 0;
+    const top = topSelect();
+    const topOptions = top.options;
+    const topFiltering = top.filtering;
     // Kept across frames rather than recomputed on each: the animation
     // re-renders the view several times a second, and neither the matching nor
     // the width scan below it can change without the filter text changing.
     // Lowercasing every label on a timer is exactly the kind of cost the
     // animations are not allowed to add.
     const visible = react.useMemo(
-      () => visibleOptionIndices(options, filterText),
-      [filterText],
+      () => visibleOptionIndices(topOptions, filterText),
+      [topOptions, filterText],
     );
     /** The widest visible label, in terminal columns.
      *
@@ -193,11 +292,34 @@ export function createSelectView<T>(
     const widestLabel = react.useMemo(() => {
       let widest = 0;
       for (const index of visible) {
-        const { label } = options[index] as SelectOption<T>;
+        const { label } = topOptions[index] as SelectOption<T>;
         widest = Math.max(widest, displayWidth(label));
       }
       return widest;
-    }, [visible]);
+    }, [topOptions, visible]);
+    /** The select hint names the expand key exactly while a visible option
+     * declares a sub-dialog, matching the glyph contract in the spec. */
+    const hint = selectHint(
+      topFiltering,
+      visible.some(
+        (index) => (topOptions[index] as SelectOption<T>).dialog !== undefined,
+      ),
+    );
+    /** Sync the top select level's runtime state into the stack ref and the
+     * render state together: refs answer mid-chunk keys before any
+     * re-render, state shows the frame the refs now hold. */
+    const syncTop = (next: SelectLevel<T>): void => {
+      const depth = levels.current.length - 1;
+      levels.current = [...levels.current.slice(0, depth), next] as readonly (
+        | SelectLevel<T>
+        | InputLevel<T>
+      )[];
+      entered.current = next.entered;
+      active.current = next.active;
+      setFilterText(next.entered);
+      setActiveIndex(next.active);
+    };
+
     // Derived while rendering, and remembered only so the next frame can move
     // it as little as possible; the window is never state of its own. Deriving
     // it against the state the frame is actually in is what lets the window
@@ -227,7 +349,7 @@ export function createSelectView<T>(
     // with this one, and wake the renderer's shared timer twice an interval.
     const { time, reset } = ink.useAnimation({
       interval: flashing ? flashInterval : animationInterval,
-      isActive: filtering || collectingField || flashing || hidden > 0,
+      isActive: topFiltering || collectingField || flashing || hidden > 0,
     });
     /** The flash ends on elapsed time reaching its duration, never on a frame
      * number: a tick landing inside the renderer's render throttle is dropped
@@ -240,13 +362,110 @@ export function createSelectView<T>(
       settle({ type: "completed", value: outcome });
     }, [flashOver, settle]);
 
+    /** Push the active option's sub-dialog over the top level: a nested
+     * select starts with a blank filter on its first option, a text leaf
+     * starts entry from its field's initial value. The parent keeps its own
+     * filter text and active position untouched inside its level. */
+    const pushSubDialog = (current: SelectLevel<T>): void => {
+      const shown = visibleOptionIndices(current.options, current.entered);
+      const chosen = shown[current.active];
+      if (chosen === undefined) return;
+      const option = current.options[chosen] as SelectOption<T>;
+      const declared = declaredSubDialog(option);
+      if (declared === undefined) return;
+      if ("field" in declared) {
+        const leaf: InputLevel<T> = {
+          field: declared.field,
+          opener: option.value,
+          collected: current.collected,
+        };
+        levels.current = [...levels.current, leaf] as readonly (
+          | SelectLevel<T>
+          | InputLevel<T>
+        )[];
+        refresh();
+        return;
+      }
+      const nested = declared.select;
+      const child: SelectLevel<T> = {
+        message: nested.message,
+        options: nested.options,
+        filtering: filterIsEnabled(nested.filter, nested.options.length),
+        entered: "",
+        active: 0,
+        collected: current.collected,
+        opener: undefined,
+      };
+      levels.current = [...levels.current, child] as readonly (
+        | SelectLevel<T>
+        | InputLevel<T>
+      )[];
+      entered.current = "";
+      active.current = 0;
+      setFilterText("");
+      setActiveIndex(0);
+      refresh();
+    };
+
+    /** Pop the top level above the root and restore the parent's filter text
+     * and active position exactly as they were: they never left its level. */
+    const popLevel = (): void => {
+      if (levels.current.length <= 1) {
+        cancel();
+        return;
+      }
+      const parent = levels.current[
+        levels.current.length - 2
+      ] as SelectLevel<T>;
+      levels.current = levels.current.slice(0, -1);
+      entered.current = parent.entered;
+      active.current = parent.active;
+      setFilterText(parent.entered);
+      setActiveIndex(parent.active);
+      refresh();
+    };
+
+    /** Resolve the whole session: the completing option's value plus every
+     * input value collected along the path, prototype-free so an opaque
+     * caller key lands as an own value. Plain nested options contribute
+     * nothing beyond the path; a text leaf contributes its submitted text
+     * under its field's name alongside the opening option's value. */
+    const resolveStack = (
+      value: T,
+      values: Readonly<Record<string, string>>,
+    ): void => {
+      const outcome: SelectResult<T> = {
+        value,
+        values: { ...values },
+      };
+      if (viewport.count === 0) {
+        settle({ type: "completed", value: outcome });
+        return;
+      }
+      confirmed.current = outcome;
+      reset();
+      setFlashing(true);
+    };
+
     ink.useInput((value, key) => {
       // The choice is made and the flash is running it out. Every key is too
       // late to change it, Escape and Ctrl-C included: cancelling a choice
       // already taken is exactly what the flash exists to rule out.
       if (confirmed.current) return;
+      // Read once: a text leaf answers keys through its own entry, and the
+      // flushed escape reaches every subscriber in one emit, so popping for a
+      // leaf here as well would pop twice and cancel the session the pop was
+      // meant to save.
+      const uppermost = levels.current[levels.current.length - 1] as
+        | SelectLevel<T>
+        | InputLevel<T>;
       if (key.escape || (key.ctrl && value === "c")) {
-        cancel();
+        if (collecting.current) {
+          cancel();
+          return;
+        }
+        if ("field" in uppermost) return;
+        popLevel();
         return;
       }
       // Ink delivers every key parsed out of one chunk in a single synchronous
@@ -255,56 +474,52 @@ export function createSelectView<T>(
       // cancellation is declined from then on — filter edits included;
       // cancellation is answered above, at every stage.
       if (collecting.current) return;
-      // Read from the ref rather than the rendered text: a chunk carrying
+      // While a leaf is on top the select list beneath it stays rendered
+      // and ignores input.
+      if ("field" in uppermost) return;
+      const current = topSelect();
+      // The trigger is the modified key report — return with control — never
+      // typed or pasted text: `value` carries the whole chunk Ink parsed, so
+      // a multi-character chunk (a paste or several keys at once) holds more
+      // than the one return the chord reports and must not open anything.
+      if (key.return && key.ctrl) {
+        if (value.length !== 1) return;
+        pushSubDialog(current);
+        return;
+      }
+      // Read from the level rather than the rendered text: a chunk carrying
       // several keys is handled before any of them has re-rendered.
-      const visible = visibleOptionIndices(options, entered.current);
+      const shown = visibleOptionIndices(current.options, current.entered);
       if (key.return) {
-        const chosen = visible[active.current];
+        const chosen = shown[current.active];
         // Nothing is visible, so there is nothing to confirm.
         if (chosen === undefined) return;
-        const option = options[chosen] as SelectOption<T>;
+        const option = current.options[chosen] as SelectOption<T>;
         if (option.fields) {
           collecting.current = { value: option.value, fields: option.fields };
           setFieldIndex(0);
         } else {
-          const outcome: SelectResult<T> = { value: option.value, values: {} };
-          // A terminal too short for one option row leaves no cursor bar to
-          // flash, and a flash nobody can see is only dead time with every key
-          // ignored. The outcome is still fixed by the key that chose it, so
-          // the settlement rule the flash exists to protect is unaffected.
-          if (viewport.count === 0) {
-            settle({ type: "completed", value: outcome });
-            return;
-          }
-          // Recorded before the flash rather than after it, so the outcome is
-          // fixed by the key that chose it and no later key can reach it. The
-          // reset is explicit rather than left to the interval change, so the
-          // flash starts from its first phase however the renderer decides to
-          // treat a subscription whose interval moved.
-          confirmed.current = outcome;
-          reset();
-          setFlashing(true);
+          resolveStack(option.value, current.collected);
         }
         return;
       }
-      const moved = movedPosition(key, active.current, visible.length, rows);
+      const moved = movedPosition(key, current.active, shown.length, rows);
       if (moved !== undefined) {
-        active.current = moved;
-        setActiveIndex(moved);
-      } else if (filtering) {
-        const edited = editedText(entered.current, value, key);
-        if (edited === entered.current) return;
-        entered.current = edited;
-        setFilterText(edited);
+        syncTop({ ...current, active: moved });
+        // The caret goes back to its visible phase on the frame the movement
+        // lands in, matching the filter edit below.
+        reset();
+      } else if (current.filtering) {
+        const edited = editedText(current.entered, value, key);
+        if (edited === current.entered) return;
+        // The point of typing is to narrow to the thing you want and press
+        // Enter, so the first match becomes the target rather than whatever
+        // row happened to be active before.
+        syncTop({ ...current, entered: edited, active: 0 });
         // The caret goes back to its visible phase on the frame the typed
         // character lands in, so no keystroke is ever answered by a row that
         // looks like it lost its caret.
         reset();
-        // The point of typing is to narrow to the thing you want and press
-        // Enter, so the first match becomes the target rather than whatever
-        // row happened to be active before.
-        active.current = 0;
-        setActiveIndex(0);
       }
     });
 
@@ -332,6 +547,16 @@ export function createSelectView<T>(
       }
     };
 
+    /** Submit a text leaf from its entry: the opening option's value plus
+     * the path's inputs including the submitted text under its field's name,
+     * with the deeper submission winning a repeated name. */
+    const submitLeaf = (leaf: InputLevel<T>, text: string): void => {
+      resolveStack(
+        leaf.opener,
+        stackedValues(leaf.collected, leaf.field.name, text),
+      );
+    };
+
     /** The phase the caret and the overflow indicator show themselves on: the
      * caret visible, the indicator dimmed. A flash restarts elapsed time and
      * never runs a caret interval long, so both simply hold this phase for the
@@ -350,8 +575,17 @@ export function createSelectView<T>(
      * option that was taken rather than the gap where it was. */
     const barInverted = !flashing || flashOver || onPhase(time, flashInterval);
 
+    const current = top;
+    const renderMessage = current?.message ?? message;
+    const renderOptions = topOptions;
+    const renderFiltering = topFiltering;
+    const uppermost = levels.current[levels.current.length - 1] as
+      | SelectLevel<T>
+      | InputLevel<T>;
+    const leaf = "field" in uppermost ? uppermost : undefined;
+
     const panelRows: PanelRow[] = [];
-    if (filtering) {
+    if (renderFiltering) {
       panelRows.push({
         key: "filter",
         prefix: `${filterPrompt} `,
@@ -377,7 +611,7 @@ export function createSelectView<T>(
         viewport.renderedStart + viewport.count,
       );
       for (const [offset, index] of windowed.entries()) {
-        const option = options[index] as SelectOption<T>;
+        const option = renderOptions[index] as SelectOption<T>;
         const position = viewport.renderedStart + offset;
         panelRows.push({
           key: `option-${index}`,
@@ -407,10 +641,10 @@ export function createSelectView<T>(
     // Measured with the caret's own glyph whatever phase it is on, because the
     // blank standing in for it is exactly as wide: the panel is sized once for
     // both.
-    if (filtering) measure(`${filterPrompt} ${filterText}${caretGlyph}`);
+    if (renderFiltering) measure(`${filterPrompt} ${filterText}${caretGlyph}`);
     if (visible.length === 0) measure(noMatch);
     if (hidden > 0) measure(`${hiddenAboveGlyph} ${hidden} more`);
-    const width = panelWidth(message, content, columns);
+    const width = panelWidth(renderMessage, content, columns);
     const inner = innerWidth(width);
     const children: DialogElement[] = panelRows.map((panelRow) =>
       react.createElement(
@@ -445,14 +679,15 @@ export function createSelectView<T>(
       Frame,
       {
         key: "select",
-        title: message,
+        title: renderMessage,
         double: true,
         width,
         columns,
         // While a field is collected the entry's own panel follows this one
         // and carries the hints that apply; naming navigation and selection
-        // here would name keys the dialog has stopped answering.
-        hint: collectingField ? undefined : hint,
+        // here would name keys the dialog has stopped answering. A text leaf
+        // answers through its own entry the same way.
+        hint: collectingField || leaf !== undefined ? undefined : hint,
       },
       children,
     );
@@ -471,6 +706,21 @@ export function createSelectView<T>(
         onEdit: reset,
         onSubmit: (value: string) => submitField(fieldIndex, value),
         onCancel: cancel,
+      });
+    } else if (leaf !== undefined) {
+      // A text leaf reuses the existing entry logic: its editing is the same
+      // implementation a standalone input and a collected field use. Its
+      // cancel pops one level rather than cancelling the session, so Escape
+      // above the root and Escape on a leaf stay distinct.
+      const activeLeaf = leaf;
+      fieldPanel = react.createElement(Entry, {
+        key: "leaf",
+        message: activeLeaf.field.message,
+        initialValue: activeLeaf.field.initialValue,
+        caret: showPhase,
+        onEdit: reset,
+        onSubmit: (value: string) => submitLeaf(activeLeaf, value),
+        onCancel: () => popLevel(),
       });
     }
     return react.createElement(

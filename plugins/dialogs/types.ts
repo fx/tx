@@ -16,6 +16,10 @@ export type SelectOption<T> = {
   readonly label: string;
   readonly value: T;
   readonly fields?: readonly TextField[];
+  /** A sub-dialog Ctrl+Enter opens over this option: a nested select or one
+   * text field collected as a leaf. Absence makes the trigger a no-op, so
+   * flat lists behave exactly as before. */
+  readonly dialog?: SelectRequest<T> | TextField;
 };
 
 export type SelectRequest<T> = {

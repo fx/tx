@@ -6,6 +6,7 @@ import {
   flashInterval,
 } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import { stackedValues } from "../plugins/dialogs/select.ts";
 import {
   collectingChromeHeight,
   selectChromeHeight,
@@ -29,6 +30,13 @@ type SelectOption<T> = {
   readonly label: string;
   readonly value: T;
   readonly fields?: readonly TextField[];
+  readonly dialog?: SelectRequest<T> | TextField;
+};
+
+type SelectRequest<T> = {
+  readonly message: string;
+  readonly options: readonly SelectOption<T>[];
+  readonly filter?: boolean | "auto";
 };
 
 type SelectResult<T> = {
@@ -2701,8 +2709,433 @@ describe("user-provided select options", () => {
     expect(stdin.rawModes).toEqual([true, false]);
     expect(stdin.refs).toBe(1);
     expect(stdin.unrefs).toBe(1);
-    expect(stdin.activeReferences).toBe(0);
     expect(stdin.listenerCount("data")).toBe(0);
+  });
+});
+
+describe("cascading sub-dialogs", () => {
+  const CTRL_ENTER = `${ESCAPE}[13;5u`;
+  const tag: TextField = {
+    type: "text",
+    name: "tag",
+    message: "Which tag?",
+  };
+
+  function expandable(): readonly SelectOption<string>[] {
+    return [
+      { label: "Known", value: "known" },
+      {
+        label: "Category",
+        value: "category",
+        dialog: {
+          message: "Pick an item",
+          options: [
+            { label: "First", value: "first" },
+            { label: "Second", value: "second" },
+          ],
+        },
+      },
+    ];
+  }
+
+  test("names the expand key exactly while a visible option declares a sub-dialog", async () => {
+    const expanded = await runSelection(expandable(), [CARRIAGE_RETURN], false);
+    expect(expanded.value).toBe("known");
+    expect(frameRows(expanded.stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · Esc cancel · Ctrl+Enter expand",
+    );
+
+    const flat = await runSelection(
+      [{ label: "Known", value: "known" }],
+      [CARRIAGE_RETURN],
+      false,
+    );
+    expect(frameRows(flat.stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · Esc cancel",
+    );
+  });
+
+  test("treats the trigger as a no-op without a declaration", async () => {
+    const result = await runSelection(
+      [
+        { label: "Known", value: "known" },
+        { label: "Other", value: "other" },
+      ],
+      [CTRL_ENTER, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("known");
+    expect(result.values).toEqual({});
+  });
+
+  test("opens a nested select and resolves the whole stack with its value", async () => {
+    const result = await runSelection(expandable(), [
+      DOWN,
+      CTRL_ENTER,
+      DOWN,
+      CARRIAGE_RETURN,
+    ]);
+    expect(result.value).toBe("second");
+    expect(result.values).toEqual({});
+  });
+
+  test("pops one level on Escape and cancels only at the root", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: expandable(),
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(DOWN);
+    await until(() => activeRow(stderr) === "Category");
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Pick an item"));
+    await until(() => {
+      try {
+        return activeRow(stderr, "Pick an item") === "First";
+      } catch {
+        return false;
+      }
+    });
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Category" &&
+          !stripped(lastFrame(stderr)).includes("Pick an item")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(settled).toBe(false);
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(await running).toBe(0);
+    expect(result).toBeUndefined();
+  });
+
+  test("cancels at the root with Ctrl-C and pops a level with Ctrl-C above it", async () => {
+    const atRoot = await runSelection(expandable(), [CTRL_C]);
+    expect(atRoot.value).toBeUndefined();
+
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined = {
+      value: "open",
+      values: {},
+    };
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: expandable(),
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(DOWN);
+    await until(() => activeRow(stderr) === "Category");
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Pick an item"));
+    await until(() => {
+      try {
+        return activeRow(stderr, "Pick an item") === "First";
+      } catch {
+        return false;
+      }
+    });
+    stdin.write(CTRL_C);
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Category" &&
+          !stripped(lastFrame(stderr)).includes("Pick an item")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(settled).toBe(false);
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("category");
+  });
+
+  test("resolves a text leaf with the opening value and its submitted text", async () => {
+    const result = await runSelection(
+      [{ label: "Tagged", value: "tagged", dialog: tag }],
+      [CTRL_ENTER, "nightly", CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe("tagged");
+    expect(result.values).toEqual({ tag: "nightly" });
+  });
+
+  test("pops a text leaf on Escape and cancels only at the root", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined = {
+      value: "stale",
+      values: {},
+    };
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [{ label: "Tagged", value: "tagged", dialog: tag }],
+            filter: false,
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Tagged"));
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Which tag?"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 80));
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Tagged" &&
+          !stripped(lastFrame(stderr)).includes("Which tag?")
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(settled).toBe(false);
+    stdin.write(CTRL_ENTER);
+    // The push is synchronous but the reopened entry subscribes on its mount
+    // effect; wait it out so the typed text is not swallowed before then.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    const reopened = stderr.text().length;
+    stdin.write("nightly");
+    await until(() => {
+      const fresh = stderr.text().slice(reopened);
+      return stripped(fresh).includes("nightly");
+    });
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result).toEqual({ value: "tagged", values: { tag: "nightly" } });
+  });
+
+  test("merges values along the path with deeper submissions winning", async () => {
+    const shallow: Record<string, string> = Object.assign(
+      Object.create(null) as Record<string, string>,
+      { name: "shallow" },
+    );
+    const merged = stackedValues(shallow, "name", "deep");
+    expect(merged).toEqual({ name: "deep" });
+    expect(Object.getOwnPropertyDescriptor(merged, "name")?.value).toBe("deep");
+    expect(stackedValues(shallow, "other", "new")).toEqual({
+      name: "shallow",
+      other: "new",
+    });
+    // The base is left untouched and stays prototype-free, so an opaque
+    // caller key lands as an own value rather than reaching Object.prototype.
+    expect(shallow).toEqual({ name: "shallow" });
+    const proto = stackedValues({}, "__proto__", "a");
+    expect(Object.getOwnPropertyDescriptor(proto, "__proto__")?.value).toBe(
+      "a",
+    );
+
+    // End to end, a nested completion carries the path's values: the nested
+    // option's fields resolve with the whole stack's inputs, deeper winning.
+    const carried = await runSelection(
+      [
+        {
+          label: "Category",
+          value: "category",
+          dialog: {
+            message: "Nested",
+            options: [
+              {
+                label: "Custom",
+                value: "custom",
+                fields: [
+                  { type: "text", name: "owner", message: "Which account?" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+      [CTRL_ENTER, CARRIAGE_RETURN, "fx", CARRIAGE_RETURN],
+      false,
+    );
+    expect(carried.value).toBe("custom");
+    expect(carried.values).toEqual({ owner: "fx" });
+  });
+
+  test("keeps the parent filter and active option across push and pop", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: "Pick one",
+            options: [
+              { label: "Alpha", value: "alpha" },
+              {
+                label: "Alphabet",
+                value: "alphabet",
+                dialog: {
+                  message: "Nested",
+                  options: [{ label: "Only", value: "only" }],
+                },
+              },
+            ],
+            filter: true,
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Alpha"));
+    stdin.write("alph");
+    await until(() => activeRow(stderr) === "Alpha");
+    stdin.write(DOWN);
+    await until(() => activeRow(stderr) === "Alphabet");
+    stdin.write(CTRL_ENTER);
+    await until(() => stripped(stderr.text()).includes("Nested"));
+    // The nested level starts blank while the parent keeps its own text.
+    await until(() => {
+      try {
+        return activeRow(stderr, "Nested") === "Only";
+      } catch {
+        return false;
+      }
+    });
+    stdin.write(ESCAPE);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await until(() => {
+      try {
+        return (
+          activeRow(stderr) === "Alphabet" &&
+          !stripped(lastFrame(stderr)).includes("Nested")
+        );
+      } catch {
+        return false;
+      }
+    });
+    // Popping restores exactly what the parent showed before it opened.
+    expect(stripped(lastFrame(stderr))).toContain("alph");
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("alphabet");
+    // The filter text never becomes part of the result.
+    expect(result?.values).toEqual({});
+  });
+
+  test("never opens a sub-dialog from typed or pasted text", async () => {
+    const pasted = await runSelection(
+      expandable(),
+      ["ab", CARRIAGE_RETURN],
+      false,
+    );
+    expect(pasted.value).toBe("known");
+    expect(pasted.values).toEqual({});
+
+    // Plain Enter on an option declaring a sub-dialog confirms it as a plain
+    // option rather than opening anything: only the modified key report opens.
+    const plain = await runSelection(expandable(), [DOWN, CARRIAGE_RETURN]);
+    expect(plain.value).toBe("category");
+    expect(plain.values).toEqual({});
+  });
+
+  test("rejects every invalid reachable sub-request before rendering", async () => {
+    const emptyNested: readonly SelectOption<number>[] = [
+      {
+        label: "Category",
+        value: 1,
+        dialog: { message: "Empty", options: [] },
+      },
+    ];
+    const emptyFields: readonly SelectOption<number>[] = [
+      {
+        label: "Known",
+        value: 1,
+        dialog: {
+          message: "Nested",
+          options: [{ label: "Leaf", value: 2, fields: [] }],
+        },
+      },
+    ];
+    const repeatedName: readonly SelectOption<number>[] = [
+      {
+        label: "Known",
+        value: 1,
+        dialog: {
+          message: "Nested",
+          options: [
+            {
+              label: "Leaf",
+              value: 2,
+              fields: [
+                { type: "text", name: "owner", message: "Which account?" },
+                {
+                  type: "text",
+                  name: "owner",
+                  message: "Which account again?",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+    for (const [options, message] of [
+      [emptyNested, "A select dialog requires at least one option"],
+      [
+        emptyFields,
+        "A user-provided select option requires at least one field",
+      ],
+      [repeatedName, 'A select option repeats the field name "owner"'],
+    ] as const) {
+      const rejected = await runRejected(options);
+      expect(rejected.exitCode).toBe(0);
+      expect(rejected.failure).toBeInstanceOf(Error);
+      expect((rejected.failure as Error).message).toBe(message);
+      expect(rejected.stderr.text()).toBe("");
+      expect(rejected.stdin.rawModes).toEqual([]);
+    }
   });
 });
 

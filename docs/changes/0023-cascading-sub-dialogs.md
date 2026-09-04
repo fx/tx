@@ -89,14 +89,14 @@ The select view gains a stack of levels, each level holding what the flat dialog
 
 ## Tasks
 
-- [ ] Stack, trigger, and pop
-  - [ ] Add the per-option `dialog` declaration to the provider's local request type, holding a nested select request or a single text field
-  - [ ] Hold a stack of levels in the select view inside the single render session: push the active option's sub-dialog on Ctrl+Enter, route all keys to the top level, pop one level on Escape above the root, cancel at the root
-  - [ ] Resolve the whole session on any level's completion with the completing option's value and the path's input values merged by field name, deeper winning; leave the filter text untouched by the trigger
-  - [ ] Validate every reachable sub-request before rendering alongside the existing rejections, so any invalid stack renders nothing
-  - [ ] Name the expand key in the select hint exactly while a visible option declares a sub-dialog
-  - [ ] Add Bun tests for the trigger as a no-op without a declaration, push and pop, root cancel, whole-stack resolution from a nested select and from an input leaf, values merging with a colliding name, filter text preserved across push and pop, and unchanged empty output on every pre-render rejection
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Stack, trigger, and pop
+  - [x] Add the per-option `dialog` declaration to the provider's local request type, holding a nested select request or a single text field
+  - [x] Hold a stack of levels in the select view inside the single render session: push the active option's sub-dialog on Ctrl+Enter, route all keys to the top level, pop one level on Escape above the root, cancel at the root
+  - [x] Resolve the whole session on any level's completion with the completing option's value and the path's input values merged by field name, deeper winning; leave the filter text untouched by the trigger
+  - [x] Validate every reachable sub-request before rendering alongside the existing rejections, so any invalid stack renders nothing
+  - [x] Name the expand key in the select hint exactly while a visible option declares a sub-dialog
+  - [x] Add Bun tests for the trigger as a no-op without a declaration, push and pop, root cancel, whole-stack resolution from a nested select and from an input leaf, values merging with a colliding name, filter text preserved across push and pop, and unchanged empty output on every pre-render rejection
+  - [x] Verify 100% coverage and `bun run check`
 - [ ] Stacked presentation and manual
   - [ ] Render stacked levels as overlapping offset panels with a dimmed block-fill shadow behind each panel above the root, clamped to the terminal, greyscale only
   - [ ] Make the viewport row budget overlay-aware so a stacked dialog stays strictly shorter than the terminal
