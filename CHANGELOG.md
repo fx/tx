@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.7.0](https://github.com/fx/tx/compare/v1.6.1...v1.7.0) (2026-09-05)
+
+
+### Features
+
+* **demo:** ship extensionless demo showcasing all dialog features ([#63](https://github.com/fx/tx/issues/63)) ([d54145c](https://github.com/fx/tx/commit/d54145c8790d0274663e1491eec6170185ea7961))
+* **dialogs:** cascade sub-dialogs as stacked shadowed panels ([#61](https://github.com/fx/tx/issues/61)) ([21659a3](https://github.com/fx/tx/commit/21659a3bb4fb8893f33c89b0cab4e940b32d5ff0))
+* **dialogs:** render sub-dialogs as columns of one panel ([#64](https://github.com/fx/tx/issues/64)) ([14d35ed](https://github.com/fx/tx/commit/14d35ed82a70ae078569e8ee4e22280cfdbdce02))
+* **theme:** add theme variables and move dialogs behind them ([#68](https://github.com/fx/tx/issues/68)) ([ce8b428](https://github.com/fx/tx/commit/ce8b428d205598a8ffebbcc0c3737f9dd9ce94e4))
+
+
+### Bug Fixes
+
+* **dialogs:** guarantee a cell's width by construction ([#66](https://github.com/fx/tx/issues/66)) ([139e185](https://github.com/fx/tx/commit/139e185499cfa1aee8a2200ae671f50d51639aa6))
+
 ## [1.6.1](https://github.com/fx/tx/compare/v1.6.0...v1.6.1) (2026-09-02)
 
 
