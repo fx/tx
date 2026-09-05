@@ -241,6 +241,7 @@ changes:
     status: draft
     depends_on:
       - "0025"
+      - "0026"
   - id: "0028"
     name: add-the-grid-plugin
     path: changes/0028-add-the-grid-plugin.md

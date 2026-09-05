@@ -40,7 +40,8 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - A new bundled plugin under `plugins/theme/`, composed in `cli.ts` before the plugins that consume it. Ordering is not required for correctness — consumers read at command time, when everything has committed — but composing a provider before its consumers is what the ordered defaults in `cli.ts` are for.
 - The dialogs plugin stops naming appearances. `frame.ts` and `columns.ts` currently carry `dim` and `inverse` as booleans on their segment and cell types; those become theme variables resolved at the point the segment is turned into an element, so the geometry modules keep having no opinion about appearance.
 - The dialogs plugin reads the `theme` key while a dialog runs, following the pattern `requireConfigCapability` in `plugins/marketplace/configured.ts` establishes, except that an absent theme falls back to the default rather than throwing — [Theming: Theme Capability](../specs/theming/index.md#theme-capability) requires the fallback and dialogs must keep working with no theme provider composed.
-- The colour decision is made once against the stream a surface draws to. Dialogs draw to stderr; a printed grid draws to whatever stream its consumer passes. The capability therefore resolves colour per surface rather than once per process.
+- The capability resolves a theme from the stream a surface draws to rather than handing one out ready-made, because the colour decision depends on that stream. Dialogs pass their injected standard-error stream; a printed grid passes whatever stream its consumer supplied. Only the stream's TTY-ness is read; the capability never writes to it or keeps it.
+- Overrides are read from the separate `theme-override` key and composed at resolution time. [Theming: Plugin Overrides](../specs/theming/index.md#plugin-overrides) owns both rules, and both exist because of what the registry does: one key holds every entry distinctly, and initialization-time reads cannot see a later plugin's contribution.
 
 #### Scenario: Existing dialogs output is unchanged
 
@@ -57,7 +58,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ### Approach
 
-`plugins/theme/` holds three things and no rendering. `variables.ts` names the variables and the default appearance of each. `colour.ts` resolves whether hues are emitted from an injected environment, an injected TTY flag, and the caller's own request — pure, no globals, no stream. `index.ts` composes registered overrides over the defaults in registry commit order and registers the capability.
+`plugins/theme/` holds three things and no rendering. `variables.ts` names the variables and the default appearance of each. `colour.ts` resolves whether hues are emitted from an injected environment, an injected TTY flag, and the caller's own request — pure, no globals, no stream. `index.ts` registers the capability under `theme`; the capability it registers reads the `theme-override` snapshot and composes it over the defaults each time a surface resolves a theme, which is while a command runs and therefore after every override has committed.
 
 The theme returns an appearance, not a rendered element and not a set of renderer props. Keeping the appearance renderer-agnostic is what lets `frame.ts` stay the only module in the dialogs plugin that knows what Ink calls a dim.
 
@@ -68,9 +69,9 @@ The existing `FrameSegment` and `ColumnCell` types carry `dim` and `inverse` boo
 - **Decision**: a bundled plugin and an internal capability, not an injected core dependency.
   - **Why**: it is exactly the shape [Dialogs](../specs/dialogs/) and [Config](../specs/config/) already have, and [Composition and Boundaries](../specs/plugin-system/index.md#composition-and-boundaries) requires `src/` to stay feature-neutral. A theme vocabulary in `CoreDependencies` would be feature vocabulary in core.
   - **Alternatives considered**: a `theme` field on `CoreDependencies` (puts appearance vocabulary in core); a module the dialogs plugin imports directly (couples two bundled plugins in the module graph, which `test/plugin-boundary.test.ts` exists to prevent).
-- **Decision**: overrides register under the same `theme` key the capability is read from, composed in commit order.
-  - **Why**: the [Generic Registry](../specs/plugin-system/index.md#generic-registry) already guarantees deterministic FIFO commit order and already discards a failed plugin's registrations. Composing over that gets the atomicity and the ordering for free.
-  - **Alternatives considered**: a separate `theme-override` key (a second key for one concept); a mutation method on the capability (a plugin mutating another plugin's committed value).
+- **Decision**: overrides register under their own `theme-override` key, and are composed when a theme is resolved rather than when the theme plugin initializes.
+  - **Why**: two things forced both halves. The [Generic Registry](../specs/plugin-system/index.md#generic-registry) keeps every entry under one key as a distinct member of one snapshot and never merges or deduplicates them, so a shared `theme` key would hand every consumer a snapshot mixing the capability with partial overrides and leave it to tell them apart by shape. And a plugin reading during its own initialization sees only what committed before it, so a theme plugin that composed at initialization would silently drop every override contributed by a plugin composed after it — which is most of them, since the provider is composed first. Composing at resolution time, while a command runs, sees every committed override, and the registry still supplies the FIFO order and the discarding of a failed plugin's registrations for free.
+  - **Alternatives considered**: the same `theme` key for both (the snapshot-mixing problem above); composing once at initialization (drops later overrides); a mutation method on the capability (a plugin mutating another plugin's committed value).
 - **Decision**: the default theme must be byte-identical, and the existing dialogs tests are the proof.
   - **Why**: this is a refactor of where a decision is made. If a rendered byte moved, every presentation test would be re-baselined in the same commit that introduced the indirection, and a genuine regression would be indistinguishable from an intended restyle.
   - **Alternatives considered**: restyling opportunistically while the code is open — rejected for exactly that reason.
@@ -91,10 +92,10 @@ The existing `FrameSegment` and `ColumnCell` types carry `dim` and `inverse` boo
 - [ ] Add the theme plugin
   - [ ] `plugins/theme/variables.ts` with the variable set and the default appearance of each
   - [ ] `plugins/theme/colour.ts` resolving hue enablement from injected environment, TTY state, and caller request
-  - [ ] `plugins/theme/index.ts` composing overrides in commit order and registering the `theme` capability
+  - [ ] `plugins/theme/index.ts` registering the `theme` capability, which resolves a theme from a supplied stream and composes the `theme-override` snapshot over the defaults in commit order at that point
   - [ ] Compose the theme plugin in `cli.ts` ahead of its consumers
   - [ ] Table-driven tests for colour precedence over `NO_COLOR`, `FORCE_COLOR` in both directions, blank and whitespace `FORCE_COLOR`, `TERM=dumb`, and TTY state
-  - [ ] Tests for partial overrides, override ordering, and a failed provider's override being absent
+  - [ ] Tests for partial overrides, override ordering, a failed provider's override being absent, and an override contributed by a plugin composed after the theme plugin still applying
 - [ ] Move the dialogs plugin behind the theme
   - [ ] Replace the `dim` and `inverse` booleans on `FrameSegment` and `ColumnCell` with theme variables
   - [ ] Resolve variables where elements are built, so geometry modules carry no appearance concept

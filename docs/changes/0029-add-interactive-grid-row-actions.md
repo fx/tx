@@ -40,7 +40,8 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - The grid builds a select request whose options carry the cells [Change 0027](./0027-add-multi-cell-select-rows.md) added, and hands it to the `dialogs` capability. It re-implements no part of movement, filtering, the viewport, the cursor bar, or cancellation.
 - A row's actions become that row's declared sub-dialog, so acting on a row is the drilling [Sub-Dialog Columns](../specs/dialogs/index.md#sub-dialog-columns) already owns and not a second mechanism beside it.
 - The grid reads the `dialogs` capability at command time, alongside the `theme` capability it already reads.
-- The row-count and value-count mismatch is rejected before rendering, alongside the validations `select` itself performs, so no request that cannot produce a usable result ever touches the terminal.
+- A row carries its own value and its own actions, so the request has no list running parallel to the rows and nothing to fall out of step. Two rows may offer different actions, and a row may offer none beside one that does.
+- A cell's declared theme variable does not survive the handoff: [Dialogs: Select Request](../specs/dialogs/index.md#select-request) takes an option's cells as display text, so every cell of a selectable row is drawn as `content`. [Grid: Interactive Grid](../specs/grid/index.md#interactive-grid) states the loss and the reason, and this change implements it rather than smuggling a role through.
 - Nothing in this change spawns, runs, names, or interprets a process. The grid reports a row and an action; what an action means belongs to its consumer.
 
 #### Scenario: The terminal is fit to hand over after a cancellation
@@ -74,9 +75,9 @@ Terminal handover needs no new machinery, which is the point of the design. `run
 - **Decision**: the handover guarantee is stated in [Grid](../specs/grid/) as an observable consumers depend on, rather than left implicit in the dialogs implementation.
   - **Why**: it is the one thing about this feature a consumer must be able to rely on and cannot verify from a type signature. Stating it makes it testable and makes breaking it a failing test rather than a bug report about ssh behaving oddly.
   - **Alternatives considered**: leaving it as the dialogs implementation detail it is today.
-- **Decision**: reject a row-count and value-count mismatch rather than tolerating it.
-  - **Why**: the consumer's values are how it identifies a row. A mismatch means some row resolves to the wrong value or to nothing, and both are worse than a rejection before anything is drawn.
-  - **Alternatives considered**: padding the shorter list; using the row index as the value when values run out.
+- **Decision**: a row carries its value and its actions, rather than the request carrying lists parallel to the rows.
+  - **Why**: parallel lists make "this row means that value" a thing the caller has to keep true, and the only defence against getting it wrong is a length check that catches the mismatched case and misses the misaligned one. Putting both on the row makes an unidentifiable row unrepresentable instead of rejectable, and it is what lets two rows offer different actions — which the shape with one action list for the whole grid could not express at all.
+  - **Alternatives considered**: parallel `values` and `actions` lists validated for length (rejects a mismatch, cannot catch a misalignment, and forbids per-row actions); using the row index as the value when values run out.
 
 ### Non-Goals
 
@@ -92,7 +93,7 @@ Terminal handover needs no new machinery, which is the point of the design. `run
 - [ ] Compose the interactive grid over the dialogs capability
   - [ ] `plugins/grid/select.ts` mapping a grid request onto a select request and its result back onto a row and an action
   - [ ] Read the `dialogs` capability at command time alongside the theme
-  - [ ] Reject the row-count and value-count mismatch, and the absent-interactive-stream case, before rendering
+  - [ ] Reject the absent-interactive-stream case before rendering, alongside the validations `select` itself performs
   - [ ] Tests over injected streams for selecting a row, selecting a row and an action, backing out of the actions, cancelling, and each rejection
 - [ ] Pin the terminal-handover guarantee
   - [ ] Tests asserting that after a completed, a cancelled, and a failed selection, raw mode is off, the installed input handler is gone, and nothing further is written
@@ -106,6 +107,7 @@ Terminal handover needs no new machinery, which is the point of the design. `run
 - [ ] Whether a selection should be able to report "chose a row, declined every action" distinctly from "cancelled" — backing out of the actions column currently returns to the rows, so the two are only distinguishable if a row can be taken without taking an action.
 - [ ] Whether actions should be declarable once for the whole grid rather than per row, since most consumers will offer the same actions on every row — per row is more general and a whole-grid form is a convenience over it, so this is about whether the convenience is worth a second shape.
 - [ ] Whether a consumer that wants to return to the grid after acting should be served by calling `select` again, which is what it can do today, or whether the repeated call loses something the loop would keep.
+- [ ] Whether a selectable row should be able to carry a cell role after all — the printed grid can, and the reason the interactive one cannot is the cursor bar's inversion, which only affects the active row. Letting the inactive rows carry theirs is arguable and is deliberately not attempted here.
 
 ## References
 

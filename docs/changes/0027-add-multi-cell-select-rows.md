@@ -6,7 +6,7 @@ Let a select option declare aligned cells instead of a single label, and let a c
 
 **Spec:** [Dialogs](../specs/dialogs/)
 **Status:** draft
-**Depends On:** 0025
+**Depends On:** 0025, 0026
 
 ## Motivation
 
@@ -57,7 +57,7 @@ The natural place for field geometry is `columns.ts`, which already owns everyth
 
 `columnWidth` gains a sibling that takes a vector of field widths and returns the column width including the gaps, and `cell` gains a sibling that lays a row of cells into that column. The existing scalar functions stay exactly as they are and keep serving label options, so the label path is not touched by the cell path.
 
-The header row is drawn as the first row of its column's band, resolved through [Theming](../specs/theming/)'s `chrome` variable so it reads as a label for the list rather than as a member of it, and it costs the viewport one of the rows it had. That last point is the one with a knock-on: `optionRowCount` computes affordable rows from the terminal height and the chrome height, and a header is chrome that only some columns have.
+The header row is drawn as the first row of its column's band, resolved through [Theming](../specs/theming/)'s `chrome` variable so it reads as a label for the list rather than as a member of it, and it costs the viewport one of the rows it had. That variable is the second dependency: [Change 0026](./0026-add-theme-variables.md) is what introduces `chrome` and moves the dialogs plugin behind the theme, so a header drawn before it landed would have to name an appearance directly and then be rewritten. It is also the order [Dialogs: Overview](../specs/dialogs/index.md#overview) states — 0025, then 0026, then this change. That last point is the one with a knock-on: `optionRowCount` computes affordable rows from the terminal height and the chrome height, and a header is chrome that only some columns have.
 
 ### Decisions
 

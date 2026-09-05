@@ -27,31 +27,65 @@ The interactive grid then costs almost nothing extra: a driveable grid is a sele
 The initial shape is conceptual:
 
 ```ts
+// ThemeVariable is [Theming]'s; nothing about it is redefined here.
+
 type Cell = {
   readonly text: string
   readonly variable?: ThemeVariable
   readonly align?: "start" | "end"
 }
 
+type Row = readonly (Cell | string)[]
+
+// The stream printed output is written to. Only its width and its TTY-ness
+// are read; the grid never reaches for the process's own streams.
+type OutputStream = {
+  write(chunk: string): unknown
+  readonly columns?: number
+  readonly isTTY?: boolean
+}
+
 type GridRequest = {
+  readonly stream: OutputStream
   readonly layout?: "table" | "flow"
   readonly headers?: readonly string[]
-  readonly rows: readonly (readonly (Cell | string)[])[]
+  readonly rows: readonly Row[]
   readonly empty?: string
   readonly summary?: string
 }
 
-type GridSelectRequest<T> = GridRequest & {
+// Actions are declared per row, so two rows may offer different ones.
+type GridAction<A> = {
+  readonly label: string
+  readonly value: A
+}
+
+type GridSelectRow<T, A> = {
+  readonly cells: Row
+  readonly value: T
+  readonly actions?: readonly GridAction<A>[]
+}
+
+type GridSelectRequest<T, A> = {
   readonly message: string
-  readonly values: readonly T[]
-  readonly actions?: readonly SelectOption<T>[]
+  readonly headers?: readonly string[]
+  readonly rows: readonly GridSelectRow<T, A>[]
+}
+
+type GridSelection<T, A> = {
+  readonly value: T
+  readonly action?: A
 }
 
 type Grid = {
   print(request: GridRequest): void
-  select<T>(request: GridSelectRequest<T>): Promise<GridSelection<T> | undefined>
+  select<T, A>(
+    request: GridSelectRequest<T, A>,
+  ): Promise<GridSelection<T, A> | undefined>
 }
 ```
+
+A selecting request carries no stream: a dialog reads and draws through the streams [Dialogs](../dialogs/) was injected with, and [Terminal Handover](#terminal-handover) depends on it being those streams and no others.
 
 #### Scenario: Capability used by a command
 
@@ -130,14 +164,14 @@ Printing is a command producing output and finishing, not an application taking 
 
 - Printing MUST write to the stream the consumer supplies and MUST NOT reach for the process's own standard output or error.
 - Printing MUST render once and terminate, and MUST NOT hold the terminal open, install an input handler, enter an alternate screen buffer, or patch the console.
-- The bytes printed MUST be identical whether the stream is a terminal or a pipe, apart from the hues [Theming: Colour Enablement](../theming/index.md#colour-enablement) drops.
+- The bytes printed MUST be identical whether the stream is a terminal or a pipe, given the same width, apart from the hues [Theming: Colour Enablement](../theming/index.md#colour-enablement) drops. Nothing about the output MUST depend on the stream beyond the width it reports and that colour decision.
 - Printed output MUST NOT contain cursor-positioning, screen-clearing, or repaint escape sequences.
-- The grid MUST size its layout from the width the consumer's stream reports, and MUST NOT probe the terminal by any other means.
+- The grid MUST take the width it lays out against from the stream the consumer supplied, and MUST NOT probe the terminal by any other means. A stream reporting no width MUST be treated as eighty columns, so a layout that depends on the width — the [flow](#flow-layout) — still produces one determinate answer through a pipe.
 - Printing MUST NOT require an interactive stream, so a grid remains printable when output is redirected.
 
 #### Scenario: Piped output matches the terminal
 
-- **GIVEN** a grid printed to a terminal and the same grid printed through a pipe
+- **GIVEN** a grid printed to a terminal of eighty columns and the same grid printed through a pipe reporting no width
 - **WHEN** both outputs are compared with hues removed
 - **THEN** they are byte-identical
 
@@ -151,7 +185,8 @@ Printing is a command producing output and finishing, not an application taking 
 
 - Selecting MUST present the grid's rows as the options of a select supplied by [Dialogs](../dialogs/), so movement, filtering, the viewport, the cursor bar, and cancellation behave exactly as [Dialogs: Selection](../dialogs/index.md#selection) and [Dialogs: Filtering](../dialogs/index.md#filtering) require, and this specification restates none of it.
 - A row's cells MUST be presented as the multi-cell option [Dialogs: Select Request](../dialogs/index.md#select-request) owns, so alignment within a row is one contract rather than two.
-- Selecting MUST reject a request whose row count and value count differ, before rendering, because a row the caller cannot identify is a result the caller cannot use.
+- Every row MUST carry the value that identifies it, declared on the row rather than in a list parallel to the rows, so a row the caller cannot identify is unrepresentable rather than rejected.
+- A cell's declared `variable` MUST NOT survive into a selecting grid: every cell of a row presented through [Dialogs](../dialogs/) is drawn as `content`, whatever role it declared for printing. [Dialogs: Select Request](../dialogs/index.md#select-request) takes an option's cells as display text, and [Dialogs: Presentation](../dialogs/index.md#presentation) requires every column's cursor bar to be the inversion alone with no cell shaded differently beneath it; a per-cell role would have to be composed with that bar on the active row and would contradict it. A consumer that needs a row's state visible while selecting MUST put it in a cell's text.
 - Selecting MUST require the interactive streams a dialog requires, and MUST reject rather than fall back to printing when they are absent.
 - A cancelled selection MUST resolve to nothing, MUST print nothing, and MUST NOT assign an exit code.
 - A grid MUST NOT be both printed and selected in one call; a consumer choosing between them owns that choice.
@@ -162,17 +197,17 @@ Printing is a command producing output and finishing, not an application taking 
 - **WHEN** the user moves to the second and confirms
 - **THEN** the selection carries the value the caller supplied for that row
 
-#### Scenario: Mismatched values rejected before rendering
+#### Scenario: A cell's role does not survive selection
 
-- **GIVEN** a request with four rows and three values
-- **WHEN** it is submitted
-- **THEN** it is rejected, nothing is rendered, and the terminal is untouched
+- **GIVEN** a row whose second cell declares the `danger` variable
+- **WHEN** the same row is printed and then presented for selection
+- **THEN** the printed cell carries `danger` and the selectable one is drawn as `content`
 
 ### Row Actions
 
-- A request MAY declare actions, and an action MUST be presented as the sub-dialog the chosen row opens, so acting on a row is the drilling [Dialogs: Sub-Dialog Columns](../dialogs/index.md#sub-dialog-columns) already owns.
-- A selection MUST report which row was chosen and, when actions were declared, which action was chosen, so a consumer never has to infer one from the other.
-- A request declaring no actions MUST resolve on the row alone, so a grid used only to pick something needs no action model.
+- A row MAY declare its own actions, and they MUST be presented as the sub-dialog that row opens, so acting on a row is the drilling [Dialogs: Sub-Dialog Columns](../dialogs/index.md#sub-dialog-columns) already owns. Actions are declared per row rather than once for the grid, so two rows MAY offer different ones and a row MAY offer none while its neighbour does.
+- A selection MUST report which row was chosen and, when the chosen row declared actions, which action was chosen, so a consumer never has to infer one from the other. [Dialogs: Sub-Dialog Columns](../dialogs/index.md#sub-dialog-columns) resolves a nested select with the completing option's value alone, so the grid MUST carry enough through the actions column to recover both and MUST NOT ask the consumer to reconstruct the row from the action.
+- A row declaring no actions MUST resolve on the row alone, so a grid used only to pick something needs no action model.
 - The grid MUST NOT run, spawn, interpret, or name a command. What an action means belongs to the consumer that declared it.
 
 #### Scenario: Act on a row
@@ -241,6 +276,7 @@ They share every measurement decision and differ only in what drives them. Split
 - Whether a printed grid SHOULD do anything at all when the terminal is narrower than its natural width, beyond not re-flowing, is undecided. Dropping a column, eliding one, and letting the terminal wrap are all defensible, and the right answer likely depends on a real consumer's columns.
 - Whether the placeholder for an absent value SHOULD be caller-supplied rather than fixed at `—` is undecided; fixing it keeps grids across plugins looking alike, which is the stronger default until someone has a reason.
 - Whether a selection SHOULD be able to report that the user chose a row and explicitly declined every action, distinctly from cancelling, is undecided.
+- Whether a selectable row's cells SHOULD be able to carry their declared variable after all is undecided. The reason they cannot is [Dialogs](../dialogs/)' rule that a cursor bar is the inversion alone, and that binds only the active row; whether the rows behind it could keep their roles without the list reading as two different things is the open part.
 - Whether the grid SHOULD offer a repeating select — return to the rows after the consumer has acted, as a file manager does — is undecided. It would require the grid to know when the consumer's action finished, which is process lifecycle it deliberately does not own today.
 
 ## References

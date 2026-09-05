@@ -20,9 +20,10 @@ Theming resolves both by moving the decision to one owner. Dialogs stops naming 
 
 ### Theme Capability
 
-- The theme capability MUST be supplied by a bundled plugin registered under the opaque registry key `theme`, and its provider MUST NOT claim a command namespace.
-- The capability MUST expose the resolved theme for the running command and MUST NOT expose the terminal, a stream, or a renderer.
+- The bundled theme plugin MUST register one theming capability under the opaque registry key `theme` and MUST NOT claim a command namespace.
+- The capability MUST resolve a theme for a surface from the stream that surface draws to, because [Colour Enablement](#colour-enablement) depends on that stream. It MUST take the stream as an argument and MUST NOT retain it, expose it, expose the terminal, or expose a renderer.
 - A consumer MUST read the capability while its command runs rather than during its own initialization, because registry reads during initialization see only earlier providers.
+- A resolved theme MUST answer with an appearance alone. It MUST NOT expose whether hues were enabled, because [Colour Enablement](#colour-enablement) requires every appearance it returns to reflect that decision already, and a consumer given the flag is a consumer that can branch on it.
 - The contract MUST remain a local structural type shared by bundled plugins; nothing about theming MUST enter `src/` or the public `@fx/tx/plugin` contract.
 - A consumer MUST behave correctly when the capability is absent, by falling back to the default theme.
 
@@ -47,15 +48,23 @@ type ThemeVariable =
 
 type Theme = {
   appearance(variable: ThemeVariable): Appearance
-  readonly hues: boolean
+}
+
+// A partial override, registered under `theme-override` by any plugin.
+type ThemeOverride = Partial<Record<ThemeVariable, Appearance>>
+
+// The value registered under `theme`. `stream` is the surface being drawn to;
+// only its TTY-ness is read, and it is not retained.
+type Theming = {
+  theme(stream: { readonly isTTY?: boolean }, options?: { readonly colour?: boolean }): Theme
 }
 ```
 
 #### Scenario: Capability used by a command
 
 - **GIVEN** a bundled theme provider has initialized successfully
-- **WHEN** a consumer reads the `theme` key while its command runs
-- **THEN** it receives exactly one theme and can resolve an appearance for every variable
+- **WHEN** a consumer reads the `theme` key while its command runs and resolves a theme for the stream it draws to
+- **THEN** it receives exactly one theming capability and can resolve an appearance for every variable
 
 #### Scenario: Absent capability falls back
 
@@ -99,10 +108,18 @@ The variables are semantic roles, not appearances. A caller names what a piece o
 Overriding is supported because a surface will occasionally need it, not because varying the look is encouraged. A plugin that overrides nothing gets a coherent `tx`; a plugin that overrides freely gets one that no longer looks like itself.
 
 - A plugin MAY contribute an override for any subset of the variables during initialization, and MUST NOT be required to supply a complete theme.
+- An override MUST be registered under the opaque registry key `theme-override`, which is distinct from the `theme` key the capability itself is registered under. The two carry different values — a theming capability and a partial override — and the [Generic Registry](../plugin-system/index.md#generic-registry) keeps every entry under one key as a distinct member of one snapshot, so a single key could not hold both without a consumer having to tell them apart by shape.
+- Overrides MUST be composed when a theme is resolved for a surface, which happens while a command runs. They MUST NOT be composed during the theme provider's own initialization: the registry shows a plugin only what committed before it, so an override contributed by a later plugin is invisible at that point and composing then would silently drop it.
 - An unspecified variable MUST keep the default theme's appearance, so a one-variable override is a one-variable change.
-- Overrides MUST be composed in the registry's deterministic commit order, and a later override of the same variable MUST win.
+- Overrides MUST be composed over the default theme in the registry's deterministic commit order, and a later override of the same variable MUST win.
 - An override contributed by a plugin that fails initialization MUST NOT be applied, under the atomic-staging rules the [Generic Registry](../plugin-system/index.md#generic-registry) owns.
 - Overriding SHOULD be avoided. A surface that can express itself with the default variables SHOULD do so, and a consumer SHOULD NOT override a variable merely to distinguish itself from another surface.
+
+#### Scenario: An override contributed after the theme provider still applies
+
+- **GIVEN** a plugin composed after the theme plugin registers an override
+- **WHEN** a surface resolves a theme while a command runs
+- **THEN** the override is applied, because composition happens at resolution rather than at the theme provider's initialization
 
 #### Scenario: A partial override leaves the rest alone
 
@@ -118,7 +135,7 @@ Overriding is supported because a surface will occasionally need it, not because
 
 ### Colour Enablement
 
-Whether hues reach the terminal is one decision, made once, for every surface — not a flag each consumer re-derives.
+Whether hues reach a surface is one rule, applied by one owner — not a flag each consumer re-derives. It is resolved per surface rather than per process, because the answer depends on the stream being drawn to and two surfaces in one invocation can differ: a dialog draws to standard error while a printed grid draws to whatever stream its consumer supplies, and one of those can be a terminal while the other is a pipe.
 
 - The theme MUST resolve whether hues are emitted, and every appearance it returns MUST already reflect that decision, so a consumer never tests for colour itself.
 - Hues MUST be disabled when the invoking command was asked to disable colour, when `NO_COLOR` is present in the environment with any value including an empty one, when `TERM` is `dumb`, or when the stream being drawn to is not a TTY.
@@ -148,7 +165,7 @@ Whether hues reach the terminal is one decision, made once, for every surface �
 
 ### Ownership
 
-The theme plugin owns the variable set, the default appearances, the composition of overrides, and the colour-enablement decision. It owns nothing about drawing: it never touches a stream, a renderer, React, or Ink, which is what keeps it testable as a pure resolution of environment plus overrides.
+The theme plugin owns the variable set, the default appearances, the composition of overrides, and the colour-enablement decision. It owns nothing about drawing: it never writes to a stream, never retains one, and never touches a renderer, React, or Ink. The only thing it reads from the stream it is handed is whether that stream is a terminal, which is what keeps it testable as a pure resolution of environment plus TTY-ness plus overrides.
 
 Consumers own the mapping from their own content to a variable. Only the consumer knows that a particular row is failed; only the theme knows what failed should look like.
 
@@ -167,7 +184,7 @@ Theming is a refactor of where an appearance decision is made, not a restyle. If
 - A user-selectable theme, a theme name, a configuration key, and any persistence of a theme choice are out of scope.
 - Background hues, 256-colour and truecolour palettes, underline, italic, strikethrough, and blink are out of scope; the appearance vocabulary is dim, bold, inverse, and one of the eight named hues plus grey.
 - Terminal capability detection beyond `TERM` being `dumb` is out of scope; `tx` does not probe terminfo.
-- Per-surface themes, theme inheritance, cascading scopes, and any selector language are out of scope. There is one theme per process.
+- Per-surface variable sets, theme inheritance, cascading scopes, and any selector language are out of scope. There is one variable set and one composed set of overrides per process; the only thing resolved per surface is [Colour Enablement](#colour-enablement), and it varies only because the stream does.
 - Runtime theme switching, live reloading, and re-rendering on a theme change are out of scope.
 - A public theme type export is out of scope while the only consumers are bundled plugins.
 - Glyph choice is not a theme variable. The glyphs [Dialogs: Presentation](../dialogs/index.md#presentation) fixes remain part of that contract.

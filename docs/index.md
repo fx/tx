@@ -42,6 +42,6 @@
 | 0024 | [Relocate and Cover the Demo](changes/0024-relocate-and-cover-the-demo.md) | [Architecture](specs/architecture/) | draft | — |
 | 0025 | [Guarantee Cell Width by Construction](changes/0025-guarantee-cell-width-by-construction.md) | [Dialogs](specs/dialogs/) | draft | — |
 | 0026 | [Add Theme Variables](changes/0026-add-theme-variables.md) | [Theming](specs/theming/) | draft | — |
-| 0027 | [Add Multi-Cell Select Rows](changes/0027-add-multi-cell-select-rows.md) | [Dialogs](specs/dialogs/) | draft | 0025 |
+| 0027 | [Add Multi-Cell Select Rows](changes/0027-add-multi-cell-select-rows.md) | [Dialogs](specs/dialogs/) | draft | 0025, 0026 |
 | 0028 | [Add the Grid Plugin](changes/0028-add-the-grid-plugin.md) | [Grid](specs/grid/) | draft | 0026 |
 | 0029 | [Add Interactive Grid Row Actions](changes/0029-add-interactive-grid-row-actions.md) | [Grid](specs/grid/) | draft | 0027, 0028 |

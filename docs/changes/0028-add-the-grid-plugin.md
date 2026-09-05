@@ -49,7 +49,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - A new bundled plugin under `plugins/grid/`, composed in `cli.ts` after the theme plugin it consumes.
 - The grid consumes the `theme` capability and supplies the `grid` capability. It claims no namespace and adds no command.
 - The grid does not import React or Ink. Both arrive through the host's injected dependencies, as [Generic Context and Dependencies](../specs/plugin-system/index.md#generic-context-and-dependencies) requires — a directly imported reconciler would be a second copy in the same process, rendering against different internal state than the host's.
-- Printing is verified against an injected stream double, so the "identical bytes through a pipe" guarantee is asserted rather than assumed.
+- The stream printed output goes to arrives on the request rather than being reached for, which is what [Grid: Printing](../specs/grid/index.md#printing) requires and what keeps the plugin off the process's own streams. Printing is verified against an injected stream double, so the "identical bytes through a pipe" guarantee is asserted rather than assumed.
 - The interactive half of [Grid](../specs/grid/) — [Interactive Grid](../specs/grid/index.md#interactive-grid), [Row Actions](../specs/grid/index.md#row-actions), and [Terminal Handover](../specs/grid/index.md#terminal-handover) — is **not** implemented by this change. [Change 0029](./0029-add-interactive-grid-row-actions.md) implements it.
 
 ## Design
@@ -62,7 +62,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 `plugins/grid/render.ts` turns a laid-out grid into elements through the injected React and Ink, resolving every appearance through the theme. It takes the output stream as an argument rather than reaching for one, because a renderer that writes to a stream cannot return a string.
 
-The canvas is sized from the measured grid rather than from the terminal, so the emitted bytes do not depend on how wide the terminal happens to be. The renderer is put in a one-shot, non-interactive mode: no input handler, no alternate screen, no console patching, and no repaint sequences.
+Two widths are in play and they must not be confused. The *layout* width is what a width-dependent layout decides against — only the [flow](../specs/grid/index.md#flow-layout) has one — and it comes from the stream on the request, or eighty columns when that stream reports none, which is what makes a flow through a pipe determinate. The *canvas* width is what the renderer is given, and it is the measured grid's own width rather than the terminal's, so the renderer never pads a line out to the terminal and the emitted bytes do not depend on how wide the terminal happens to be. The renderer is put in a one-shot, non-interactive mode: no input handler, no alternate screen, no console patching, and no repaint sequences.
 
 ### Decisions
 
@@ -75,9 +75,9 @@ The canvas is sized from the measured grid rather than from the terminal, so the
 - **Decision**: control characters are removed from every cell, not escaped or rejected.
   - **Why**: the text is not the consumer's own — it comes from a file, a process, or a network response. Rejecting would turn one bad row into a failed command; escaping would render noise. The printing contract promises no repaint sequences reach the stream, and that has to hold for the payload as received.
   - **Alternatives considered**: rejecting the request; escaping visibly; trusting the consumer.
-- **Decision**: the canvas is the measured grid's width, not the terminal's.
-  - **Why**: it is the only way "identical bytes on a terminal and through a pipe" is achievable. A renderer that sizes itself from the stream produces different output when the stream has no width, and a renderer that probes for one shells out to do it.
-  - **Alternatives considered**: the terminal's width (breaks the guarantee); letting the renderer decide (probes the terminal).
+- **Decision**: the canvas is the measured grid's width, not the terminal's, and the one width-dependent layout falls back to eighty columns.
+  - **Why**: a renderer handed the terminal's width pads every line out to it, so the same grid emits different bytes on a wide terminal and through a pipe. Sizing the canvas from the measurement removes the dependency entirely for a table, which needs no width at all. A flow genuinely does need one, so it reads the stream's — and a fixed eighty when the stream reports none, because "undefined columns" has to resolve to some number and a stated one is reproducible where a renderer's private default is not.
+  - **Alternatives considered**: the terminal's width for the canvas (breaks the guarantee); letting the renderer decide (probes the terminal, and its fallback is undocumented).
 - **Decision**: print and select live in one capability even though only print is implemented here.
   - **Why**: they share every measurement decision. Two capabilities would duplicate the geometry and drift the moment one gained a rule the other did not.
   - **Alternatives considered**: shipping print as its own capability and adding select as a second — a rename or a merge later.
@@ -104,9 +104,9 @@ The canvas is sized from the measured grid rather than from the terminal, so the
   - [ ] Pure-function tests for placement, ordering, the one-column floor, and trailing whitespace
 - [ ] Render and print
   - [ ] `plugins/grid/render.ts` building elements through injected React and Ink, resolving appearances through the theme
-  - [ ] One-shot non-interactive render that terminates, with the canvas sized from the measured grid
+  - [ ] One-shot non-interactive render that terminates, with the canvas sized from the measured grid and the flow's layout width taken from the request's stream, eighty when it reports none
   - [ ] `plugins/grid/index.ts` registering the `grid` capability and claiming no namespace; compose it in `cli.ts` after the theme plugin
-  - [ ] Tests against an injected stream double asserting identical bytes with and without a TTY, no repaint or screen-clearing sequences, and no hue when colour is disabled
+  - [ ] Tests against an injected stream double asserting identical bytes with and without a TTY at one width, the eighty-column fallback for a stream reporting none, no repaint or screen-clearing sequences, and no hue when colour is disabled
 - [ ] Show it in the demo
   - [ ] Add a printed-grid scenario to `demo/`, covered by the demo tests [Change 0024](./0024-relocate-and-cover-the-demo.md) adds
 
