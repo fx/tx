@@ -1,6 +1,6 @@
 /**
- * The demo's catalogue: what each scenario shows and the exact dialog it
- * presents.
+ * The demo's catalogue: what each scenario shows and the exact dialog it asks
+ * or grid it prints.
  *
  * Everything here is a pure value or a pure builder, so the whole catalogue can
  * be asserted without a terminal. Rendering it — and waiting for the person
@@ -94,7 +94,8 @@ export type Surfaces = {
 };
 
 /** One scenario: the line the help text gives it, and the request it presents.
- * The two kinds are the two dialogs there are to show. */
+ * The kinds are the two dialogs there are to show and the grid that prints
+ * instead of asking. */
 export type Scenario =
   | {
       readonly kind: "input";
@@ -506,11 +507,12 @@ const nameWidth = Math.max(...order.map((name) => name.length));
  * being in it. */
 export const usage = `Usage: bun run demo [scenario]
 
-Showcase every dialog: ${order.join(", ")}.
+Showcase every dialog and printed layout: ${order.join(", ")}.
 
 ${order
   .map((name) => `  ${name.padEnd(nameWidth)}  ${scenarios[name].description}`)
   .join("\n")}
 
-A ▸ marks an option that opens a sub-dialog: Enter or → opens it as the next
-column, ← or Esc backs out. Typing always filters the column you are in.`;
+In a dialog, a ▸ marks an option that opens a sub-dialog: Enter or → opens it
+as the next column, ← or Esc backs out, and typing always filters the column
+you are in. A printed layout answers nothing and waits for no key.`;

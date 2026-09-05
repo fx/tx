@@ -1,5 +1,6 @@
 /**
- * Shippable demo showcasing every dialogs-plugin feature.
+ * Shippable demo showcasing every dialogs-plugin and grid-plugin feature:
+ * the dialogs it asks with, and the layouts it prints.
  *
  *   bun run demo              # every scenario, one after another
  *   bun run demo input        # standalone input: blinking caret
