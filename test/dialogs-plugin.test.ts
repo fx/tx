@@ -5472,6 +5472,67 @@ describe("aligned cells and headers", () => {
     expect(with_.join("\n")).toContain("▼ 21");
   });
 
+  /** Two columns may be given the same options array with different headers,
+   * and each is its own column: the second is a question the first did not
+   * answer, so a walk that skipped it would let a column declaring headers its
+   * cells cannot carry render anyway. */
+  test("rejects headers on a column sharing another column's options", async () => {
+    const shared: readonly SelectOption<number>[] = [
+      { cells: ["a", "b"], value: 1 },
+    ];
+    const result = await runRejectedRequest({
+      message: "Root",
+      options: [
+        {
+          label: "Valid",
+          value: 2,
+          dialog: { message: "Two", options: shared, headers: ["A", "B"] },
+        },
+        {
+          label: "Invalid",
+          value: 3,
+          dialog: { message: "One", options: shared, headers: ["Only"] },
+        },
+      ],
+    });
+
+    expect(result.failure).toBeInstanceOf(Error);
+    expect((result.failure as Error).message).toBe(
+      "Select headers require one header for every cell of their column",
+    );
+    expect(result.stderr.text()).toBe("");
+    expect(result.stdin.rawModes).toEqual([]);
+  });
+
+  /**
+   * A header is a row of the same frame, so a terminal with one band row left
+   * cannot have both it and the row a column with nothing visible spends
+   * saying so. The header gives way there: a band of two would take the frame
+   * to the terminal's own height, which Ink reads as full-screen and answers
+   * by clearing what was on screen before the dialog opened.
+   */
+  test("gives up the header where the band has no row for it", async () => {
+    const short = selectChromeHeight + 2;
+    let emptied: readonly string[] = [];
+    const result = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: releases, headers: HEADERS },
+      [
+        "zzz",
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes(noMatchRow));
+          emptied = frameRows(stderr);
+        },
+        ESCAPE,
+      ],
+      terminalOfRows(short),
+    );
+
+    expect(result.value).toBeUndefined();
+    expect(emptied.length).toBeLessThan(short);
+    expect(emptied.join("\n")).toContain(noMatchRow);
+    expect(emptied.join("\n")).not.toContain("Version");
+  });
+
   /** A cell option leading somewhere is marked exactly as a label option is:
    * on the column's right edge, past the last field. */
   test("marks a cell row that opens a sub-dialog", async () => {

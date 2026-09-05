@@ -223,6 +223,15 @@ class TerminalOutput extends PassThrough {
   }
 }
 
+/** Every control sequence the renderer writes around a frame, so a test that
+ * matches on what the reader sees can ignore them. Built from the escape
+ * character rather than written literally, so the source carries no control
+ * character. */
+const CONTROL_SEQUENCE = new RegExp(
+  `${String.fromCharCode(27)}\\[[\\d;?]*[a-zA-Z]`,
+  "g",
+);
+
 /**
  * How long a wait for the dialog to take the terminal is given. Deliberately
  * generous — a first frame is not an animation, and a loaded runner can be
@@ -269,6 +278,41 @@ describe("the demo on a terminal", () => {
     expect(stderr.text()).toContain("Pick a bump");
     expect(stdout.text()).toBe(
       `select: ${JSON.stringify({ value: "patch", values: {} })}\n`,
+    );
+  });
+
+  /** The table scenario driven through the real plugin, which is the only
+   * place the catalogue meets the validations: a column of cells with headers
+   * is either accepted and drawn as a table, or rejected before it renders. */
+  test("draws the table scenario under the headers naming its fields", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new TerminalOutput();
+    const stdout = new TerminalOutput();
+    const context: CommandContext = {
+      cwd: "/work",
+      env: {},
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stderr: stderr as unknown as NodeJS.WriteStream,
+      plugin: { name: "demo" },
+    };
+
+    const running = main(
+      ["demo", "cells"],
+      [themePlugin, dialogsPlugin, demoPlugin],
+      context,
+    );
+    await until(() => stdin.rawModes.includes(true));
+    stdin.write("\r");
+    const exitCode = await running;
+
+    expect(exitCode).toBe(0);
+    const screen = stderr.text().replace(CONTROL_SEQUENCE, "");
+    expect(screen).toContain("Pick a release");
+    expect(screen).toContain("Version");
+    expect(screen).toContain("Published");
+    expect(stdout.text()).toBe(
+      `cells: ${JSON.stringify({ value: "1.6.1", values: {} })}\n`,
     );
   });
 });

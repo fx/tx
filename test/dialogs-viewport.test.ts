@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  affordsBandRows,
   collectingChromeHeight,
   maximumOptionRows,
   optionRowCount,
@@ -414,5 +415,41 @@ describe("a column that draws a header", () => {
     expect(withHeader.count).toBe(maximumOptionRows - 1);
     expect(withHeader.hiddenBelow).toBe(30 - (maximumOptionRows - 1));
     expect(optionWindow(30, 0, 0, ROOMY, false).count).toBe(maximumOptionRows);
+  });
+});
+
+describe("what the band can afford", () => {
+  /** The rows a band may take are the terminal's, less the chrome and the one
+   * row that keeps the whole dialog strictly shorter than the terminal. */
+  test("allows a band that leaves the dialog shorter than the terminal", () => {
+    expect(affordsBandRows(1, selectChromeHeight + 2, false)).toBe(true);
+    expect(affordsBandRows(2, selectChromeHeight + 2, false)).toBe(false);
+    expect(affordsBandRows(2, selectChromeHeight + 3, false)).toBe(true);
+    expect(affordsBandRows(1, collectingChromeHeight + 2, true)).toBe(true);
+    expect(affordsBandRows(2, collectingChromeHeight + 2, true)).toBe(false);
+  });
+
+  /** It answers for the rows `optionRowCount` never counted — the single row a
+   * column whose filter matched nothing spends saying so, and a header drawn
+   * over it. Together they are two band rows where that count said none. */
+  test("answers for the rows the option count never counted", () => {
+    const rows = selectChromeHeight + 2;
+    expect(optionRowCount(0, rows, false, true)).toBe(0);
+    expect(affordsBandRows(1, rows, false)).toBe(true);
+    expect(affordsBandRows(2, rows, false)).toBe(false);
+  });
+
+  /** Consistent with the count, so a window that was granted its rows is never
+   * then told the band cannot hold them. */
+  test("affords every window the option count granted", () => {
+    for (const terminal of [5, 6, 9, 14, 40]) {
+      for (const header of [false, true]) {
+        const count = optionRowCount(30, terminal, false, header);
+        if (count === 0) continue;
+        expect(affordsBandRows(count + (header ? 1 : 0), terminal, false)).toBe(
+          true,
+        );
+      }
+    }
   });
 });

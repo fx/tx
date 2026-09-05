@@ -45,7 +45,7 @@ import type {
   SelectResult,
   TextField,
 } from "./types.ts";
-import { optionRowCount, optionWindow } from "./viewport.ts";
+import { affordsBandRows, optionRowCount, optionWindow } from "./viewport.ts";
 
 /** The prompt the filter row carries, so the row the user types into is
  * distinguishable from the option rows under it. */
@@ -905,20 +905,27 @@ export function createSelectView<T>(
     // one row saying so. Nothing but option rows is in the band: the filter
     // and the overflow counts are set into the frame's edges, so neither can
     // move the list by appearing.
-    // A column's own rows: the options its window draws, or the one row a
-    // column whose filter matched nothing spends saying so, plus the header it
-    // declared. A column drawing nothing draws no header either — a header
-    // over a window the terminal could not afford would be the row that takes
-    // the frame to the terminal's own height.
-    const columnRows = (column: (typeof laid)[number]): number => {
+    // What each column contributes to the band: the options its window draws,
+    // or the one row a column whose filter matched nothing spends saying so,
+    // plus the header it declared.
+    //
+    // The header is decided here rather than inside the column, because it is
+    // the frame's height that decides it. A column drawing nothing draws no
+    // header, and a band with no room for another row gives the header up
+    // rather than taking the frame to the terminal's own height, which is what
+    // Ink reads as full-screen and answers by clearing the screen. The option
+    // rows were budgeted against a header already; the `no match` row was not,
+    // because it is not an option row and `optionRowCount` never counted it.
+    const bands = shown.map((column) => {
       const drawn =
         column.matched.visible.length === 0 ? 1 : column.viewport.count;
-      return drawn === 0 ? 0 : drawn + (drawsHeader(column.level) ? 1 : 0);
-    };
-    const bandRows = shown.reduce(
-      (most, column) => Math.max(most, columnRows(column)),
-      0,
-    );
+      const header =
+        drawn > 0 &&
+        drawsHeader(column.level) &&
+        affordsBandRows(drawn + 1, rows, entryOnScreen);
+      return { rows: drawn === 0 ? 0 : drawn + (header ? 1 : 0), header };
+    });
+    const bandRows = bands.reduce((most, band) => Math.max(most, band.rows), 0);
     const driven = shown.at(-1);
     /** Everything the driven column has off screen, either side of its window
      * together. It is the largest either count can ever reach, so it is the
@@ -999,7 +1006,9 @@ export function createSelectView<T>(
           ? undefined
           : {
               fields: column.matched.fields,
-              headers: column.level.headers,
+              // Named only where the band counted the row it takes, so what is
+              // drawn and what was budgeted cannot come apart.
+              headers: bands[at]?.header ? column.level.headers : [],
               expandable: column.matched.expandable,
             };
       return columnCells(

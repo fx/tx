@@ -41,6 +41,30 @@ function chromeHeight(collecting: boolean): number {
   return collecting ? collectingChromeHeight : selectChromeHeight;
 }
 
+/** The rows the band may take at all: what the terminal has, less the dialog's
+ * own chrome and the one row that keeps the whole dialog strictly shorter than
+ * the terminal. */
+function affordableBandRows(terminalRows: number, collecting: boolean): number {
+  return terminalRows - chromeHeight(collecting) - 1;
+}
+
+/**
+ * Whether a band of this many rows leaves the dialog shorter than the terminal.
+ *
+ * The option rows are budgeted by `optionRowCount`, which already accounts for
+ * a header. This answers for the rows that count budgets nothing about: the
+ * single row a column whose filter matched nothing spends saying so is not an
+ * option row, so nothing has weighed a header drawn over it, and a header and
+ * a `no match` row together are two band rows where the count said none.
+ */
+export function affordsBandRows(
+  bandRows: number,
+  terminalRows: number,
+  collecting: boolean,
+): boolean {
+  return bandRows <= affordableBandRows(terminalRows, collecting);
+}
+
 /** The option rows a select renders, given what is visible, how tall the
  * terminal is, and whether a field is being collected under the list. The `- 1`
  * is load-bearing: Ink treats output as tall as the terminal as full-screen and
@@ -66,7 +90,7 @@ export function optionRowCount(
 ): number {
   if (visibleCount < 1) return 0;
   const headerRows = header ? 1 : 0;
-  const affordable = terminalRows - chromeHeight(collecting) - 1 - headerRows;
+  const affordable = affordableBandRows(terminalRows, collecting) - headerRows;
   if (affordable < 1) return 0;
   return Math.max(
     1,

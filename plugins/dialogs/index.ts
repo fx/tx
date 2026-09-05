@@ -297,8 +297,16 @@ function requireCollectableFields<T>(
  * rather than an option, and why it is the request's own `headers` it checks
  * them against. Every reachable sub-dialog is a column of its own and decides
  * its own shape and its own headers, so every one of them is validated here
- * too, with the same `seen` set stopping on a cyclic graph that the other
- * validations use.
+ * too.
+ *
+ * The cycle guard is on the request rather than on its options list, which is
+ * where the other two validations put theirs. Those read the list alone, so
+ * two requests sharing one list are the same question asked twice; this one
+ * also reads the request's own headers, so they are two different questions —
+ * and a guard keyed on the list would answer the second by skipping it,
+ * letting a column declaring headers its cells cannot carry render anyway.
+ * Keying on the request still terminates, because a cyclic graph revisits the
+ * same request object.
  *
  * Two emptinesses are decided by the rules rather than by a check of their
  * own. An empty cell list is not a list of cells: the option declaring one has
@@ -311,11 +319,11 @@ function requireAlignedCells<T>(
     readonly options: readonly SelectOption<T>[];
     readonly headers?: readonly string[] | undefined;
   },
-  seen: Set<readonly SelectOption<T>[]> = new Set(),
+  seen: Set<object> = new Set(),
 ): void {
   const { options, headers } = request;
-  if (seen.has(options)) return;
-  seen.add(options);
+  if (seen.has(request)) return;
+  seen.add(request);
   /** The cell count this column settled on, and so what every later row of it
    * and its headers are held to. */
   let cells: number | undefined;

@@ -849,6 +849,38 @@ describe("the cells a column of cell options contributes", () => {
     }
   });
 
+  /**
+   * The invariant holds where the column cannot afford even the gaps between
+   * its fields — nine or more fields in the narrowest supported terminal. The
+   * fields fall to nothing and the assembled row is cut to the column by the
+   * same `padToWidth` a single over-long label goes through, so what the frame
+   * receives is already exactly the column's width and its own row truncation
+   * stays the guard it is rather than the thing that made the row fit.
+   */
+  test("stays exactly its column's width when the gaps alone do not fit", () => {
+    const many = cellRows(Array.from({ length: 10 }, (_, at) => `c${at}`));
+    const measured = fieldWidths([many[0]?.cells as readonly string[]]);
+    for (const column of [12, 16, 20, 30]) {
+      const cells = columnCells(
+        many,
+        allOf(many),
+        window(0, 1, 1),
+        0,
+        column,
+        1,
+        DRIVEN,
+        layout(measured),
+      );
+
+      expect(displayWidth(drawn(cells[0]))).toBe(column);
+    }
+    // The fields nearest the front are the ones that survive, so a column with
+    // room for one of them shows the first rather than a row of ellipses.
+    expect(fitFieldWidths(measured, 20)).toEqual([
+      2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+  });
+
   /** A field that does not fit loses its own characters at its end. The
    * alternative is a row cut as one run, which drops the last field of every
    * row rather than narrowing anything — the caller-side failure the shape
