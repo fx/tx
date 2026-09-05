@@ -3,8 +3,11 @@ import { PassThrough } from "node:stream";
 import { demoPlugin } from "../demo/index.ts";
 import {
   type Dialogs,
+  type Grid,
+  type GridRequest,
   type InputRequest,
   order,
+  type PrintRequest,
   type ScenarioName,
   type SelectRequest,
   type SelectResult,
@@ -12,6 +15,7 @@ import {
 } from "../demo/scenarios.ts";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import gridPlugin from "../plugins/grid/index.ts";
 import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
@@ -21,7 +25,8 @@ import { captureContext } from "./helpers.ts";
  * observable behavior besides what it prints. */
 type Asked =
   | { readonly kind: "input"; readonly request: InputRequest }
-  | { readonly kind: "select"; readonly request: SelectRequest<unknown> };
+  | { readonly kind: "select"; readonly request: SelectRequest<unknown> }
+  | { readonly kind: "grid"; readonly request: PrintRequest };
 
 /**
  * A dialogs provider that answers without rendering. It stands in for the
@@ -57,8 +62,28 @@ function stubDialogs(
   };
 }
 
+/**
+ * A grid provider that records what it was asked to print without drawing
+ * anything, so the assertions about the runner — which scenario it presents,
+ * in which order, and what it prints — neither need a canvas nor measure one.
+ */
+function stubGrid(asked: Asked[]): PluginDefinition {
+  return {
+    identity: { name: "grid" },
+    load:
+      () =>
+      ({ register }) => {
+        register<Grid>("grid", {
+          print({ stream: _stream, ...request }: GridRequest) {
+            asked.push({ kind: "grid", request });
+          },
+        });
+      },
+  };
+}
+
 /** The demo run headless: the runner over injected streams, against whichever
- * dialogs provider the case is about. */
+ * providers the case is about. */
 async function runDemo(
   argv: readonly string[],
   providers: readonly PluginDefinition[],
@@ -76,9 +101,23 @@ async function runDemo(
   };
 }
 
-/** The line the runner prints for one answered scenario. */
+/** The line the runner prints for one answered scenario. A printed grid gets
+ * none: the grid is the output. */
 function reported(name: ScenarioName, result: unknown): string {
   return `${name}: ${JSON.stringify(result)}\n`;
+}
+
+/** Every styling sequence removed, so an assertion about a printed grid is
+ * about the columns rather than about the theme. The pattern is built rather
+ * than written as a literal: a control character in a regular expression is
+ * unreadable, and the linter rejects one. */
+const stylingSequence = new RegExp(
+  `${String.fromCharCode(0x1b)}\\[[0-9;]*m`,
+  "gu",
+);
+
+function unstyled(output: string): string {
+  return output.replace(stylingSequence, "");
 }
 
 /** The answer a select resolves with when the person takes the first row. */
@@ -96,8 +135,9 @@ describe("the demo runner", () => {
       ["demo"],
       [
         stubDialogs(asked, (call) =>
-          call.kind === "input" ? "spring" : firstRow(call.request),
+          call.kind === "select" ? firstRow(call.request) : "spring",
         ),
+        stubGrid(asked),
       ],
     );
 
@@ -110,6 +150,7 @@ describe("the demo runner", () => {
       order
         .map((name) => {
           const scenario = scenarios[name];
+          if (scenario.kind === "grid") return "";
           return reported(
             name,
             scenario.kind === "input" ? "spring" : firstRow(scenario.request),
@@ -128,6 +169,7 @@ describe("the demo runner", () => {
         stubDialogs(asked, (call) =>
           call.kind === "select" ? firstRow(call.request) : undefined,
         ),
+        stubGrid(asked),
       ],
     );
 
@@ -143,7 +185,7 @@ describe("the demo runner", () => {
 
     const { exitCode, stdout } = await runDemo(
       ["demo", "input"],
-      [stubDialogs(asked)],
+      [stubDialogs(asked), stubGrid(asked)],
     );
 
     expect(exitCode).toBe(0);
@@ -165,12 +207,45 @@ describe("the demo runner", () => {
     expect(asked).toEqual([]);
   });
 
+  test("prints a grid instead of reporting an answer", async () => {
+    const asked: Asked[] = [];
+
+    const { exitCode, stdout } = await runDemo(
+      ["demo", "grid"],
+      [stubDialogs(asked), themePlugin, gridPlugin],
+    );
+
+    expect(exitCode).toBe(0);
+    expect(asked).toEqual([]);
+    expect(stdout).not.toContain("grid:");
+    // The real grid, so the demo is showing what a consumer would get: a
+    // header row, columns aligned to one width, and a summary beneath.
+    expect(unstyled(stdout).split("\n").slice(0, 2)).toEqual([
+      "PACKAGE         STATUS   TESTS",
+      "core            ready      128",
+    ]);
+    expect(stdout).toContain("5 packages");
+  });
+
   test("fails when nothing provides the dialogs capability", async () => {
     const { exitCode, stdout, stderr } = await runDemo(["demo"], []);
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe("");
     expect(stderr).toContain("dialogs capability missing");
+  });
+
+  test("fails when nothing provides the grid capability", async () => {
+    const asked: Asked[] = [];
+
+    const { exitCode, stdout, stderr } = await runDemo(
+      ["demo"],
+      [stubDialogs(asked)],
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("grid capability missing");
   });
 });
 
@@ -267,7 +342,7 @@ describe("the demo on a terminal", () => {
 
     const running = main(
       ["demo", "select"],
-      [themePlugin, dialogsPlugin, demoPlugin],
+      [themePlugin, dialogsPlugin, gridPlugin, demoPlugin],
       context,
     );
     await until(() => stdin.rawModes.includes(true));
@@ -299,7 +374,7 @@ describe("the demo on a terminal", () => {
 
     const running = main(
       ["demo", "cells"],
-      [themePlugin, dialogsPlugin, demoPlugin],
+      [themePlugin, dialogsPlugin, gridPlugin, demoPlugin],
       context,
     );
     await until(() => stdin.rawModes.includes(true));

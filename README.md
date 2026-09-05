@@ -72,14 +72,14 @@ Marketplace plugins, dependencies, and install scripts are not sandboxed and run
 
 ## Demo
 
-`bun run demo` walks through every dialog the bundled dialogs plugin renders, one scenario after another; `bun run demo <scenario>` runs a single one, and `bun run demo --help` lists them.
+`bun run demo` walks through every dialog the bundled dialogs plugin renders and every layout the bundled grid plugin prints, one scenario after another; `bun run demo <scenario>` runs a single one, and `bun run demo --help` lists them.
 
 ```sh
 bun run demo
 bun run demo nested
 ```
 
-The demo runs from a source checkout with dependencies installed. It is not part of the published package's `files` allowlist, because it imports `plugins/dialogs/index.ts` and `src/cli.ts` by relative path and neither is published. It renders on standard error and prints results on standard output, so redirecting the results still shows the dialogs.
+The demo runs from a source checkout with dependencies installed. It is not part of the published package's `files` allowlist, because it imports `plugins/dialogs/index.ts`, `plugins/grid/index.ts`, and `src/cli.ts` by relative path and none of them is published. It renders dialogs on standard error and prints results and grids on standard output, so redirecting the results still shows the dialogs.
 
 ## Releases
 

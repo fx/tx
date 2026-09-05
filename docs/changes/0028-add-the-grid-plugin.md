@@ -5,7 +5,7 @@
 Add a bundled grid plugin supplying a `grid` capability that prints aligned cells — a table with headers, or a flowed list — once and terminates. This is the half of the grid a plugin needs before it needs anything interactive.
 
 **Spec:** [Grid](../specs/grid/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0026
 
 ## Motivation
@@ -56,11 +56,11 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ### Approach
 
-`plugins/grid/geometry.ts` holds every layout decision as pure functions over values: column widths from cells and headers, the gap, padding and alignment, flow placement, and where the empty and summary lines go. It imports nothing but the display-width measure.
+`plugins/grid/geometry.ts` holds every layout decision as pure functions over values: column widths from cells and headers, the gap, padding and alignment, flow placement, and where the empty and summary lines go. It knows no renderer, no theme, and no stream: it names a variable rather than resolving one and answers in numbers and text rather than in frames. Its only import is its sibling `cells.ts`, for the display-width measure and the normalization every layout starts from — which is what keeps the choice between the two layouts, and the padding rule each of them needs, in the one module rather than split across the module that composes them.
 
 `plugins/grid/cells.ts` holds normalization: control-character removal, the placeholder for an empty cell, and filling a short row out to the column count. The removal is applied to every consumer-supplied string the grid renders — headers, the empty message, the summary, a selecting request's message and an action's label as well as a cell's text — and to everything handed to [Dialogs](../specs/dialogs/) on the selecting path, as [Grid: Cell Values](../specs/grid/index.md#cell-values) requires, because a guarantee about what reaches the terminal that held for only some strings would not be a guarantee.
 
-`plugins/grid/render.ts` turns a laid-out grid into elements through the injected React and Ink, resolving every appearance through the theme. It takes the output stream as an argument rather than reaching for one, because a renderer that writes to a stream cannot return a string.
+`plugins/grid/render.ts` turns a laid-out grid into elements through the injected React and Ink, resolving every appearance through the theme, and writes the result to the stream the request carries rather than to one it reached for. It draws in a single synchronous pass to a string and writes that string once: no terminal session is opened, so there is no input handler to install, no alternate screen to enter, no console to patch, and no repaint sequence to emit — the guarantees [Printing](../specs/grid/index.md#printing) makes hold by construction rather than by configuration, and `print` can return `void` because nothing is left in flight when it does.
 
 Two widths are in play and they must not be confused. The *layout* width is what a width-dependent layout decides against — only the [flow](../specs/grid/index.md#flow-layout) has one — and it comes from the stream on the request, or eighty columns when that stream reports none, which is what makes a flow through a pipe determinate. The *canvas* width is what the renderer is given, and it is the measured grid's own width rather than the terminal's, so the renderer never pads a line out to the terminal and the emitted bytes do not depend on how wide the terminal happens to be. The renderer is put in a one-shot, non-interactive mode: no input handler, no alternate screen, no console patching, and no repaint sequences.
 
@@ -95,26 +95,26 @@ Two widths are in play and they must not be confused. The *layout* width is what
 
 ## Tasks
 
-- [ ] Add the grid plugin's geometry and cells
-  - [ ] `plugins/grid/cells.ts` — control-character removal over every rendered string, the `—` placeholder for an empty cell only, the column count, and short-row filling
-  - [ ] `plugins/grid/geometry.ts` — column widths over cells and headers, gap, padding, start and end alignment, and the no-trailing-whitespace rule
-  - [ ] Pure-function tests for widths over wide and astral characters, alignment, the empty and summary lines including an empty grid that still carries a summary, trailing whitespace, the column count over ragged rows and a longer header row, and control-character removal in every rendered string
-- [ ] Add the flow layout
-  - [ ] Flow placement in `geometry.ts`: rows flattened to items in row then cell order, equal columns, down-then-across order, one column when nothing more fits, headers and per-cell alignment ignored, the empty and summary lines as in a table
-  - [ ] Pure-function tests for placement, ordering, a multi-cell row contributing several items, the one-column floor, and trailing whitespace
-- [ ] Render and print
-  - [ ] `plugins/grid/render.ts` building elements through injected React and Ink, resolving appearances through the theme
-  - [ ] One-shot non-interactive render that terminates, with the canvas sized from the measured grid and the flow's layout width taken from the request's stream, eighty when it reports none
-  - [ ] `plugins/grid/index.ts` registering the `grid` capability and claiming no namespace; compose it in `cli.ts` after the theme plugin
-  - [ ] Tests against an injected stream double asserting identical bytes with and without a TTY at one width, the eighty-column fallback for a stream reporting none, no repaint or screen-clearing sequences, and no hue when colour is disabled
-- [ ] Show it in the demo
-  - [ ] Add a printed-grid scenario to `demo/`, covered by the demo tests [Change 0024](./0024-relocate-and-cover-the-demo.md) adds
+- [x] Add the grid plugin's geometry and cells
+  - [x] `plugins/grid/cells.ts` — control-character removal over every rendered string, the `—` placeholder for an empty cell only, the column count, and short-row filling
+  - [x] `plugins/grid/geometry.ts` — column widths over cells and headers, gap, padding, start and end alignment, and the no-trailing-whitespace rule
+  - [x] Pure-function tests for widths over wide and astral characters, alignment, the empty and summary lines including an empty grid that still carries a summary, trailing whitespace, the column count over ragged rows and a longer header row, and control-character removal in every rendered string
+- [x] Add the flow layout
+  - [x] Flow placement in `geometry.ts`: rows flattened to items in row then cell order, equal columns, down-then-across order, one column when nothing more fits, headers and per-cell alignment ignored, the empty and summary lines as in a table
+  - [x] Pure-function tests for placement, ordering, a multi-cell row contributing several items, the one-column floor, and trailing whitespace
+- [x] Render and print
+  - [x] `plugins/grid/render.ts` building elements through injected React and Ink, resolving appearances through the theme
+  - [x] One-shot non-interactive render that terminates, with the canvas sized from the measured grid and the flow's layout width taken from the request's stream, eighty when it reports none
+  - [x] `plugins/grid/index.ts` registering the `grid` capability and claiming no namespace; compose it in `cli.ts` after the theme plugin
+  - [x] Tests against an injected stream double asserting identical bytes with and without a TTY at one width, the eighty-column fallback for a stream reporting none, no repaint or screen-clearing sequences, and no hue when colour is disabled
+- [x] Show it in the demo
+  - [x] Add a printed-grid scenario to `demo/`, covered by the demo tests [Change 0024](./0024-relocate-and-cover-the-demo.md) adds
 
 ## Open Questions
 
-- [ ] Whether the flow layout should ship in this change at all, given no bundled consumer produces one — it is specified because the capability is named for cells rather than tables, but it could be split into its own change and land when something needs it.
+- [x] Whether the flow layout should ship in this change at all, given no bundled consumer produces one — it is specified because the capability is named for cells rather than tables, but it could be split into its own change and land when something needs it. **Resolved: it ships now, in this change.** The reason is that splitting it would have cost more than keeping it. A flow is not a second layout engine: it is the same measured cells with a different placement, and the placement is about thirty lines over values the table layout already produces. Deferring it would have meant shipping a capability named `grid` that could only draw tables, which invites the second capability the naming decision above exists to avoid, and it would have left the width-dependent half of [Printing](../specs/grid/index.md#printing) — the stream's own width, the stated eighty-column fallback, and the guarantee that a piped grid is determinate — with nothing exercising it, because a table needs no width at all. The demo now prints one, so the layout has a consumer in the repository even though no bundled command produces one yet.
 - [ ] What a printed table should do when the terminal is narrower than its natural width, beyond not re-flowing — [Grid: Open Questions](../specs/grid/index.md#open-questions) leaves it undecided and the answer likely depends on a real consumer's columns.
-- [ ] Whether the summary line belongs to the grid at all, or whether a consumer should simply print its own line after the grid — it is here because a summary under a table is near-universal and its blank-line spacing is a layout decision.
+- [x] Whether the summary line belongs to the grid at all, or whether a consumer should simply print its own line after the grid — it is here because a summary under a table is near-universal and its blank-line spacing is a layout decision. **Resolved: it stays in the grid.** Implementing it made the reason concrete rather than stylistic: whether a blank line precedes the summary depends on whether the grid printed rows, printed its empty message, or printed neither, and only the grid knows which of the three happened. A consumer printing its own line would have to reproduce that test — and would get it wrong exactly in the case it never sees, which is the empty one. The three-way rule is eight lines in `decorate` and is directly testable there.
 
 ## References
 

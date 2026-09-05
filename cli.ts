@@ -3,6 +3,7 @@
 import configPlugin from "./plugins/config/index.ts";
 import dialogsPlugin from "./plugins/dialogs/index.ts";
 import executablePlugin from "./plugins/executable/index.ts";
+import gridPlugin from "./plugins/grid/index.ts";
 import marketplacePlugin from "./plugins/marketplace/index.ts";
 import themePlugin from "./plugins/theme/index.ts";
 import updatePlugin from "./plugins/update/index.ts";
@@ -25,13 +26,15 @@ import type { PluginDefinition } from "./src/plugin.ts";
  * makes that correct — a consumer resolves a theme when its command runs, by
  * which point every plugin has committed — but composing a provider ahead of
  * its consumers is what this ordered list is for, and an override contributed
- * by anything after it still applies.
+ * by anything after it still applies. The dialogs and grid plugins are two of
+ * those surfaces, and they sit after it for that reason.
  */
 export const defaultPlugins: readonly PluginDefinition[] = Object.freeze([
   marketplacePlugin,
   updatePlugin,
   themePlugin,
   dialogsPlugin,
+  gridPlugin,
   configPlugin,
   executablePlugin,
 ]);

@@ -467,6 +467,49 @@ A dialog animates on one subscription for all three, which is active exactly whi
 
 Both dialogs are built on the same render session and obey the same cleanup contract, and a `select` that collects fields is one such session for the whole interaction: it does not unmount, restore terminal state, or settle between its selection and field stages. Completion, cancellation, rendering failure, and interaction failure all finish renderer unmounting, restoration of the prior terminal/input state, listener teardown, and pending output before the promise fulfills or rejects. If an injected raw-mode disable, unref, or renderer unmount method persistently throws, the provider retries finitely and rejects with the first applicable cleanup failure; restoration or renderer teardown is necessarily best-effort only on that exceptional path. There is no non-interactive fallback, concurrency policy, nested-dialog support, or multi-provider selection policy.
 
+## Use the bundled grid capability
+
+The namespace-free bundled grid provider registers one internal capability under the exact opaque key `grid`. It exists so that a plugin with rows to show does not have to own column measurement, display-width arithmetic, colour resolution, canvas sizing, or a renderer lifecycle. Its current local structural shape is:
+
+```ts
+type Cell = {
+  readonly text: string
+  readonly variable?: ThemeVariable
+  readonly align?: "start" | "end"
+}
+
+type Row = readonly (Cell | string)[]
+
+type OutputStream = {
+  write(chunk: string): unknown
+  readonly columns?: number
+  readonly isTTY?: boolean
+}
+
+type Grid = {
+  print(request: {
+    readonly stream: OutputStream
+    readonly layout?: "table" | "flow"
+    readonly headers?: readonly string[]
+    readonly rows: readonly Row[]
+    readonly empty?: string
+    readonly summary?: string
+  }): void
+}
+```
+
+A bundled consumer declares that compatible type locally and reads `registrations<Grid>("grid")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
+
+A cell supplied as a bare string is exactly the cell that string would make with no variable and no alignment, so a row may mix the two notations freely. An absent `variable` names `content`; an absent `align` names `start`. Every string the grid renders — a cell's text, a header, the empty message, and the summary — has its control characters removed before it is measured or drawn, so text carrying a newline or an escape sequence can neither break the layout apart nor reach the terminal as a command, and nothing else about the string is changed. Text is measured in terminal display columns rather than code units. A cell left empty after that removal renders as `—`; a header, an empty message, and a summary are the consumer's to leave blank and never get the placeholder. A grid's column count is the most cells any one row supplies, or the number of headers where there are more of those, and a short row's missing trailing cells render as the placeholder rather than shortening the row.
+
+A table aligns every cell of a column to the widest cell in it, the header included, separates columns by two spaces, and pads the final column not at all, so no line ends in a space. A cell declaring `end` is padded at its start instead, which is what lines a column of counts up on its digits. A supplied header row is drawn once above the rows and emphasized; a supplied summary is drawn once beneath them, de-emphasized and separated by one blank line. A grid with no rows prints its empty message where the rows would have been and no header row over nothing, and a summary is separated from that message by the same blank line; a grid with no rows and no empty message prints a supplied summary alone. A grid with nothing to say writes nothing at all.
+
+A flow is the same cells with no column meaning: the cells of every row flattened in row then cell order, placed into as many equal columns as the width affords and read down each column before across, one column when it affords no more. A flow ignores a supplied header row and a cell's declared alignment — neither has anything to mean without columns of fixed meaning — while a cell's declared variable is still honoured. The empty message and the summary behave exactly as they do in a table, so the two layouts differ only in how the cells are placed. A request declaring no layout is a table, which is the only layout that needs no width at all.
+
+Printing writes to the stream on the request and never to the process's own standard output or error, and it does not require that stream to be interactive. It renders once and returns: no input handler, no alternate screen, no patched console, and no cursor-positioning, screen-clearing, or repaint sequence in what it wrote. The width a width-dependent layout decides against is the one the stream reports, and a stream whose `columns` is absent is read as eighty, so a flow through a pipe still produces one determinate answer. The canvas is sized from the measured grid rather than from the terminal, so the bytes printed are the same on a terminal and through a pipe apart from the hues the colour decision above drops.
+
+Sorting, grouping, filtering, and paginating the supplied rows are out of scope, as are machine-readable output, borders and box drawing, spanning and wrapped cells, caller-specified widths, and value formatting of every kind — a duration, a timestamp, and a byte count are the consumer's to render into a string before it hands one over.
+
 ## One namespace per plugin
 
 `command(build)` hands you your plugin's namespace: a command object named after your plugin's identity and already attached to the tree tx dispatches. Declaring commands, subcommands of any depth, arguments, options, and descriptions beneath it requires no parser dependency of your own. If you also want the parser itself — to build a detached command, share option definitions, or reuse its helpers — take it from `dependencies.commander` so you share the host's instance.
