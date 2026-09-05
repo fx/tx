@@ -44,4 +44,4 @@
 | 0026 | [Add Theme Variables](changes/0026-add-theme-variables.md) | [Theming](specs/theming/) | complete | — |
 | 0027 | [Add Multi-Cell Select Rows](changes/0027-add-multi-cell-select-rows.md) | [Dialogs](specs/dialogs/) | complete | 0025, 0026 |
 | 0028 | [Add the Grid Plugin](changes/0028-add-the-grid-plugin.md) | [Grid](specs/grid/) | complete | 0026 |
-| 0029 | [Add Interactive Grid Row Actions](changes/0029-add-interactive-grid-row-actions.md) | [Grid](specs/grid/) | draft | 0027, 0028 |
+| 0029 | [Add Interactive Grid Row Actions](changes/0029-add-interactive-grid-row-actions.md) | [Grid](specs/grid/) | complete | 0027, 0028 |

@@ -81,8 +81,36 @@ export type PrintRequest = {
   readonly summary?: string;
 };
 export type GridRequest = PrintRequest & { readonly stream: OutputStream };
+/** One thing a consumer offers to do with a row. What the value means belongs
+ * to the consumer: the grid reports it and never runs it. */
+export type GridAction<A> = {
+  readonly label: string;
+  readonly value: A;
+};
+/** One selectable row: its cells, the value identifying it, and the actions it
+ * offers. An empty action list means the row offers none, exactly as omitting
+ * it does. */
+export type GridSelectRow<T, A> = {
+  readonly cells: Row;
+  readonly value: T;
+  readonly actions?: readonly GridAction<A>[];
+};
+/** A grid presented for selection. It carries no stream: a dialog draws
+ * through the streams the dialogs capability was injected with. */
+export type GridSelectRequest<T, A> = {
+  readonly message: string;
+  readonly headers?: readonly string[];
+  readonly rows: readonly GridSelectRow<T, A>[];
+};
+export type GridSelection<T, A> = {
+  readonly value: T;
+  readonly action?: A;
+};
 export type Grid = {
   print(request: GridRequest): void;
+  select<T, A>(
+    request: GridSelectRequest<T, A>,
+  ): Promise<GridSelection<T, A> | undefined>;
 };
 
 /** The surfaces a scenario is presented on: the dialogs it drives, the grid it
@@ -111,6 +139,11 @@ export type Scenario =
       readonly kind: "grid";
       readonly description: string;
       readonly request: PrintRequest;
+    }
+  | {
+      readonly kind: "rows";
+      readonly description: string;
+      readonly request: GridSelectRequest<string, string>;
     };
 
 const branches = [
@@ -303,6 +336,89 @@ const releases: SelectRequest<string> = {
   ],
 };
 
+/** One service the fleet holds, before anything turns it into a row. */
+type Service = {
+  readonly name: string;
+  readonly environment: string;
+  readonly state: "running" | "degraded" | "retired";
+  readonly uptime: string;
+};
+
+const services: readonly Service[] = [
+  { name: "api", environment: "production", state: "running", uptime: "12d" },
+  {
+    name: "worker",
+    environment: "production",
+    state: "running",
+    uptime: "12d",
+  },
+  {
+    name: "scheduler",
+    environment: "staging",
+    state: "degraded",
+    uptime: "4h",
+  },
+  {
+    name: "国际化-i18n 😀",
+    environment: "staging",
+    state: "running",
+    uptime: "3d",
+  },
+  {
+    name: "legacy-import",
+    environment: "production",
+    state: "retired",
+    uptime: "—",
+  },
+];
+
+/** What a state's cell says it is. The role is dropped when the row is
+ * presented for selection and kept when the same cells are printed, which is
+ * what makes the pair a comparison rather than an omission. */
+const stateVariables: Readonly<Record<Service["state"], ThemeVariable>> = {
+  running: "positive",
+  degraded: "caution",
+  retired: "muted",
+};
+
+/**
+ * The actions a service offers, computed from its state rather than declared
+ * once for the grid — which is the shape a consumer writes, and the shape that
+ * lets a retired service offer none while its neighbours offer three. An empty
+ * list means the row declares no actions and is taken on the row alone; it is
+ * not a request the grid rejects.
+ */
+function serviceActions(
+  state: Service["state"],
+): readonly GridAction<string>[] {
+  if (state === "retired") return [];
+  return [
+    { label: "connect", value: "connect" },
+    { label: "open logs", value: "logs" },
+    { label: "restart", value: "restart" },
+  ];
+}
+
+/**
+ * A fleet to drive: rows that identify themselves, actions computed per row,
+ * one row left with none, and a name whose glyphs take two terminal columns
+ * each so the fields are visibly measured rather than guessed.
+ */
+const fleet: GridSelectRequest<string, string> = {
+  message: "Pick a service",
+  headers: ["SERVICE", "ENVIRONMENT", "STATE", "UPTIME"],
+  rows: services.map((service) => ({
+    cells: [
+      service.name,
+      service.environment,
+      { text: service.state, variable: stateVariables[service.state] },
+      { text: service.uptime, align: "end" },
+    ],
+    value: service.name,
+    actions: serviceActions(service.state),
+  })),
+};
+
 /** The order the scenarios run in when the demo is given no argument, and so
  * the order the help text lists them in. */
 export const order = [
@@ -317,6 +433,7 @@ export const order = [
   "leaf",
   "grid",
   "flow",
+  "rows",
 ] as const;
 
 export type ScenarioName = (typeof order)[number];
@@ -481,6 +598,15 @@ export const scenarios = {
       summary: `${packages.length} packages`,
     },
   },
+
+  rows: {
+    kind: "rows",
+    // The driven half of the same capability: the rows are a select, a row's
+    // actions are the column it opens, and the answer carries both. Enter on
+    // `legacy-import` resolves on the row alone, because it declares none.
+    description: "interactive grid: pick a row, then what to do with it",
+    request: fleet,
+  },
 } as const satisfies Record<ScenarioName, Scenario>;
 
 /** Presents one scenario and resolves with what the person answered, or
@@ -497,6 +623,7 @@ export async function present(
     grid.print({ ...scenario.request, stream });
     return undefined;
   }
+  if (scenario.kind === "rows") return await grid.select(scenario.request);
   return await dialogs.select(scenario.request);
 }
 
@@ -515,4 +642,6 @@ ${order
 
 In a dialog, a ▸ marks an option that opens a sub-dialog: Enter or → opens it
 as the next column, ← or Esc backs out, and typing always filters the column
-you are in. A printed layout answers nothing and waits for no key.`;
+you are in. A printed layout answers nothing and waits for no key, while an
+interactive one is driven exactly like any other dialog: a row that offers
+actions opens them as the next column, and the answer names both.`;

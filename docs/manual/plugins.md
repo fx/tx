@@ -486,6 +486,17 @@ type OutputStream = {
   readonly isTTY?: boolean
 }
 
+type GridAction<A> = {
+  readonly label: string
+  readonly value: A
+}
+
+type GridSelectRow<T, A> = {
+  readonly cells: Row
+  readonly value: T
+  readonly actions?: readonly GridAction<A>[]
+}
+
 type Grid = {
   print(request: {
     readonly stream: OutputStream
@@ -495,12 +506,19 @@ type Grid = {
     readonly empty?: string
     readonly summary?: string
   }): void
+  select<T, A>(request: {
+    readonly message: string
+    readonly headers?: readonly string[]
+    readonly rows: readonly GridSelectRow<T, A>[]
+  }): Promise<
+    { readonly value: T; readonly action?: A } | undefined
+  >
 }
 ```
 
 A bundled consumer declares that compatible type locally and reads `registrations<Grid>("grid")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
 
-A cell supplied as a bare string is exactly the cell that string would make with no variable and no alignment, so a row may mix the two notations freely. An absent `variable` names `content`; an absent `align` names `start`. Every string the grid renders — a cell's text, a header, the empty message, and the summary — has its control characters removed before it is measured or drawn, so text carrying a newline or an escape sequence can neither break the layout apart nor reach the terminal as a command, and nothing else about the string is changed. Text is measured in terminal display columns rather than code units. A cell left empty after that removal renders as `—`; a header, an empty message, and a summary are the consumer's to leave blank and never get the placeholder. A grid's column count is the most cells any one row supplies, or the number of headers where there are more of those, and a short row's missing trailing cells render as the placeholder rather than shortening the row.
+A cell supplied as a bare string is exactly the cell that string would make with no variable and no alignment, so a row may mix the two notations freely. An absent `variable` names `content`; an absent `align` names `start`. Every string the grid renders — a cell's text, a header, the empty message, the summary, a selecting request's message, and an action's label — has its control characters removed before it is measured or drawn, and that removal is applied to every string it hands the dialogs capability too, so text carrying a newline or an escape sequence can neither break the layout apart nor reach the terminal as a command, and nothing else about the string is changed. Text is measured in terminal display columns rather than code units. A cell left empty after that removal renders as `—`; a header, an empty message, and a summary are the consumer's to leave blank and never get the placeholder. A grid's column count is the most cells any one row supplies, or the number of headers where there are more of those, and a short row's missing trailing cells render as the placeholder rather than shortening the row.
 
 A table aligns every cell of a column to the widest cell in it, the header included, separates columns by two spaces, and pads the final column not at all, so the grid adds no trailing whitespace to a line. That is what not padding achieves rather than a licence to trim: a cell whose own text ends in spaces still prints with them, exactly as every other character it was handed does. A cell declaring `end` is padded at its start instead, which is what lines a column of counts up on its digits. A supplied header row is drawn once above the rows and emphasized; a supplied summary is drawn once beneath them, de-emphasized and separated by one blank line. A grid with no rows prints its empty message where the rows would have been and no header row over nothing, and a summary is separated from that message by the same blank line; a grid with no rows and no empty message prints a supplied summary alone. A grid with nothing to say writes nothing at all.
 
@@ -508,7 +526,64 @@ A flow is the same cells with no column meaning: the cells of every row flattene
 
 Printing writes to the stream on the request and never to the process's own standard output or error, and it does not require that stream to be interactive. It renders once and returns: no input handler, no alternate screen, no patched console, and no cursor-positioning, screen-clearing, or repaint sequence in what it wrote. The width a width-dependent layout decides against is the one the stream reports, and a stream whose `columns` is absent is read as eighty, so a flow through a pipe still produces one determinate answer. The canvas is sized from the measured grid rather than from the terminal, so the bytes printed are the same on a terminal and through a pipe apart from the hues the colour decision above drops.
 
-Sorting, grouping, filtering, and paginating the supplied rows are out of scope, as are machine-readable output, borders and box drawing, spanning and wrapped cells, caller-specified widths, and value formatting of every kind — a duration, a timestamp, and a byte count are the consumer's to render into a string before it hands one over.
+`select` is the same cells driven rather than printed. It presents the rows as the options of a select supplied by the dialogs capability above, so movement, filtering, the viewport, the cursor bar, and cancellation are exactly that capability's and nothing about them is re-implemented or re-specified here — including its rejections, which it raises before any terminal state changes: a grid with no rows, rows carrying no cells at all, and the non-interactive standard input or standard error a dialog cannot run on. It reads the dialogs capability while your command runs, exactly as it reads the theme, and fails with an error naming the count where a `tx` is composed without exactly one dialogs provider. A selecting request carries no stream: the dialog draws through the streams it was injected with, which is what the handover guarantee below depends on.
+
+Every row carries the value that identifies it, so a row you cannot identify is unrepresentable rather than rejected, and there is no list running parallel to the rows to fall out of step with them. Rows are padded to the grid's column count with the same `—` a printed one uses, so a set of rows differing in cell count is laid out rather than rejected. A cell's declared `variable` and `align` do not survive: a select takes an option's cells as display text and draws its cursor bar as the inversion alone, so every cell of a selectable row is drawn as `content` whatever role it declared. Put a row's state in a cell's text where it has to be visible while selecting.
+
+A row's `actions` are the sub-dialog that row opens, so acting on a row is the drilling sub-dialog columns already own rather than a second mechanism beside it — Enter or → opens the actions of the row under the bar, ← or Esc backs out to the rows, and no key is introduced. Actions are declared per row, so two rows may offer different ones; an empty list means the row declares none, exactly as omitting it does, and such a row is taken by Enter and resolves on the row alone. A selection reports both halves — the chosen row's `value` and the chosen `action` — so you never reconstruct one from the other. An absent `action` means the chosen row offered none: backing out of an actions column returns to the rows rather than selecting the row without one. **Absent means the key is not there, so test it with `"action" in chosen` rather than `chosen.action === undefined`.** An action's value is yours and is never inspected, so `undefined` is a value you may legitimately give one; a selection carrying it is a row that offered actions and had one taken, which the equality test would misread as a row that offered none. The grid never writes the key it does not mean.
+
+Once the promise settles, the terminal is yours. `select` does not settle until the dialog has restored the terminal and unmounted its renderer, on completion, cancellation, and failure alike, so the process you start next finds no raw mode, no input handler the grid installed, and nothing further written by it. Standard output is untouched throughout, so your own output and a launched process's are the only things on it. That is the one thing about the capability you cannot read off a type signature, and it is why the whole shape is worth writing out:
+
+```ts
+const plugin: Plugin = ({ command, context, registrations }) => {
+  command((namespace) => {
+    namespace.action(async () => {
+      const [grid] = registrations<Grid>("grid");
+      if (!grid) throw new Error("grid capability missing");
+
+      const chosen = await grid.select({
+        message: "Pick a service",
+        headers: ["SERVICE", "STATE"],
+        rows: services.map((service) => ({
+          cells: [service.name, service.state],
+          value: service,
+          // Computed per row, so a retired service offers none while its
+          // neighbours offer two. An empty list is not a rejected request.
+          actions:
+            service.state === "retired"
+              ? []
+              : [
+                  { label: "connect", value: "connect" as const },
+                  { label: "open logs", value: "logs" as const },
+                ],
+        })),
+      });
+      // Nothing chosen at all: the reader cancelled.
+      if (chosen === undefined) return;
+      // Which of the two answers this is, is said by whether the key is
+      // there — not by what it holds. An action's value is your own, so
+      // `undefined` is a value you may legitimately give an action, and
+      // `chosen.action === undefined` would then read a row that offered
+      // actions and had one taken as a row that offered none.
+      if (!("action" in chosen)) {
+        context.stdout.write(`${chosen.value.name}\n`);
+        return;
+      }
+
+      // The dialog is gone and the terminal is back to what it was, so this
+      // process gets the user's keystrokes and leaves the terminal unbroken.
+      const executable = chosen.action === "logs" ? "journalctl" : "ssh";
+      Bun.spawnSync([executable, chosen.value.host], {
+        stdio: ["inherit", "inherit", "inherit"],
+      });
+    });
+  });
+};
+```
+
+Running, spawning, and supervising a process are the consumer's, not the grid's: it reports a chosen row and a chosen action and never runs, spawns, names, or interprets one. Returning to the rows after you have acted — the file-manager loop — is not offered; call `select` again if you want it.
+
+Sorting, grouping, filtering, and paginating the supplied rows are out of scope, as are machine-readable output, borders and box drawing, spanning and wrapped cells, caller-specified widths, multi-row selection, in-place cell editing, column reordering, and value formatting of every kind — a duration, a timestamp, and a byte count are the consumer's to render into a string before it hands one over.
 
 ## One namespace per plugin
 

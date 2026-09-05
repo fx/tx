@@ -5,6 +5,8 @@ import {
   type Dialogs,
   type Grid,
   type GridRequest,
+  type GridSelection,
+  type GridSelectRequest,
   type InputRequest,
   order,
   type PrintRequest,
@@ -26,7 +28,11 @@ import { captureContext } from "./helpers.ts";
 type Asked =
   | { readonly kind: "input"; readonly request: InputRequest }
   | { readonly kind: "select"; readonly request: SelectRequest<unknown> }
-  | { readonly kind: "grid"; readonly request: PrintRequest };
+  | { readonly kind: "grid"; readonly request: PrintRequest }
+  | {
+      readonly kind: "rows";
+      readonly request: GridSelectRequest<string, string>;
+    };
 
 /**
  * A dialogs provider that answers without rendering. It stands in for the
@@ -77,6 +83,13 @@ function stubGrid(asked: Asked[]): PluginDefinition {
           print({ stream: _stream, ...request }: GridRequest) {
             asked.push({ kind: "grid", request });
           },
+          async select<T, A>(request: GridSelectRequest<T, A>) {
+            asked.push({
+              kind: "rows",
+              request: request as unknown as GridSelectRequest<string, string>,
+            });
+            return firstSelection(request);
+          },
         });
       },
   };
@@ -120,11 +133,48 @@ function unstyled(output: string): string {
   return output.replace(stylingSequence, "");
 }
 
-/** The answer a select resolves with when the person takes the first row. */
+/**
+ * The answer a select resolves with when the person takes the first row.
+ *
+ * It names the first option's value, and for a scenario whose first option
+ * opens a sub-dialog the real dialogs would never resolve with it — that
+ * option is opened rather than taken, and the answer comes from whichever
+ * option finally completes. That is sound here because the assertions this
+ * feeds are about the runner's dispatch order — which scenario ran, in what
+ * sequence — rather than about what a dialog resolves with, so the value is a
+ * token. Repointed at a case where the resolved value is the subject, it would
+ * have to account for the expand binding and for the descent into a
+ * sub-dialog.
+ */
 function firstRow(request: SelectRequest<unknown>): SelectResult<unknown> {
   const [first] = request.options;
   if (!first) throw new Error("a select with no options");
   return { value: first.value, values: {} };
+}
+
+/**
+ * The answer the real grid gives when the person takes the first row.
+ *
+ * Which action it takes is arbitrary; that it takes one at all is not. A row
+ * declaring actions opens them rather than resolving, so it can only complete
+ * on one of them — a selection carrying that row's value and no action is a
+ * shape the capability cannot produce for it, and a stub answering that way
+ * would have the runner asserted against an output that can never occur. A row
+ * declaring none resolves on the row alone, and says so by carrying no
+ * `action` key rather than one holding `undefined`.
+ *
+ * The stub and the expectation both go through this, so the two cannot come to
+ * disagree about what the capability would have said.
+ */
+function firstSelection<T, A>(
+  request: GridSelectRequest<T, A>,
+): GridSelection<T, A> {
+  const [first] = request.rows;
+  if (!first) throw new Error("an interactive grid with no rows");
+  const [action] = first.actions ?? [];
+  return action === undefined
+    ? { value: first.value }
+    : { value: first.value, action: action.value };
 }
 
 describe("the demo runner", () => {
@@ -151,10 +201,11 @@ describe("the demo runner", () => {
         .map((name) => {
           const scenario = scenarios[name];
           if (scenario.kind === "grid") return "";
-          return reported(
-            name,
-            scenario.kind === "input" ? "spring" : firstRow(scenario.request),
-          );
+          if (scenario.kind === "input") return reported(name, "spring");
+          if (scenario.kind === "rows") {
+            return reported(name, firstSelection(scenario.request));
+          }
+          return reported(name, firstRow(scenario.request));
         })
         .join(""),
     );
