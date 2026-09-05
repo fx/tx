@@ -12,7 +12,7 @@ specs:
     status: active
   - name: dialogs
     path: specs/dialogs/
-    description: Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, text input composed through user-provided options, and a greyscale Norton Commander presentation.
+    description: Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, aligned multi-cell option rows with headers, text input composed through user-provided options, and a themed Norton Commander presentation.
     status: active
   - name: updates
     path: specs/updates/
@@ -21,6 +21,14 @@ specs:
   - name: config
     path: specs/config/
     description: Shared per-user JSON config persistence supplied by a bundled plugin, covering validated key definition, reads, writes, and atomic storage.
+    status: active
+  - name: theming
+    path: specs/theming/
+    description: Named appearance variables supplied by a bundled plugin, covering the default greyscale Norton Commander theme, plugin overrides, and colour enablement.
+    status: active
+  - name: grid
+    path: specs/grid/
+    description: Aligned cell layout supplied by a bundled plugin, covering table and flowed presentations, one-shot printing, interactive row selection, and row actions.
     status: active
 
 changes:
@@ -204,3 +212,50 @@ changes:
     status: complete
     depends_on:
       - "0021"
+  - id: "0024"
+    name: relocate-and-cover-the-demo
+    path: changes/0024-relocate-and-cover-the-demo.md
+    description: Move the repository-root demo into checked source, run it through a bun package script, document it in the README, and hold it to the lint, type-check, and coverage gates.
+    spec: architecture
+    status: draft
+    depends_on: []
+  - id: "0025"
+    name: guarantee-cell-width-by-construction
+    path: changes/0025-guarantee-cell-width-by-construction.md
+    description: Make a select column's cell occupy exactly its measured width by construction, dropping the sub-dialog marker on a column too narrow for it, rather than relying on the frame's row truncation.
+    spec: dialogs
+    status: draft
+    depends_on: []
+  - id: "0026"
+    name: add-theme-variables
+    path: changes/0026-add-theme-variables.md
+    description: Add a bundled theme plugin supplying named appearance variables, make the existing greyscale look its default theme, and move every dialogs appearance decision behind it without changing a rendered byte.
+    spec: theming
+    status: draft
+    depends_on: []
+  - id: "0027"
+    name: add-multi-cell-select-rows
+    path: changes/0027-add-multi-cell-select-rows.md
+    description: Let a select option declare aligned cells instead of one label, let a column declare headers over them, and match filter terms within a cell rather than across the join.
+    spec: dialogs
+    status: draft
+    depends_on:
+      - "0025"
+      - "0026"
+  - id: "0028"
+    name: add-the-grid-plugin
+    path: changes/0028-add-the-grid-plugin.md
+    description: Add a bundled grid plugin supplying aligned table and flowed cell layouts that print once and terminate, with sanitized cells, display-width measurement, and themed appearances.
+    spec: grid
+    status: draft
+    depends_on:
+      - "0026"
+  - id: "0029"
+    name: add-interactive-grid-row-actions
+    path: changes/0029-add-interactive-grid-row-actions.md
+    description: Present grid rows as a select, offer the actions declared for a chosen row as its sub-dialog, report both, and guarantee the terminal is fit to hand to a launched process once the selection settles.
+    spec: grid
+    status: draft
+    depends_on:
+      - "0027"
+      - "0028"

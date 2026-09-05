@@ -8,6 +8,8 @@
 
 [Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented. [Change 0023](../../changes/0023-render-sub-dialogs-as-columns.md) implements the [Sub-Dialog Columns](#sub-dialog-columns) section together with its column rules in [Presentation](#presentation), the always-live [Filter Request](#filter-request), and the chrome the [Viewport](#viewport) sets into the frame's edges. Those requirements are implemented.
 
+The cell-width guarantee in [Presentation](#presentation), the delegation of every appearance to [Theming](../theming/), and the aligned cells and headers in [Select Request](#select-request), [Filtering](#filtering), and [Presentation](#presentation) are **not yet implemented**. [Change 0025](../../changes/0025-guarantee-cell-width-by-construction.md), [Change 0026](../../changes/0026-add-theme-variables.md), and [Change 0027](../../changes/0027-add-multi-cell-select-rows.md) implement them in that order.
+
 ## Background
 
 Plugins already receive the host's React and Ink instances and injected process streams through the [Plugin System](../plugin-system/). They can render their own terminal interfaces, but unrelated plugins have no supported way to share one runtime capability.
@@ -35,7 +37,10 @@ type TextField = {
 }
 
 type SelectOption<T> = {
-  readonly label: string
+  // Exactly one of `label` and `cells`, never both and never neither, and the
+  // same one on every option of a column; the Select Request rules own this.
+  readonly label?: string
+  readonly cells?: readonly string[]
   readonly value: T
   readonly fields?: readonly TextField[]
   readonly dialog?: SelectRequest<T> | TextField
@@ -44,6 +49,7 @@ type SelectOption<T> = {
 type SelectRequest<T> = {
   readonly message: string
   readonly options: readonly SelectOption<T>[]
+  readonly headers?: readonly string[]
   readonly filter?: "typed" | "always"
   readonly expand?: "enter" | "tab"
 }
@@ -80,13 +86,20 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 ### Select Request
 
-- `select` MUST reject a request with no options before rendering or changing terminal state.
-- `select` MUST render the request message and the label of every option the [filter](#filtering) leaves visible and the [viewport](#viewport) has room for.
-- `select` MUST treat option labels as display text and option values as opaque values.
-- `select` MUST preserve option order and MUST NOT remove options whose labels or values repeat.
+One principle settles every empty list a caller can pass, here and in the specifications that build on this one: **an empty collection MUST be rejected where its emptiness contradicts the declaration carrying it, and MUST mean "none" where it does not.** A list is not harmless merely because it is empty; what decides is whether the caller has said two things that cannot both be true. Declaring a select and supplying no options, or marking an option as collecting input and supplying no fields, are each a statement contradicted by its own contents. Supplying no headers is not: a caller saying a column has none has said one coherent thing, and a rule already says what that means.
+
+- `select` MUST reject a request with no options before rendering or changing terminal state, because a select with nothing to select asks the reader for nothing.
+- `select` MUST render the request message and the display text of every option the [filter](#filtering) leaves visible and the [viewport](#viewport) has room for.
+- `select` MUST treat an option's display text as display text and option values as opaque values.
+- An option MUST declare either one label or a list of cells, and MUST NOT declare both or neither; a request violating that MUST be rejected before rendering or changing terminal state. An empty cell list is not a list of cells, so an option declaring one has declared neither and is rejected by this rule already; no separate validation of an empty cell list MUST be added, and none is needed.
+- Every option of one column MUST declare the same one of those two shapes. A column mixing label options with cell options MUST be rejected before rendering or changing terminal state: a label is not a one-cell row, and treating it as one would put a lone label into a field measured against cells that mean something else. Each column decides its own shape independently, exactly as it decides its own headers, so a column of labels MAY open a column of cells and the reverse.
+- An option declaring cells MUST have its cells aligned into fields shared with every other option of its column, as [Presentation](#presentation) requires, so a column of cells reads as a table rather than as padded labels.
+- A column of cell options MUST declare the same number of cells on every one of them, and a request violating that MUST be rejected before rendering or changing terminal state.
+- A request MAY declare headers for its own column, and headers MUST be accepted only on a column of cell options and MUST match those cells in number; a request violating either MUST be rejected before rendering or changing terminal state. An empty header list MUST mean that the column declares no headers, exactly as omitting it does, and MUST NOT be rejected: nothing about a column of cells claims it has headers, so declaring none contradicts nothing.
+- `select` MUST preserve option order and MUST NOT remove options whose display text or values repeat.
 - The first option MUST be active when the dialog opens.
 - An option that declares no fields MUST be a plain option, and an option that declares fields MUST be a user-provided option.
-- `select` MUST reject a request in which an option declares an empty field list or repeats a field name within that same option, before rendering or changing terminal state.
+- `select` MUST reject a request in which an option declares an empty field list or repeats a field name within that same option, before rendering or changing terminal state. The empty list is rejected because an option declaring fields is a user-provided option by the rule above it, and one that collects nothing is that declaration contradicting itself.
 
 #### Scenario: Invalid empty request
 
@@ -105,6 +118,18 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - **GIVEN** an option declares two fields sharing one name, or an empty field list
 - **WHEN** the caller calls `select`
 - **THEN** the call rejects before rendering anything
+
+#### Scenario: Invalid cell declaration
+
+- **GIVEN** a column whose options declare differing numbers of cells, or an option declaring both a label and cells or neither, or a column mixing label options with cell options, or headers declared on a column of labels, or headers whose count differs from its column's cells
+- **WHEN** the caller calls `select`
+- **THEN** the call rejects before rendering anything
+
+#### Scenario: Cells align across a column
+
+- **GIVEN** a column of options whose first cells are `alpha`, `b`, and `charlie-delta`
+- **WHEN** the dialog renders
+- **THEN** every option's second cell begins at the same terminal column
 
 ### Selection
 
@@ -166,7 +191,8 @@ Every option is visible while the filter text is blank; [Filtering](#filtering) 
 - The filter MUST be the element that receives typed text from the moment the dialog opens, with no key moving focus to or from it.
 - Printable input and Backspace MUST edit the filter text exactly as they edit a [text input's](#text-input) value.
 - The dialog MUST render the current filter text once there is any, and MUST render it in a place whose appearing and disappearing moves no option row.
-- The filter's terms are the whitespace-separated pieces of its text; an option MUST be visible when every term occurs within its label under a case-insensitive comparison, or when the option declares fields.
+- The filter's terms are the whitespace-separated pieces of its text; an option MUST be visible when every term occurs within its display text under a case-insensitive comparison, or when the option declares fields.
+- What an option's display text is follows the shape it declared, and matching follows that: on an option declaring a label, every term MUST be matched against that label; on an option declaring cells, every term MUST be matched against each cell individually rather than against the cells joined together, and the option MUST be visible when every term occurs within at least one of its cells — so a term never matches by spanning the gap between two cells. Every option of one column declares the same one of those shapes, so no column mixes the two readings. Headers MUST NOT participate in matching.
 - Visible options MUST keep their supplied order; the filter MUST NOT rank, reorder, or deduplicate them.
 - Whenever the filter text changes, the first visible option MUST become active.
 - When no option is visible, the dialog MUST indicate that nothing matches, Enter and navigation MUST do nothing, and cancellation MUST remain available.
@@ -179,6 +205,12 @@ Every option is visible while the filter text is blank; [Filtering](#filtering) 
 - **GIVEN** a dialog listing `Alpha`, `Beta`, `Gamma`, and `Alphabet`
 - **WHEN** the user types `alp` and presses Enter
 - **THEN** only `Alpha` and `Alphabet` were visible, in that order, and `select` resolves with `Alpha`'s value
+
+#### Scenario: Terms match cells individually
+
+- **GIVEN** a column of cell options, one of which carries the cells `alpha` and `beta`
+- **WHEN** the user types `alphab`
+- **THEN** that option is not visible, because no single cell contains the term
 
 #### Scenario: Several terms in any order
 
@@ -326,7 +358,7 @@ An option MAY declare a sub-dialog holding a nested select request or a single t
 
 - An option declaring a sub-dialog MUST be marked in its list, and opening one MUST add a column to the right of the column it was opened from, inside the same render session and inside the same frame.
 - Enter MUST open the sub-dialog of an option that declares one, and MUST take an option that declares none. The right arrow MUST open a declared sub-dialog whatever the binding below, and MUST do nothing on an option declaring none.
-- The root request MAY rebind opening from Enter to Tab. Under that binding Enter MUST take an option whether or not it declares a sub-dialog, and Tab MUST open a declared one. The binding MUST be read from the root request alone and MUST apply to every column.
+- The root request MAY rebind opening from Enter to Tab, and an omitted `expand` setting MUST mean `"enter"` — the binding the rule above states. Under the Tab binding Enter MUST take an option whether or not it declares a sub-dialog, and Tab MUST open a declared one. The binding MUST be read from the root request alone and MUST apply to every column.
 - Only the rightmost column MUST answer keys; the columns left of it MUST stay rendered and ignore input until it closes.
 - The left arrow MUST close the rightmost column and return to the one that opened it, and MUST do nothing at the leftmost column, where closing the dialog is Escape's alone.
 - Escape or Ctrl-C with more than one column open MUST close only the rightmost and return to its parent with the parent's state unchanged; at the leftmost column it MUST cancel the dialog and resolve with `undefined`.
@@ -372,16 +404,19 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 
 - Every dialog MUST be drawn inside a frame whose top edge carries its message as a title: the request message for a select or a standalone input, and the field's message for a field under collection.
 - A select MUST use a double-line frame; a standalone input and a field under collection MUST use a single-line frame.
-- Frame edges, the title, the key hints, the overflow counts, and the filter prompt MUST be rendered dimmed relative to option labels and entered text.
-- The active option MUST be rendered as an inverted bar spanning its column's full width. The rightmost column MUST take whatever width the title or the edges left the panel spare, so a select showing one column has its bar spanning the frame's whole inner width.
-- A dialog MUST use only the terminal's default foreground and background, their dimmed form, and their inversion; it MUST NOT emit any hue.
+- Frame edges, the title, the key hints, the overflow counts, the filter prompt, the column divider, and a header row MUST be drawn as [Theming](../theming/)'s `chrome` variable; option cells, option labels, and entered text MUST be drawn as its `content` variable. The default theme renders `chrome` dimmed relative to `content`, which is the appearance this rule previously fixed directly.
+- The active option MUST be rendered as [Theming](../theming/)'s `cursor` variable spanning its column's full width, which the default theme renders as the terminal's own inversion. The rightmost column MUST take whatever width the title or the edges left the panel spare, so a select showing one column has its bar spanning the frame's whole inner width.
+- A dialog MUST resolve every appearance it draws through [Theming](../theming/) and MUST NOT choose a dim, an inversion, or a hue itself. Against the default theme a dialog therefore uses only the terminal's default foreground and background, their dimmed form, and their inversion, and emits no hue; that greyscale is the default theme's property rather than a prohibition this specification makes.
 - The filter and the overflow counts MUST be set into the frame's own edges rather than drawn as rows of the panel: the filter into the bottom edge, the counts into the top and bottom edges on their right. Neither MUST cost the panel a row, and neither appearing nor disappearing MUST move an option row. The room the counts take MUST be held whether a count is showing or not, so the title does not resize as the reader scrolls. Both describe the rightmost column: it is the one taking keys, and it is the only one that scrolls.
 - A dimmed key hint line MUST appear beneath the frame, naming exactly the keys the dialog answers where the reader is: a select's names moving, opening when the row under the cursor leads somewhere, taking when that row can be taken, backing out once a column has been opened, typing to filter, and cancelling; an entry's names submitting and then whichever of backing out or cancelling its own cancel key performs. A dialog MUST draw exactly one such line however many columns it is showing.
 - Backing out and cancelling MUST NOT both be named. Above the leftmost column the cancel key backs out exactly as the left arrow does, so the line MUST name the two keys as the one thing they do there and MUST NOT promise a cancellation the dialog will not perform; cancelling MUST be named only at the leftmost column, where it is what the cancel key does. The same rule binds an entry: a standalone `input` and a field collected at the leftmost column MUST name cancelling, while a text leaf and a field collected in an opened column MUST name backing out, because their cancel key closes only that column.
 - The line names the keys the dialog answers in the mode it is in — leftmost column or a column opened over it, list or entry — and MUST NOT track momentary availability. Typing to filter MUST be named whether or not the filter is on screen, because typing always filters. Moving and taking MUST stay named when a filter has left nothing to move over or take, though both are no-ops in that state. A phrase that came and went as the reader typed would be one more thing moving under them, which is the churn the filter and the overflow counts were set into the frame's edges to stop; a mode changes only when the reader opens or closes a column, which they do deliberately.
 - Every column of a select MUST render inside one frame — the one the first level drew, and the only one however deep the reader goes — and a sub-dialog MUST NOT draw a border, an offset, or a shadow of its own. A text-field sub-dialog is not a column: it MUST render as its own single-line panel beneath the frame, as a collected field does.
 - The columns MUST be laid out left to right in the order they were opened, separated by a dimmed divider, and MUST share one band of rows so lists of different lengths start on the same row.
-- An option declaring a sub-dialog MUST be marked on the right edge of its column, on the same edge for every marked row of that column.
+- An option declaring a sub-dialog MUST be marked on the right edge of its column, on the same edge for every marked row of that column, drawn as [Theming](../theming/)'s `marker` variable.
+- A cell MUST occupy exactly the columns its field was measured at, by construction rather than by a later truncation of the row it sits in. A field too narrow to hold both its text and a marker MUST drop the marker rather than overrun, and the row-level truncation the frame performs MUST remain a guard against a panel narrower than its content rather than the thing that makes a cell fit.
+- An option's cells MUST be aligned into fields shared by every option of its column, each field as wide as its widest cell in that column and its header where one is declared, separated by a fixed gap. A field whose text does not fit MUST be truncated at its end with an ellipsis, so a narrow terminal loses characters from a cell rather than shifting the fields after it.
+- A declared header row MUST be drawn once at the top of its column's band, MUST NOT be selectable, MUST NOT be filtered, MUST NOT scroll with the options beneath it, and MUST cost the [viewport](#viewport) one option row of the rows it had.
 - A column a sub-dialog has been opened from MUST keep rendering what it was showing — the window its own filter text left it on, and its cursor bar on the choice it was left on — so the choices made on the way in stay readable beside the one being made now. The one thing that MUST move that window is the shared band shrinking under an entry panel, which shrinks it for every column at once, and the column MUST return to the window it was left on once the band grows back. It MUST be dressed at rest, with nothing on it animating. Its filter text and its hidden counts MUST NOT be drawn, because the edges that carry those belong to the column taking keys.
 - Every column MUST draw its cursor bar identically: the bar is the inversion alone, and a column behind the driven one MUST NOT shade its bar or its label differently. Which column is being driven is said by where it sits — rightmost — and saying it a second time in a second way is what the reader has to unlearn.
 - The frame's title MUST name the trail of the columns on screen.
@@ -396,7 +431,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Every animation timer MUST be stopped before the dialog settles.
 - A request rejected before rendering MUST still render nothing, frame included.
 
-The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow counts are `▲ N` on the top edge and `▼ N` on the bottom with `N` the hidden count, the no-match row reads `no match`, the marker on an option that opens a sub-dialog is `▸`, the divider between columns is `│`, and the trail in the title joins its columns with `›` and opens with `…` when columns have been dropped. The select hint line is assembled from `↑↓ move`, then `→/Enter open` on a row that leads somewhere (`→/Tab open` under the Tab binding), then `Enter select` unless Enter opens that row, then `←/Esc back` once a column has been opened, then `type to filter`, then `Esc cancel` at the leftmost column only, joined with ` · `; the entry hint line reads `Enter submit · Esc cancel` where Escape cancels the dialog — a standalone `input`, and a field collected at the leftmost column — and `Enter submit · Esc back` where it backs out instead — a text leaf, and a field collected in a column opened over the leftmost one. An entry offers no left arrow of its own, so it names Escape alone where the select's line reads `←/Esc back`.
+The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow counts are `▲ N` on the top edge and `▼ N` on the bottom with `N` the hidden count, the no-match row reads `no match`, the marker on an option that opens a sub-dialog is `▸`, the divider between columns is `│`, the gap between the cell fields of one option is two spaces, and the trail in the title joins its columns with `›` and opens with `…` when columns have been dropped. The select hint line is assembled from `↑↓ move`, then `→/Enter open` on a row that leads somewhere (`→/Tab open` under the Tab binding), then `Enter select` unless Enter opens that row, then `←/Esc back` once a column has been opened, then `type to filter`, then `Esc cancel` at the leftmost column only, joined with ` · `; the entry hint line reads `Enter submit · Esc cancel` where Escape cancels the dialog — a standalone `input`, and a field collected at the leftmost column — and `Enter submit · Esc back` where it backs out instead — a text leaf, and a field collected in a column opened over the leftmost one. An entry offers no left arrow of its own, so it names Escape alone where the select's line reads `←/Esc back`.
 
 Reference rendering of a select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves six option rows because the dialog's other three rows — the two frame edges and the hint line — must fit alongside them and still stay strictly under the terminal height. The filter and the counts are set into the edges the panel is already drawing, so neither takes a row:
 
@@ -417,6 +452,18 @@ Reference rendering of a select in a terminal of 80 columns and 10 rows, greysca
 - **GIVEN** a select whose message is `Which branch?`
 - **WHEN** the dialog renders
 - **THEN** a double-line frame appears with `Which branch?` set into its top edge, the active option is inverted across the frame's inner width, and a dimmed key hint line follows the frame
+
+#### Scenario: A header names its fields
+
+- **GIVEN** a column of cell options declaring headers
+- **WHEN** the reader scrolls the list
+- **THEN** the header row stays at the top of the band, is never selected, and never narrows the list when the reader types
+
+#### Scenario: A cell fits its field without rescue
+
+- **GIVEN** a column narrowed until a marked option's field affords only one terminal column
+- **WHEN** the cell is built
+- **THEN** it occupies exactly one column with the marker dropped, before the frame truncates anything
 
 #### Scenario: Long label is truncated
 
@@ -508,12 +555,14 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 
 - Only `select`, `input`, and their composition are in scope.
 - The dialogs capability is internal to bundled plugins; a stable external dialogs package or public export is out of scope.
-- `text` is the only field type. Dropdown, checkbox, numeric, masked, and multi-line fields are out of scope, as is a form that presents several fields at once with focus movement between them.
+- `text` is the only field type. Dropdown, checkbox, numeric, masked, and multi-line fields are out of scope, as is a form that presents several fields at once with focus movement between them. An option's cells are display text and are unrelated to fields: they collect nothing and take no focus.
 - Field validation, required-field policy, defaults beyond an initial value, error messages, and re-prompting after a rejected value are out of scope; a caller validates what it receives.
 - Caret movement, word or line deletion, clipboard integration, paste-specific handling, entry history, completion, and character masking are out of scope for text entry and for the filter; a terminal paste arrives as ordinary input and is appended as such.
 - Fuzzy or prefix matching, match ranking, match highlighting, matching against option values, a caller-supplied matcher, an initial filter text, and a filter on `input` are out of scope.
 - Returning to an earlier stage, partial results, and any back-navigation key are out of scope, except that Escape and the left arrow MUST close the rightmost sub-dialog column and return to the one that opened it.
-- Multi-select, disabled or grouped options, custom option rendering, mouse input, configurable themes or palettes, color hues, and layout APIs are out of scope.
+- Multi-select, disabled or grouped options, arbitrary caller-supplied option rendering, mouse input, and layout APIs are out of scope. Aligned cells and a header row are the only structure an option may have, and they are declared rather than drawn by the caller.
+- Deciding an appearance is out of scope: [Theming](../theming/) owns the variables, the default greyscale theme, whether hues are emitted, and what a plugin may override.
+- Per-field alignment, caller-specified field widths, per-field truncation policy, sorting or reordering by a field, and a header that can be clicked or activated are out of scope.
 - Non-interactive fallback, concurrent dialogs, independently nested dialogs in separate render sessions, global serialization, persistence, and terminal accessibility policy are out of scope. Sub-dialog columns are not nested dialogs in this sense: they are one dialog in one render session.
 - Registry collision policy, provider priority, deduplication, ownership metadata, and version negotiation are owned by neither this spec nor the initial implementation.
 
@@ -526,11 +575,15 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - Whether a filter that has been cleared back to empty should stay on screen for the column it was used in MAY be revisited once a bundled consumer presents real lists.
 - Whether a column left of the rightmost one SHOULD report its own hidden counts is undecided. Only the rightmost reports today, so a column behind it whose list runs past the band shows a list that stops without saying it was cut; the two edges have room for one column's pair, and a rule for the rest needs somewhere to put the numbers first.
 - Highlighting the matched characters within a visible label MAY be specified later; it is presentation only and changes no result.
+- Whether a column of cells SHOULD elide or drop a field, rather than truncating every field proportionally, when the terminal cannot afford the column is undecided; the answer likely depends on a real consumer's fields.
+- Whether a header row SHOULD be repeated when a list is long enough to scroll past it is undecided; it does not scroll today, so the question is only whether a second one would ever help.
 
 ## References
 
 - [Plugin System](../plugin-system/)
 - [Architecture](../architecture/)
+- [Theming](../theming/)
+- [Grid](../grid/)
 - [Change 0016: Add Plugin Capabilities and Dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md)
 - [Change 0017: Add Dialog Text Input and Composition](../../changes/0017-add-dialog-text-input-and-composition.md)
 - [Change 0020: Add Select Filter and Viewport](../../changes/0020-add-select-filter-and-viewport.md)
@@ -554,3 +607,6 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-05 | Desired sub-dialogs as columns of one frame, the Enter-opens binding with its `expand` escape hatch, the always-live filter with its `filter` showing setting, and the filter and overflow counts set into the frame's edges | [0023-render-sub-dialogs-as-columns](../../changes/0023-render-sub-dialogs-as-columns.md) |
 | 2026-09-05 | Implemented the column browser inside one frame with its divider, shared band, expand marker, trail title, and collapsing from the left; the Enter and arrow opening keys with the root-only `expand` binding; the always-live filter; and the filter and overflow counts set into the frame's edges with their room held | [0023-render-sub-dialogs-as-columns](../../changes/0023-render-sub-dialogs-as-columns.md) |
 | 2026-09-05 | Stated the viewport's one-row floor and its active-option rule with the conditions they hold under, so both match the collapse a too-short terminal forces, closing the open question 0020 recorded | [0023-render-sub-dialogs-as-columns](../../changes/0023-render-sub-dialogs-as-columns.md) |
+| 2026-09-05 | Cell width made a construction-time guarantee rather than a rescue by row truncation | [0025-guarantee-cell-width-by-construction](../../changes/0025-guarantee-cell-width-by-construction.md) |
+| 2026-09-05 | Appearance decisions delegated to Theming; the greyscale rule became the default theme's property | [0026-add-theme-variables](../../changes/0026-add-theme-variables.md) |
+| 2026-09-05 | Options may declare aligned cells and a column may declare headers | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |
