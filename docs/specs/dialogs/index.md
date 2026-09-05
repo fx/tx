@@ -88,9 +88,10 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - `select` MUST render the request message and the display text of every option the [filter](#filtering) leaves visible and the [viewport](#viewport) has room for.
 - `select` MUST treat an option's display text as display text and option values as opaque values.
 - An option MUST declare either one label or a list of cells, and MUST NOT declare both or neither; a request violating that MUST be rejected before rendering or changing terminal state.
+- Every option of one column MUST declare the same one of those two shapes. A column mixing label options with cell options MUST be rejected before rendering or changing terminal state: a label is not a one-cell row, and treating it as one would put a lone label into a field measured against cells that mean something else. Each column decides its own shape independently, exactly as it decides its own headers, so a column of labels MAY open a column of cells and the reverse.
 - An option declaring cells MUST have its cells aligned into fields shared with every other option of its column, as [Presentation](#presentation) requires, so a column of cells reads as a table rather than as padded labels.
-- A column whose options declare cells MUST declare the same number of cells on every one of them, and a request violating that MUST be rejected before rendering or changing terminal state.
-- A request MAY declare headers for its own column, and headers MUST be accepted only where that column's options declare cells and MUST match them in number; a request violating either MUST be rejected before rendering or changing terminal state.
+- A column of cell options MUST declare the same number of cells on every one of them, and a request violating that MUST be rejected before rendering or changing terminal state.
+- A request MAY declare headers for its own column, and headers MUST be accepted only on a column of cell options and MUST match those cells in number; a request violating either MUST be rejected before rendering or changing terminal state.
 - `select` MUST preserve option order and MUST NOT remove options whose display text or values repeat.
 - The first option MUST be active when the dialog opens.
 - An option that declares no fields MUST be a plain option, and an option that declares fields MUST be a user-provided option.
@@ -116,7 +117,7 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 #### Scenario: Invalid cell declaration
 
-- **GIVEN** a column whose options declare differing numbers of cells, or an option declaring both a label and cells, or headers whose count differs from its column's cells
+- **GIVEN** a column whose options declare differing numbers of cells, or an option declaring both a label and cells or neither, or a column mixing label options with cell options, or headers declared on a column of labels, or headers whose count differs from its column's cells
 - **WHEN** the caller calls `select`
 - **THEN** the call rejects before rendering anything
 

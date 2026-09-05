@@ -58,7 +58,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 `plugins/grid/geometry.ts` holds every layout decision as pure functions over values: column widths from cells and headers, the gap, padding and alignment, flow placement, and where the empty and summary lines go. It imports nothing but the display-width measure.
 
-`plugins/grid/cells.ts` holds normalization: control-character removal, the placeholder for an empty value, and filling a short row out to the column count.
+`plugins/grid/cells.ts` holds normalization: control-character removal, the placeholder for an empty cell, and filling a short row out to the column count. The removal is applied to every consumer-supplied string the grid renders — headers, the empty message, the summary, a selecting request's message and an action's label as well as a cell's text — and to everything handed to [Dialogs](../specs/dialogs/) on the selecting path, as [Grid: Cell Values](../specs/grid/index.md#cell-values) requires, because a guarantee about what reaches the terminal that held for only some strings would not be a guarantee.
 
 `plugins/grid/render.ts` turns a laid-out grid into elements through the injected React and Ink, resolving every appearance through the theme. It takes the output stream as an argument rather than reaching for one, because a renderer that writes to a stream cannot return a string.
 
@@ -72,7 +72,7 @@ Two widths are in play and they must not be confused. The *layout* width is what
 - **Decision**: the grid takes strings and formats nothing.
   - **Why**: a duration, a timestamp, a byte count, and a relative time are policy — how precise, in whose timezone, rounded which way. A grid that decided them would make a product decision for every consumer, and would need a date library on the startup path of every unrelated command to do it.
   - **Alternatives considered**: built-in formatters; an injected formatter interface (the same coupling with an extra indirection).
-- **Decision**: control characters are removed from every cell, not escaped or rejected.
+- **Decision**: control characters are removed from every rendered string, not escaped or rejected.
   - **Why**: the text is not the consumer's own — it comes from a file, a process, or a network response. Rejecting would turn one bad row into a failed command; escaping would render noise. The printing contract promises no repaint sequences reach the stream, and that has to hold for the payload as received.
   - **Alternatives considered**: rejecting the request; escaping visibly; trusting the consumer.
 - **Decision**: the canvas is the measured grid's width, not the terminal's, and the one width-dependent layout falls back to eighty columns.
@@ -96,9 +96,9 @@ Two widths are in play and they must not be confused. The *layout* width is what
 ## Tasks
 
 - [ ] Add the grid plugin's geometry and cells
-  - [ ] `plugins/grid/cells.ts` — control-character removal, the `—` placeholder, short-row filling
+  - [ ] `plugins/grid/cells.ts` — control-character removal over every rendered string, the `—` placeholder for an empty cell only, the column count, and short-row filling
   - [ ] `plugins/grid/geometry.ts` — column widths over cells and headers, gap, padding, start and end alignment, and the no-trailing-whitespace rule
-  - [ ] Pure-function tests for widths over wide and astral characters, alignment, the empty and summary lines, and trailing whitespace
+  - [ ] Pure-function tests for widths over wide and astral characters, alignment, the empty and summary lines, trailing whitespace, the column count over ragged rows and a longer header row, and control-character removal in every rendered string
 - [ ] Add the flow layout
   - [ ] Flow placement in `geometry.ts`: equal columns, down-then-across order, one column when nothing more fits, headers ignored
   - [ ] Pure-function tests for placement, ordering, the one-column floor, and trailing whitespace

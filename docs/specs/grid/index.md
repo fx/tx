@@ -97,17 +97,19 @@ A selecting request carries no stream: a dialog reads and draws through the stre
 
 A cell's text arrives from the consumer, and a consumer's text arrives from somewhere it does not control. The grid MUST therefore treat it as data.
 
-- A cell MUST be measured in terminal display columns rather than code units, so a row of wide or astral characters occupies the columns it will actually take.
-- A cell MUST have its control characters removed before it is measured or drawn, so text carrying a newline, a carriage return, or an escape sequence can neither break the layout apart nor reach the terminal as a command.
-- A cell whose text is empty after that removal MUST render a placeholder rather than an empty column, and the placeholder MUST be `—`.
-- A cell MUST NOT be trimmed, wrapped, re-cased, re-ordered, or otherwise rewritten beyond removing control characters.
-- A row MAY supply fewer cells than the grid has columns; the missing trailing cells MUST render as the placeholder rather than shortening the row.
+- A cell supplied as a bare string MUST mean exactly the cell that string would make with no variable and no alignment, so the shorthand and the full form differ in notation alone. A row MAY mix the two forms freely.
+- Every string the grid renders MUST have its control characters removed before it is measured or drawn, so text carrying a newline, a carriage return, or an escape sequence can neither break the layout apart nor reach the terminal as a command. This binds every consumer-supplied string without exception — a cell's text, a header, the empty message, the summary, a selecting request's message, and an action's label — because the guarantee [Printing](#printing) makes about what reaches the terminal cannot hold for only some of them.
+- The removal MUST also be applied to every string the grid hands to [Dialogs](../dialogs/) when [selecting](#interactive-grid). The grid is where text the consumer did not author enters `tx`, so it is where the text is made safe; a dialog's own callers own what they pass it, and this specification adds nothing to that contract.
+- Text MUST be measured in terminal display columns rather than code units, so a row of wide or astral characters occupies the columns it will actually take.
+- A cell whose text is empty after that removal MUST render a placeholder rather than an empty column, and the placeholder MUST be `—`. The placeholder MUST NOT be substituted for an empty header, empty message, empty summary, or empty action label, which are the consumer's to leave blank.
+- A string MUST NOT be trimmed, wrapped, re-cased, re-ordered, or otherwise rewritten beyond removing control characters.
+- A grid's column count MUST be the largest number of cells any one of its rows supplies, or the number of headers where more headers are supplied than that. A row supplying fewer cells than that count MUST have its missing trailing cells rendered as the placeholder rather than having its row shortened.
 
 #### Scenario: A cell carrying an escape sequence
 
-- **GIVEN** a cell's text contains a screen-clearing escape sequence
-- **WHEN** the grid renders
-- **THEN** the sequence does not reach the terminal, the row keeps its shape, and the remaining text is drawn
+- **GIVEN** a screen-clearing escape sequence in a cell's text, in a header, in the empty message, in the summary, and in an action's label
+- **WHEN** the grid renders, printing and selecting alike
+- **THEN** no sequence reaches the terminal, every row and line keeps its shape, and the remaining text is drawn
 
 #### Scenario: A cell of wide characters
 

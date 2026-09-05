@@ -38,7 +38,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 [Dialogs](../specs/dialogs/) owns the option model, the validations, the per-field matching rule, the alignment and truncation rules, and the header row's behavior, in [Select Request](../specs/dialogs/index.md#select-request), [Filtering](../specs/dialogs/index.md#filtering), and [Presentation](../specs/dialogs/index.md#presentation). Their scenarios are this change's acceptance criteria and are not restated here. What implementing them requires of this change:
 
-- `label` becomes optional and `cells` is added beside it, with exactly one of the two required. Every existing caller declares `label`, so no existing call site changes.
+- `label` becomes optional and `cells` is added beside it, with exactly one of the two required, and one column may not mix the two shapes. Every existing caller declares `label` on every option, so no existing call site changes and no existing column becomes mixed.
 - The `MatchableOption` type in `filter.ts` reads only `label` and `fields` today. It gains `cells`, and matching becomes per cell.
 - Column measurement in `select.ts` currently reduces a column to one scalar `widestLabel`. For a column of cell options it becomes a vector — one width per field — measured over the whole visible list, exactly as the scalar is today, so scrolling still does not resize a column under the cursor bar.
 - The header row is not an option. It is a row of the band that the viewport must account for, that `visibleOptionIndices` never sees, and that the active index can never address.
@@ -57,13 +57,18 @@ The natural place for field geometry is `columns.ts`, which already owns everyth
 
 `columnWidth` gains a sibling that takes a vector of field widths and returns the column width including the gaps, and `cell` gains a sibling that lays a row of cells into that column. The existing scalar functions stay exactly as they are and keep serving label options, so the label path is not touched by the cell path.
 
-The header row is drawn as the first row of its column's band, resolved through [Theming](../specs/theming/)'s `chrome` variable so it reads as a label for the list rather than as a member of it, and it costs the viewport one of the rows it had. That variable is the second dependency: [Change 0026](./0026-add-theme-variables.md) is what introduces `chrome` and moves the dialogs plugin behind the theme, so a header drawn before it landed would have to name an appearance directly and then be rewritten. It is also the order [Dialogs: Overview](../specs/dialogs/index.md#overview) states — 0025, then 0026, then this change. That last point is the one with a knock-on: `optionRowCount` computes affordable rows from the terminal height and the chrome height, and a header is chrome that only some columns have.
+The header row is drawn as the first row of its column's band, resolved through [Theming](../specs/theming/)'s `chrome` variable so it reads as a label for the list rather than as a member of it, and it costs the viewport one of the rows it had. That cost is the knock-on: `optionRowCount` computes affordable rows from the terminal height and the chrome height, and a header is chrome that only some columns have.
+
+The `chrome` variable is also the second dependency. [Change 0026](./0026-add-theme-variables.md) is what introduces it and moves the dialogs plugin behind the theme, so a header drawn before it landed would have to name an appearance directly and then be rewritten in the change that forbids exactly that. It is the order [Dialogs: Overview](../specs/dialogs/index.md#overview) already states — 0025, then 0026, then this change.
 
 ### Decisions
 
 - **Decision**: `label` and `cells` as alternatives on the option, rather than `label: string | readonly string[]`.
   - **Why**: two named fields make the validation statable and the type narrowing obvious at every use site. A union type would put the discrimination at every read of `label`, including the ones in `filter.ts` and `select.ts` that have nothing to do with cells.
   - **Alternatives considered**: the union; a separate `SelectRequest` variant for tabular columns, which would double the request type for one added field.
+- **Decision**: a column may not mix label options with cell options; a mixed column is rejected.
+  - **Why**: the two shapes are measured differently — a label against one scalar width, a row of cells against a vector of field widths — and a column holding both would have to decide what a lone label means among fields that mean something else. Treating it as a one-cell row puts it in the first field and leaves the rest blank, which reads as a row that lost its data rather than as a label. Rejecting states the constraint where the caller can see it, and it costs nothing today because every existing column is uniformly labels.
+  - **Alternatives considered**: promoting a label to a one-cell row (the misreading above); measuring mixed columns as labels and ignoring the cells (silently drops what the caller declared).
 - **Decision**: a term matches within one cell, never across the join.
   - **Why**: matching against the padded or joined row is what makes `alphab` find a row of `alpha` and `beta` — a match the reader cannot see and cannot predict. Matching per cell is the rule a reader would guess.
   - **Alternatives considered**: joining with a separator no term can contain (works, but makes the rule an artifact of the separator); matching the joined string (the current caller-side failure, reproduced inside `tx`).
@@ -91,7 +96,7 @@ The header row is drawn as the first row of its column's band, resolved through 
 
 - [ ] Add cells to the option model
   - [ ] Make `label` optional and add `cells` in `plugins/dialogs/types.ts`, with `headers` on the request
-  - [ ] Validate label-or-cells, uniform cell counts within a column, and header count, before rendering — alongside the existing option and field validations, at every reachable sub-dialog depth
+  - [ ] Validate label-or-cells, one shape per column, uniform cell counts within a column, and header count and placement, before rendering — alongside the existing option and field validations, at every reachable sub-dialog depth
   - [ ] Tests asserting each rejection happens before any terminal state changes
 - [ ] Measure and draw aligned fields
   - [ ] Add vector field-width measurement and cell layout to `plugins/dialogs/columns.ts`, leaving the scalar label path untouched
