@@ -1,12 +1,20 @@
 import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
+import { requireDialogsCapability } from "./dialogs.ts";
 import { printGrid } from "./render.ts";
+import { selection, selectRequest } from "./select.ts";
 import { requireThemeCapability } from "./theme.ts";
-import type { Grid, GridRequest } from "./types.ts";
+import type {
+  Grid,
+  GridRequest,
+  GridSelection,
+  GridSelectRequest,
+} from "./types.ts";
 
 const identity: PluginIdentity = Object.freeze({ name: "grid" });
 
 /**
- * The grid capability: cells laid out in two dimensions and printed once.
+ * The grid capability: cells laid out in two dimensions, printed once or
+ * driven.
  *
  * It claims no command namespace and adds no command — it exists so that a
  * plugin with rows to show does not have to own column measurement,
@@ -36,6 +44,41 @@ const definition: PluginDefinition = Object.freeze({
             request.stream,
           );
           printGrid(react, ink, theme, request);
+        },
+
+        /**
+         * Presents the rows as a select and answers with the row and the
+         * action the reader chose.
+         *
+         * The dialogs capability is read while the command runs, for the same
+         * two reasons the theme is: a plugin reading during its own
+         * initialization sees only what committed before it, and the provider
+         * is composed ahead of its consumers. It resolves its own theme for
+         * the stream it draws on, so nothing about an appearance is decided
+         * here.
+         *
+         * Every rejection a malformed request earns — a grid with no rows,
+         * rows carrying no cells at all, and the non-interactive streams a
+         * dialog cannot run on — is the select's, raised before any terminal
+         * state changes. There is one owner of each of those rules and it is
+         * not this one. What the composition takes off the table rather than
+         * passing through is a ragged set of rows and a header list longer
+         * than a row: both are padded to the grid's own column count, so
+         * neither can reach the select as a column it would have to reject.
+         *
+         * Handing the terminal on needs nothing here either: the dialog
+         * restores it and unmounts its renderer before it settles, so a
+         * consumer that starts a process the moment this resolves finds the
+         * terminal as it was.
+         */
+        async select<T, A>(
+          request: GridSelectRequest<T, A>,
+        ): Promise<GridSelection<T, A> | undefined> {
+          const dialogs = requireDialogsCapability(registrations);
+          const chosen = await dialogs.select(selectRequest(request));
+          return chosen === undefined
+            ? undefined
+            : selection(request, chosen.value);
         },
       });
 

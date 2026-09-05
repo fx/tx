@@ -54,8 +54,56 @@ export type GridRequest = {
   readonly summary?: string;
 };
 
-/** The value registered under `grid`. Selecting a row is the other half of the
- * capability and is not implemented here. */
+/** One thing a consumer offers to do with a row. `value` is what the grid
+ * reports back; what it means — a command, a route, a mode — belongs to the
+ * consumer that declared it, and the grid never runs, spawns, or interprets
+ * it. */
+export type GridAction<A> = {
+  readonly label: string;
+  readonly value: A;
+};
+
+/** One selectable row: the cells it shows, the value that identifies it, and
+ * the actions it offers.
+ *
+ * The value is declared on the row rather than in a list parallel to the rows,
+ * so a row the caller cannot identify is unrepresentable rather than
+ * rejectable. The actions are declared per row for the same reason and one
+ * more: two rows may offer different ones, and a row may offer none beside one
+ * that does. An empty list means the row declares none, exactly as omitting it
+ * does. */
+export type GridSelectRow<T, A> = {
+  readonly cells: Row;
+  readonly value: T;
+  readonly actions?: readonly GridAction<A>[];
+};
+
+/** A grid presented for selection. It carries no stream: a dialog reads and
+ * draws through the streams the dialogs capability was injected with, and the
+ * terminal-handover guarantee depends on it being those streams and no
+ * others. */
+export type GridSelectRequest<T, A> = {
+  readonly message: string;
+  /** Names for the fields the rows align into, drawn once above them. An empty
+   * list means no headers, exactly as omitting it does. */
+  readonly headers?: readonly string[];
+  readonly rows: readonly GridSelectRow<T, A>[];
+};
+
+/** What a selection carries: the chosen row's value, and the chosen action's
+ * where the row declared any. An absent `action` means the chosen row offered
+ * none — it is never what backing out of an actions column produces, because
+ * backing out returns to the row list rather than selecting the row. */
+export type GridSelection<T, A> = {
+  readonly value: T;
+  readonly action?: A;
+};
+
+/** The value registered under `grid`: cells printed once, or driven. A grid is
+ * one or the other in a call, never both. */
 export type Grid = {
   print(request: GridRequest): void;
+  select<T, A>(
+    request: GridSelectRequest<T, A>,
+  ): Promise<GridSelection<T, A> | undefined>;
 };

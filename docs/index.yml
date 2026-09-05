@@ -255,7 +255,7 @@ changes:
     path: changes/0029-add-interactive-grid-row-actions.md
     description: Present grid rows as a select, offer the actions declared for a chosen row as its sub-dialog, report both, and guarantee the terminal is fit to hand to a launched process once the selection settles.
     spec: grid
-    status: draft
+    status: complete
     depends_on:
       - "0027"
       - "0028"

@@ -5,7 +5,7 @@
 Add the driveable half of the grid: present rows as a select, let the user pick one, offer the actions declared for it, and report both. The consumer then does whatever the action means — launching a command being the first thing anyone will want.
 
 **Spec:** [Grid](../specs/grid/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0027, 0028
 
 ## Motivation
@@ -90,23 +90,23 @@ Terminal handover needs no new machinery, which is the point of the design. `run
 
 ## Tasks
 
-- [ ] Compose the interactive grid over the dialogs capability
-  - [ ] `plugins/grid/select.ts` mapping a grid request onto a select request and its result back onto a row and an action
-  - [ ] Read the `dialogs` capability at command time alongside the theme
-  - [ ] Reject the absent-interactive-stream case before rendering, alongside the validations `select` itself performs
-  - [ ] Tests over injected streams for selecting a row, selecting a row and an action, backing out of the actions, cancelling, each rejection, and a row whose computed action list is empty resolving on the row alone rather than being rejected
-- [ ] Pin the terminal-handover guarantee
-  - [ ] Tests asserting that after a completed, a cancelled, and a failed selection, raw mode is off, the installed input handler is gone, and nothing further is written
-  - [ ] Test asserting standard output is untouched throughout an interactive selection
-- [ ] Document the consumer shape
-  - [ ] Add a worked example to `docs/manual/plugins.md`: read the capability, select a row, act on the result, and launch on the restored terminal
-  - [ ] Add an interactive-grid scenario to `demo/`, covered by the demo tests [Change 0024](./0024-relocate-and-cover-the-demo.md) adds
+- [x] Compose the interactive grid over the dialogs capability
+  - [x] `plugins/grid/select.ts` mapping a grid request onto a select request and its result back onto a row and an action
+  - [x] Read the `dialogs` capability at command time alongside the theme
+  - [x] Reject the absent-interactive-stream case before rendering, alongside the validations `select` itself performs
+  - [x] Tests over injected streams for selecting a row, selecting a row and an action, backing out of the actions, cancelling, each rejection, and a row whose computed action list is empty resolving on the row alone rather than being rejected
+- [x] Pin the terminal-handover guarantee
+  - [x] Tests asserting that after a completed, a cancelled, and a failed selection, raw mode is off, the installed input handler is gone, and nothing further is written
+  - [x] Test asserting standard output is untouched throughout an interactive selection
+- [x] Document the consumer shape
+  - [x] Add a worked example to `docs/manual/plugins.md`: read the capability, select a row, act on the result, and launch on the restored terminal
+  - [x] Add an interactive-grid scenario to `demo/`, covered by the demo tests [Change 0024](./0024-relocate-and-cover-the-demo.md) adds
 
 ## Open Questions
 
-- [ ] Whether a selection should be able to report "chose a row, declined every action" distinctly from "cancelled" — backing out of the actions column currently returns to the rows, so the two are only distinguishable if a row can be taken without taking an action.
-- [ ] Whether actions should be declarable once for the whole grid rather than per row, since most consumers will offer the same actions on every row — per row is more general and a whole-grid form is a convenience over it, so this is about whether the convenience is worth a second shape.
-- [ ] Whether a consumer that wants to return to the grid after acting should be served by calling `select` again, which is what it can do today, or whether the repeated call loses something the loop would keep.
+- [ ] Whether a selection should be able to report "chose a row, declined every action" distinctly from "cancelled" — backing out of the actions column currently returns to the rows, so the two are only distinguishable if a row can be taken without taking an action. Implementing it named the mechanism that would answer it without inventing anything: under [Dialogs: Sub-Dialog Columns](../specs/dialogs/index.md#sub-dialog-columns)' `tab` binding, Enter takes the row it is on whether or not it leads anywhere and Tab is what opens it, which is exactly "took the row, opened no actions". Exposing it would mean the grid forwarding a binding it deliberately does not forward today, and it would make Enter mean two different things depending on a setting the reader cannot see, so it is left where the specification leaves it.
+- [x] Whether actions should be declarable once for the whole grid rather than per row, since most consumers will offer the same actions on every row — per row is more general and a whole-grid form is a convenience over it, so this is about whether the convenience is worth a second shape. **Resolved: per row alone.** The convenience it would buy is one `.map` a consumer writes anyway — the rows are already being built from something — while the cost is a second shape that has to be specified, validated, and reconciled with the per-row one wherever they disagree, and a rule for what a whole-grid list means on a row that declares its own. The demo makes the general form's advantage concrete rather than theoretical: its retired service offers none while its neighbours offer three, which the one-list-per-grid shape could not express at all.
+- [x] Whether a consumer that wants to return to the grid after acting should be served by calling `select` again, which is what it can do today, or whether the repeated call loses something the loop would keep. **Resolved: calling again is the answer.** What the repeat loses is the reader's place — a second call opens on the first row with an empty filter — and nothing else, because a grid holds no other state between calls. What the loop would cost is the thing the capability refuses to own: it only returns to the rows once the consumer's action has finished, so the grid would have to be told when that was, which is the process lifecycle [Grid: Constraints](../specs/grid/index.md#constraints) puts out of scope. A consumer that wants the place kept can pass the rows in the order it wants them; one that wants the lifecycle owned wants a different capability.
 - [ ] Whether a selectable row should be able to carry a cell role after all — the printed grid can, and the reason the interactive one cannot is the cursor bar's inversion, which only affects the active row. Letting the inactive rows carry theirs is arguable and is deliberately not attempted here.
 
 ## References

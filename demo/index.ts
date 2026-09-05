@@ -14,6 +14,7 @@
  *   bun run demo leaf         # select whose option opens a text input leaf
  *   bun run demo grid         # printed table: aligned columns and a summary
  *   bun run demo flow         # printed flow: short items filling the width
+ *   bun run demo rows         # interactive grid: pick a row, then an action
  *
  * It runs from a source checkout: it imports the bundled dialogs and grid
  * plugins and the core entry point directly, and none of them is in the
@@ -65,7 +66,8 @@ export const demoPlugin: PluginDefinition = {
         for (const name of names) {
           const result = await present(surfaces, name);
           // A printed grid is its own output: a line reporting what it
-          // returned would be noise underneath it.
+          // returned would be noise underneath it. A driven one answers a
+          // question, so it is reported like every other dialog.
           if (scenarios[name].kind !== "grid") report(context, name, result);
         }
       };

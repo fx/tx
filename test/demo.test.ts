@@ -5,6 +5,8 @@ import {
   type Dialogs,
   type Grid,
   type GridRequest,
+  type GridSelection,
+  type GridSelectRequest,
   type InputRequest,
   order,
   type PrintRequest,
@@ -26,7 +28,11 @@ import { captureContext } from "./helpers.ts";
 type Asked =
   | { readonly kind: "input"; readonly request: InputRequest }
   | { readonly kind: "select"; readonly request: SelectRequest<unknown> }
-  | { readonly kind: "grid"; readonly request: PrintRequest };
+  | { readonly kind: "grid"; readonly request: PrintRequest }
+  | {
+      readonly kind: "rows";
+      readonly request: GridSelectRequest<string, string>;
+    };
 
 /**
  * A dialogs provider that answers without rendering. It stands in for the
@@ -76,6 +82,15 @@ function stubGrid(asked: Asked[]): PluginDefinition {
         register<Grid>("grid", {
           print({ stream: _stream, ...request }: GridRequest) {
             asked.push({ kind: "grid", request });
+          },
+          async select<T, A>(request: GridSelectRequest<T, A>) {
+            asked.push({
+              kind: "rows",
+              request: request as unknown as GridSelectRequest<string, string>,
+            });
+            const [first] = request.rows;
+            if (!first) throw new Error("an interactive grid with no rows");
+            return { value: first.value } as GridSelection<T, A>;
           },
         });
       },
@@ -151,10 +166,11 @@ describe("the demo runner", () => {
         .map((name) => {
           const scenario = scenarios[name];
           if (scenario.kind === "grid") return "";
-          return reported(
-            name,
-            scenario.kind === "input" ? "spring" : firstRow(scenario.request),
-          );
+          if (scenario.kind === "input") return reported(name, "spring");
+          if (scenario.kind === "rows") {
+            return reported(name, { value: scenario.request.rows[0]?.value });
+          }
+          return reported(name, firstRow(scenario.request));
         })
         .join(""),
     );
