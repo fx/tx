@@ -29,7 +29,7 @@ This change MUST satisfy the project's standing testing rules (see [Development 
 - TypeScript MUST pass with no type errors.
 - `test/plugin-boundary.test.ts` MUST keep passing; the theme plugin is bundled and its module graph MUST stay out of `src/`.
 
-Colour resolution MUST be tested as a pure function of environment plus TTY state rather than through a rendered surface, for the same reason column geometry is: the precedence between `NO_COLOR`, `FORCE_COLOR`, `TERM`, and the stream is a table of cases, and a table of cases belongs in a table of assertions.
+Colour resolution MUST be tested as a pure function of the caller's request plus environment plus TTY state rather than through a rendered surface, for the same reason column geometry is: [Theming: Colour Enablement](../specs/theming/index.md#colour-enablement) fixes one order over five inputs, and an order is a table of cases that belongs in a table of assertions.
 
 Skipping or weakening any of these rules to land the PR MUST be treated as a bug in the PR, not in the rule.
 
@@ -94,7 +94,7 @@ The existing `FrameSegment` and `ColumnCell` types carry `dim` and `inverse` boo
   - [ ] `plugins/theme/colour.ts` resolving hue enablement from injected environment, TTY state, and caller request
   - [ ] `plugins/theme/index.ts` registering the `theme` capability, which resolves a theme from a supplied stream and composes the `theme-override` snapshot over the defaults in commit order at that point
   - [ ] Compose the theme plugin in `cli.ts` ahead of its consumers
-  - [ ] Table-driven tests for colour precedence over `NO_COLOR`, `FORCE_COLOR` in both directions, blank and whitespace `FORCE_COLOR`, `TERM=dumb`, and TTY state
+  - [ ] Table-driven tests walking the five-input precedence order in both directions, including the pairs it exists to settle: `NO_COLOR` against `FORCE_COLOR`, `FORCE_COLOR=1` against `TERM=dumb` and against a redirected stream, an explicit caller request against every environment input, and blank or whitespace `FORCE_COLOR` deciding nothing
   - [ ] Tests for partial overrides, override ordering, a failed provider's override being absent, and an override contributed by a plugin composed after the theme plugin still applying
 - [ ] Move the dialogs plugin behind the theme
   - [ ] Replace the `dim` and `inverse` booleans on `FrameSegment` and `ColumnCell` with theme variables

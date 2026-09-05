@@ -138,9 +138,14 @@ Overriding is supported because a surface will occasionally need it, not because
 Whether hues reach a surface is one rule, applied by one owner — not a flag each consumer re-derives. It is resolved per surface rather than per process, because the answer depends on the stream being drawn to and two surfaces in one invocation can differ: a dialog draws to standard error while a printed grid draws to whatever stream its consumer supplies, and one of those can be a terminal while the other is a pipe.
 
 - The theme MUST resolve whether hues are emitted, and every appearance it returns MUST already reflect that decision, so a consumer never tests for colour itself.
-- Hues MUST be disabled when the invoking command was asked to disable colour, when `NO_COLOR` is present in the environment with any value including an empty one, when `TERM` is `dumb`, or when the stream being drawn to is not a TTY.
-- `FORCE_COLOR` MUST decide in both directions: a value of `0` or `false` MUST disable hues even on a TTY, and any other non-blank value MUST enable them even off one. A `FORCE_COLOR` that is absent, empty, or only whitespace MUST decide nothing.
-- `NO_COLOR` MUST take precedence over `FORCE_COLOR`.
+- The five inputs MUST be consulted in one fixed order, and the first that decides MUST settle the question with the rest unread. No pair of inputs may be left to interact, because a rule stated as a set of independent conditions leaves every conflicting pair — `TERM=dumb` beside `FORCE_COLOR=1`, an explicit request beside `NO_COLOR` — without an answer. Highest first:
+  1. The caller's own request, where the invoking command made one: `false` MUST disable hues and `true` MUST enable them. It is the most specific statement of intent there is, and a command that offers the flag has already decided the flag wins.
+  2. `NO_COLOR` present in the environment with any value, including an empty one, MUST disable hues.
+  3. `FORCE_COLOR` MUST decide in both directions: `0` or `false` MUST disable hues even on a TTY, and any other value MUST enable them even off one. A `FORCE_COLOR` that is absent, empty, or only whitespace decides nothing and MUST be passed over, leaving the question to the inputs below it.
+  4. `TERM` being `dumb` MUST disable hues.
+  5. The stream being drawn to not being a TTY MUST disable hues.
+- Where no input decides, hues MUST be enabled.
+- Two consequences of that order are worth stating outright, because both are cases an implementation will be asked about: `NO_COLOR` beats `FORCE_COLOR`, and `FORCE_COLOR=1` beats `TERM=dumb` and beats a redirected stream, which is what makes it a way of forcing colour rather than a hint.
 - With hues disabled, a theme MUST still resolve dim, bold, and inverse, so a surface keeps its structure when it loses its colour.
 
 #### Scenario: NO_COLOR wins
@@ -160,6 +165,18 @@ Whether hues reach a surface is one rule, applied by one owner — not a flag ea
 - **GIVEN** output is redirected and no colour variable is set
 - **WHEN** a surface renders
 - **THEN** no hue is emitted and the visible text is the text a terminal would show
+
+#### Scenario: Forced colour beats a dumb terminal
+
+- **GIVEN** `TERM` is `dumb` and `FORCE_COLOR` is set to `1`
+- **WHEN** a surface renders
+- **THEN** hues are emitted, because `FORCE_COLOR` is consulted before `TERM`
+
+#### Scenario: An explicit request beats the environment
+
+- **GIVEN** the invoking command was asked for colour and `NO_COLOR` is set
+- **WHEN** a surface renders
+- **THEN** hues are emitted, because the caller's own request is consulted first
 
 ## Design
 

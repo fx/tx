@@ -100,8 +100,8 @@ Two widths are in play and they must not be confused. The *layout* width is what
   - [ ] `plugins/grid/geometry.ts` — column widths over cells and headers, gap, padding, start and end alignment, and the no-trailing-whitespace rule
   - [ ] Pure-function tests for widths over wide and astral characters, alignment, the empty and summary lines, trailing whitespace, the column count over ragged rows and a longer header row, and control-character removal in every rendered string
 - [ ] Add the flow layout
-  - [ ] Flow placement in `geometry.ts`: equal columns, down-then-across order, one column when nothing more fits, headers ignored
-  - [ ] Pure-function tests for placement, ordering, the one-column floor, and trailing whitespace
+  - [ ] Flow placement in `geometry.ts`: rows flattened to items in row then cell order, equal columns, down-then-across order, one column when nothing more fits, headers and per-cell alignment ignored, the empty and summary lines as in a table
+  - [ ] Pure-function tests for placement, ordering, a multi-cell row contributing several items, the one-column floor, and trailing whitespace
 - [ ] Render and print
   - [ ] `plugins/grid/render.ts` building elements through injected React and Ink, resolving appearances through the theme
   - [ ] One-shot non-interactive render that terminates, with the canvas sized from the measured grid and the flow's layout width taken from the request's stream, eighty when it reports none

@@ -149,16 +149,24 @@ A cell's text arrives from the consumer, and a consumer's text arrives from some
 
 A flow is the same cells with no column meaning: a list of short items filling the width available.
 
+- A flow's items MUST be the cells of its rows, flattened into one sequence in row order and, within a row, in cell order. A row of one cell therefore contributes one item, and a row of several contributes several. The rows are how a request carries cells; only a table gives a row's shape any further meaning, so a flow MUST NOT reject a multi-cell row, MUST NOT join one into a single item, and MUST NOT pad rows out to a common length.
 - A flow MUST place its items into as many equal columns as the width available affords, and MUST use one column when it affords no more.
 - Items MUST read down each column before across, so a flowed list stays alphabetical down the page.
 - Every item MUST be padded to the shared column width except the last on its line, so no line carries trailing whitespace.
-- A flow MUST ignore a supplied header row, because its columns carry no per-column meaning; supplying one MUST NOT be an error.
+- A flow MUST ignore a supplied header row and MUST ignore a cell's declared alignment, because its columns carry no per-column meaning and there is nothing for a cell to be aligned against; supplying either MUST NOT be an error. A cell's declared variable MUST still be honoured, because that is a property of the cell rather than of a column.
+- A flow MUST draw the empty message and the summary exactly as [Table Layout](#table-layout) requires, so the two layouts differ only in how the cells are placed.
 
 #### Scenario: Items flow down then across
 
 - **GIVEN** six items and a width affording two columns
 - **WHEN** the flow renders
 - **THEN** the first three items form the left column and the remaining three the right
+
+#### Scenario: A multi-cell row contributes several items
+
+- **GIVEN** a flow of two rows, the first carrying the cells `alpha` and `beta` and the second carrying `gamma`
+- **WHEN** the flow renders
+- **THEN** it places three items in the order `alpha`, `beta`, `gamma`
 
 ### Printing
 
