@@ -354,24 +354,26 @@ describe("bundled theme provider", () => {
     expect(theming.theme(terminal).appearance("chrome")).toEqual({ dim: true });
   });
 
-  /** An override is another plugin's own object, so composing it freezes it:
-   * the plugin that contributed it cannot reach back into a theme already
-   * resolved from it and change what a surface will draw. */
-  test("holds an override against the plugin that contributed it", async () => {
-    const override: ThemeOverride = { danger: { hue: "red" } };
+  /** An override is another plugin's own object, so the theme keeps a snapshot
+   * of it rather than the object itself. The contributor stays free to do what
+   * it likes with what it still holds — the theme it was composed into does not
+   * follow it. */
+  test("keeps a snapshot of an override, not the contributor's object", async () => {
+    const contributed: { hue?: Hue } = { hue: "red" };
+    const override: ThemeOverride = { danger: contributed };
     const { theming } = await obtainTheming([overriding("states", override)]);
+    const theme = theming.theme(terminal);
 
-    expect(theming.theme(terminal).appearance("danger")).toEqual({
-      hue: "red",
-    });
-    const contributed = override.danger as { hue?: string };
-    expect(Object.isFrozen(contributed)).toBe(true);
-    expect(() => {
-      contributed.hue = "green";
-    }).toThrow();
-    expect(theming.theme(terminal).appearance("danger")).toEqual({
-      hue: "red",
-    });
+    expect(theme.appearance("danger")).toEqual({ hue: "red" });
+
+    // Composition left the contributor's own object alone, so changing it is
+    // its own business and cannot throw — and a theme already resolved from it
+    // does not follow it.
+    expect(Object.isFrozen(contributed)).toBe(false);
+    contributed.hue = "green";
+    override.danger = { hue: "blue" };
+
+    expect(theme.appearance("danger")).toEqual({ hue: "red" });
   });
 
   test("leaves every unspecified variable alone under a partial override", async () => {

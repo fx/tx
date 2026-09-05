@@ -56,11 +56,14 @@ const themeOverrideKey = "theme-override";
  * attribute is not applied rather than inherited, and merging would make an
  * override unable to turn an attribute off.
  *
- * A contributed appearance is frozen as it is laid in, and the record itself
- * when it is done: the defaults arrive frozen, but an override is another
- * plugin's own object, and a theme composed from one it could still change
- * afterwards is a theme that answers differently later for reasons no consumer
- * can see.
+ * What the theme keeps is an immutable snapshot: a contributed appearance is
+ * copied and the copy frozen, and the record is frozen once it is composed.
+ * The defaults already arrive frozen, but an override is another plugin's own
+ * object, and a theme still holding that object would answer differently later
+ * for reasons no consumer could see. Taking a snapshot leaves the contributor
+ * free to do whatever it likes with its own object afterwards — reuse it,
+ * mutate it, hand it somewhere else — without the composed theme changing, and
+ * without this plugin reaching into data it does not own to freeze it.
  */
 function composeOverrides(
   overrides: readonly ThemeOverride[],
@@ -70,7 +73,7 @@ function composeOverrides(
     for (const variable of themeVariables) {
       const appearance = override[variable];
       if (appearance !== undefined) {
-        composed[variable] = Object.freeze(appearance);
+        composed[variable] = Object.freeze({ ...appearance });
       }
     }
   }
