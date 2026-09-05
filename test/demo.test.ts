@@ -133,7 +133,19 @@ function unstyled(output: string): string {
   return output.replace(stylingSequence, "");
 }
 
-/** The answer a select resolves with when the person takes the first row. */
+/**
+ * The answer a select resolves with when the person takes the first row.
+ *
+ * It names the first option's value, and for a scenario whose first option
+ * opens a sub-dialog the real dialogs would never resolve with it — that
+ * option is opened rather than taken, and the answer comes from whichever
+ * option finally completes. That is sound here because the assertions this
+ * feeds are about the runner's dispatch order — which scenario ran, in what
+ * sequence — rather than about what a dialog resolves with, so the value is a
+ * token. Repointed at a case where the resolved value is the subject, it would
+ * have to account for the expand binding and for the descent into a
+ * sub-dialog.
+ */
 function firstRow(request: SelectRequest<unknown>): SelectResult<unknown> {
   const [first] = request.options;
   if (!first) throw new Error("a select with no options");

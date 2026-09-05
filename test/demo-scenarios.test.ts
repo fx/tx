@@ -137,6 +137,11 @@ function recordingSurfaces(): {
       inputs.push(request);
       return "answered";
     },
+    // The first option's value, with the same caveat `firstRow` carries in
+    // test/demo.test.ts: where that option opens a sub-dialog the real dialogs
+    // would resolve with whatever finally completed instead. Sound here for
+    // the same reason — what these assertions are about is which surface a
+    // scenario is presented on, not what a dialog answers.
     async select<T>(request: SelectRequest<T>) {
       selects.push(request as SelectRequest<unknown>);
       const [first] = request.options;
