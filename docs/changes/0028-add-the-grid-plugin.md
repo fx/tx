@@ -98,7 +98,7 @@ Two widths are in play and they must not be confused. The *layout* width is what
 - [ ] Add the grid plugin's geometry and cells
   - [ ] `plugins/grid/cells.ts` — control-character removal over every rendered string, the `—` placeholder for an empty cell only, the column count, and short-row filling
   - [ ] `plugins/grid/geometry.ts` — column widths over cells and headers, gap, padding, start and end alignment, and the no-trailing-whitespace rule
-  - [ ] Pure-function tests for widths over wide and astral characters, alignment, the empty and summary lines, trailing whitespace, the column count over ragged rows and a longer header row, and control-character removal in every rendered string
+  - [ ] Pure-function tests for widths over wide and astral characters, alignment, the empty and summary lines including an empty grid that still carries a summary, trailing whitespace, the column count over ragged rows and a longer header row, and control-character removal in every rendered string
 - [ ] Add the flow layout
   - [ ] Flow placement in `geometry.ts`: rows flattened to items in row then cell order, equal columns, down-then-across order, one column when nothing more fits, headers and per-cell alignment ignored, the empty and summary lines as in a table
   - [ ] Pure-function tests for placement, ordering, a multi-cell row contributing several items, the one-column floor, and trailing whitespace

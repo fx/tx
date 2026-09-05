@@ -125,6 +125,7 @@ A cell's text arrives from the consumer, and a consumer's text arrives from some
 - A header row, when supplied, MUST be drawn once above the rows and MUST be emphasized relative to them.
 - A grid asked to draw no rows MUST print its supplied empty message, and MUST NOT print a header row over nothing.
 - A summary, when supplied, MUST be drawn once beneath the rows, separated from them by a blank line, and MUST be de-emphasized relative to them.
+- A grid with no rows and a summary MUST print the empty message, then that same blank line, then the summary. The empty message stands where the rows would have been and is separated from the summary exactly as rows would have been, so the spacing beneath a grid does not change with whether it happened to have anything in it. A grid with no rows and no summary MUST print the empty message alone, with no trailing blank line.
 - When the terminal is narrower than the table's natural width, the table MUST NOT re-wrap or re-flow a column in a way that changes which row a cell belongs to.
 
 #### Scenario: Aligned columns
@@ -138,6 +139,12 @@ A cell's text arrives from the consumer, and a consumer's text arrives from some
 - **GIVEN** a grid with a header row and no rows, and the empty message `Nothing to show.`
 - **WHEN** it renders
 - **THEN** `Nothing to show.` is printed and no header row appears
+
+#### Scenario: Empty grid with a summary
+
+- **GIVEN** a grid with no rows, the empty message `Nothing to show.`, and a summary
+- **WHEN** it renders
+- **THEN** `Nothing to show.` is printed, then one blank line, then the summary
 
 #### Scenario: No trailing whitespace
 
