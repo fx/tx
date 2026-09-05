@@ -315,25 +315,25 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 
 An option MAY declare a sub-dialog holding a nested select request or a single text field:
 
-- Ctrl+Enter on an option declaring a sub-dialog MUST open that sub-dialog as a new level stacked over its parent inside the same render session, and MUST do nothing on an option declaring none.
+- Tab on an option declaring a sub-dialog MUST open that sub-dialog as a new level stacked over its parent inside the same render session, and MUST do nothing on an option declaring none.
 - Only the top level MUST answer keys; the levels beneath it MUST stay rendered and ignore input until the top level closes.
 - Escape or Ctrl-C with more than one level open MUST close only the top level and return to its parent with the parent's state unchanged; at the root level it MUST cancel the dialog and resolve with `undefined`.
 - Completing a nested select level MUST resolve the whole `select` with a result carrying the completing option's exact value and every input value collected along the path, keyed by field name with the deeper submission winning a repeated name.
 - Submitting a text-field sub-dialog MUST resolve the whole `select` with a result carrying the opening option's exact value and every input value collected along the path including the submitted text under its field's name, keyed by field name with the deeper submission winning a repeated name.
 - Entering a sub-dialog MUST NOT change its parent's filter text or active option, and leaving it MUST restore exactly what the parent showed before it opened.
-- The trigger MUST be answered from the modified key report rather than from typed or pasted text, so a multi-character chunk MUST NOT open a sub-dialog.
+- The trigger MUST be answered from the Tab key report rather than from typed or pasted text; Shift+Tab reports the same key and MUST open a sub-dialog too rather than reaching the filter as text.
 - `select` MUST reject before rendering when any reachable sub-dialog declares an empty options list, or when any reachable option declares an empty field list or repeats a field name within itself.
 
 #### Scenario: Drill into a nested select
 
 - **GIVEN** the active option declares a nested select whose second option is plain
-- **WHEN** the user presses Ctrl+Enter, then Down, then Enter
+- **WHEN** the user presses Tab, then Down, then Enter
 - **THEN** the nested select opens over its parent and `select` resolves with the second nested option's value
 
 #### Scenario: Submit a text leaf
 
 - **GIVEN** the active option declares a text-field sub-dialog named `tag`
-- **WHEN** the user presses Ctrl+Enter, types `nightly`, and presses Enter
+- **WHEN** the user presses Tab, types `nightly`, and presses Enter
 - **THEN** `select` resolves with the opening option's value and the collected value `nightly` under `tag`
 
 #### Scenario: Pop back to the parent
@@ -345,7 +345,7 @@ An option MAY declare a sub-dialog holding a nested select request or a single t
 #### Scenario: Trigger without a declaration does nothing
 
 - **GIVEN** the active option declares no sub-dialog
-- **WHEN** the user presses Ctrl+Enter
+- **WHEN** the user presses Tab
 - **THEN** nothing opens and the dialog stays on the same option
 
 ### Presentation
@@ -357,7 +357,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Frame edges, the title, the key hints, the overflow indicators, and the filter prompt MUST be rendered dimmed relative to option labels and entered text.
 - The active option MUST be rendered as an inverted bar spanning the frame's full inner width.
 - A dialog MUST use only the terminal's default foreground and background, their dimmed form, and their inversion; it MUST NOT emit any hue.
-- A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys. A select level whose visible options include one declaring a sub-dialog MUST append `· Ctrl+Enter expand` to that line.
+- A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys. A select level whose visible options include one declaring a sub-dialog MUST append `· Tab expand` to that line.
 - Each stacked sub-dialog MUST use the frame its kind calls for: a nested select in a double-line frame, a text-field sub-dialog in a single-line frame.
 - Stacked levels MUST overlap: each level above the root MUST render offset down and right from its parent, with a dimmed block-fill shadow box behind it, clamped so the union of the stacked frames stays within the terminal width and stays strictly shorter than the terminal height.
 - A frame MUST fit its content and MUST NOT exceed the terminal width; a title or label wider than the inner width MUST be truncated at its end with an ellipsis rather than wrapped, and filter text or a value under entry wider than the inner width MUST keep its end visible, so the caret is never cut off.
@@ -370,7 +370,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Every animation timer MUST be stopped before the dialog settles.
 - A request rejected before rendering MUST still render nothing, frame included.
 
-The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled and with ` · Ctrl+Enter expand` appended exactly when a visible option declares a sub-dialog; the input hint line reads `Enter submit · Esc cancel`.
+The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled and with ` · Tab expand` appended exactly when a visible option declares a sub-dialog; the input hint line reads `Enter submit · Esc cancel`.
 
 Reference rendering of a filter-enabled select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves three option rows because the dialog's other six rows — the two frame edges, the filter prompt, both overflow indicators, and the hint line — must fit alongside them and still stay strictly under the terminal height. Only one indicator has anything to count here, so the frame drawn is eight rows of the ten:
 
@@ -524,3 +524,4 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-02 | Implemented the Norton Commander presentation: greyscale framed panels with their message set into the top edge, the inverted cursor bar, dimmed chrome and key hints, width-aware truncation, and the bounded caret blink, indicator pulse, and confirmation flash | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |
 | 2026-09-04 | Desired cascading sub-dialogs with the Ctrl+Enter trigger, one-session stacking, Escape popping, whole-stack resolution, and overlapping shadowed panels | [0023-cascading-sub-dialogs](../../changes/0023-cascading-sub-dialogs.md) |
 | 2026-09-04 | Implemented cascading sub-dialogs with the Ctrl+Enter trigger, one-session stacking, Escape popping, whole-stack resolution, and overlapping shadowed panels | [0023-cascading-sub-dialogs](../../changes/0023-cascading-sub-dialogs.md) |
+| 2026-09-04 | Retargeted the sub-dialog trigger from Ctrl+Enter to Tab so it works on terminals without the kitty keyboard protocol | [0024-sub-dialog-trigger-tab](../../changes/0024-sub-dialog-trigger-tab.md) |

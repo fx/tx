@@ -1838,7 +1838,7 @@ describe("select viewport and extended navigation", () => {
   });
 
   test("pages by the reduced window while a sub-dialog is open", async () => {
-    const expand = `${ESCAPE}[13;5u`;
+    const expand = "\t";
     const options: readonly SelectOption<number>[] = [
       ...listed(29),
       {
@@ -1859,7 +1859,7 @@ describe("select viewport and extended navigation", () => {
     expect(result.value).toBe(5);
   });
   test("clips a stack deeper than the terminal inside its bounds", async () => {
-    const expand = `${ESCAPE}[13;5u`;
+    const expand = "\t";
     const deep: readonly SelectOption<number>[] = [
       { label: "Known", value: 0 },
       {
@@ -2787,7 +2787,7 @@ describe("user-provided select options", () => {
 });
 
 describe("cascading sub-dialogs", () => {
-  const CTRL_ENTER = `${ESCAPE}[13;5u`;
+  const EXPAND = "\t";
   const tag: TextField = {
     type: "text",
     name: "tag",
@@ -2815,7 +2815,7 @@ describe("cascading sub-dialogs", () => {
     const expanded = await runSelection(expandable(), [CARRIAGE_RETURN], false);
     expect(expanded.value).toBe("known");
     expect(frameRows(expanded.stderr).at(-1)).toBe(
-      " ↑↓ move · Enter select · Esc cancel · Ctrl+Enter expand",
+      " ↑↓ move · Enter select · Esc cancel · Tab expand",
     );
 
     const flat = await runSelection(
@@ -2834,17 +2834,38 @@ describe("cascading sub-dialogs", () => {
         { label: "Known", value: "known" },
         { label: "Other", value: "other" },
       ],
-      [CTRL_ENTER, CARRIAGE_RETURN],
+      [EXPAND, CARRIAGE_RETURN],
       false,
     );
     expect(result.value).toBe("known");
     expect(result.values).toEqual({});
   });
 
+  test("opens from a filtered list without consuming the key as filter text", async () => {
+    const options: readonly SelectOption<string>[] = [
+      { label: "Alpha", value: "alpha" },
+      {
+        label: "Alphabet",
+        value: "alphabet",
+        dialog: {
+          message: "Nested",
+          options: [{ label: "Only", value: "only" }],
+        },
+      },
+    ];
+    const result = await runSelection(
+      options,
+      ["alph", DOWN, EXPAND, CARRIAGE_RETURN],
+      true,
+    );
+    expect(result.value).toBe("only");
+    expect(result.values).toEqual({});
+  });
+
   test("opens a nested select and resolves the whole stack with its value", async () => {
     const result = await runSelection(expandable(), [
       DOWN,
-      CTRL_ENTER,
+      EXPAND,
       DOWN,
       CARRIAGE_RETURN,
     ]);
@@ -2875,7 +2896,7 @@ describe("cascading sub-dialogs", () => {
     await until(() => stripped(stderr.text()).includes("Category"));
     stdin.write(DOWN);
     await until(() => activeRow(stderr) === "Category");
-    stdin.write(CTRL_ENTER);
+    stdin.write(EXPAND);
     await until(() => stripped(stderr.text()).includes("Pick an item"));
     await until(() => {
       try {
@@ -2932,7 +2953,7 @@ describe("cascading sub-dialogs", () => {
     await until(() => stripped(stderr.text()).includes("Category"));
     stdin.write(DOWN);
     await until(() => activeRow(stderr) === "Category");
-    stdin.write(CTRL_ENTER);
+    stdin.write(EXPAND);
     await until(() => stripped(stderr.text()).includes("Pick an item"));
     await until(() => {
       try {
@@ -2961,7 +2982,7 @@ describe("cascading sub-dialogs", () => {
   test("resolves a text leaf with the opening value and its submitted text", async () => {
     const result = await runSelection(
       [{ label: "Tagged", value: "tagged", dialog: tag }],
-      [CTRL_ENTER, "nightly", CARRIAGE_RETURN],
+      [EXPAND, "nightly", CARRIAGE_RETURN],
       false,
     );
     expect(result.value).toBe("tagged");
@@ -2993,7 +3014,7 @@ describe("cascading sub-dialogs", () => {
     );
     await until(() => stdin.rawModes.includes(true));
     await until(() => stripped(stderr.text()).includes("Tagged"));
-    stdin.write(CTRL_ENTER);
+    stdin.write(EXPAND);
     await until(() => stripped(stderr.text()).includes("Which tag?"));
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
     stdin.write(ESCAPE);
@@ -3009,7 +3030,7 @@ describe("cascading sub-dialogs", () => {
       }
     });
     expect(settled).toBe(false);
-    stdin.write(CTRL_ENTER);
+    stdin.write(EXPAND);
     // The push is synchronous but the reopened entry subscribes on its mount
     // effect; wait it out so the typed text is not swallowed before then.
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
@@ -3088,7 +3109,7 @@ describe("cascading sub-dialogs", () => {
     );
     await until(() => stdin.rawModes.includes(true));
     await until(() => stripped(stderr.text()).includes("Category"));
-    stdin.write(CTRL_ENTER);
+    stdin.write(EXPAND);
     await until(() => stripped(stderr.text()).includes("Nested"));
     stdin.write(CARRIAGE_RETURN);
     await until(() => stripped(stderr.text()).includes("Which account?"));
@@ -3146,7 +3167,7 @@ describe("cascading sub-dialogs", () => {
     await until(() => stripped(stderr.text()).includes("Category"));
     // Open the nested level first: the field collected there completes the
     // level, and the root's own collection must no longer be reachable.
-    stdin.write(CTRL_ENTER);
+    stdin.write(EXPAND);
     await until(() => stripped(stderr.text()).includes("Nested"));
     stdin.write(CARRIAGE_RETURN);
     await until(() => stripped(stderr.text()).includes("Which account below?"));
@@ -3174,7 +3195,7 @@ describe("cascading sub-dialogs", () => {
     ];
     const result = await runSelection(
       options,
-      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      [DOWN, EXPAND, CARRIAGE_RETURN],
       false,
     );
     expect(result.value).toBe("x");
@@ -3191,7 +3212,7 @@ describe("cascading sub-dialogs", () => {
   test("cuts a stacked entry shadow to its panel rather than the terminal", async () => {
     const result = await runSelection(
       [{ label: "Tagged", value: "tagged", dialog: tag }],
-      [CTRL_ENTER, "nightly", CARRIAGE_RETURN],
+      [EXPAND, "nightly", CARRIAGE_RETURN],
       false,
       terminalOfColumns(40),
     );
@@ -3246,7 +3267,7 @@ describe("cascading sub-dialogs", () => {
     );
     await until(() => nestedStdin.rawModes.includes(true));
     await until(() => stripped(nestedStderr.text()).includes("Category"));
-    nestedStdin.write(CTRL_ENTER);
+    nestedStdin.write(EXPAND);
     await until(() => stripped(nestedStderr.text()).includes("Nested"));
     nestedStdin.write(CARRIAGE_RETURN);
     await until(() => stripped(nestedStderr.text()).includes("Which account?"));
@@ -3301,7 +3322,7 @@ describe("cascading sub-dialogs", () => {
     await until(() => activeRow(stderr) === "Alpha");
     stdin.write(DOWN);
     await until(() => activeRow(stderr) === "Alphabet");
-    stdin.write(CTRL_ENTER);
+    stdin.write(EXPAND);
     await until(() => stripped(stderr.text()).includes("Nested"));
     // The nested level starts blank while the parent keeps its own text.
     await until(() => {
@@ -3351,7 +3372,7 @@ describe("cascading sub-dialogs", () => {
     ];
     const result = await runSelection(
       options,
-      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      [DOWN, EXPAND, CARRIAGE_RETURN],
       false,
     );
     expect(result.value).toBe("x");
@@ -3368,13 +3389,13 @@ describe("cascading sub-dialogs", () => {
     // of that row is what peeks out right of the overlap.
     expect(frame).toContain("eOptionIsLong");
     expect(frame).not.toContain("Known");
-    expect(frame).not.toContain("Ctrl+Enter");
+    expect(frame).not.toContain("expand");
   });
 
   test("dims a block-fill shadow behind each panel above the root", async () => {
     const result = await runSelection(
       expandable(),
-      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      [DOWN, EXPAND, CARRIAGE_RETURN],
       false,
     );
     expect(result.value).toBe("first");
@@ -3388,7 +3409,7 @@ describe("cascading sub-dialogs", () => {
     const columns = 24;
     const result = await runSelection(
       expandable(),
-      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      [DOWN, EXPAND, CARRIAGE_RETURN],
       false,
       terminalOfColumns(columns),
     );
@@ -3404,7 +3425,7 @@ describe("cascading sub-dialogs", () => {
     const terminalRows = 10;
     const result = await runSelection(
       expandable(),
-      [DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      [DOWN, EXPAND, CARRIAGE_RETURN],
       false,
       terminalOfRows(terminalRows),
     );
@@ -3441,7 +3462,7 @@ describe("cascading sub-dialogs", () => {
     const terminalRows = 12;
     const result = await runSelection(
       deep,
-      [DOWN, CTRL_ENTER, DOWN, CTRL_ENTER, CARRIAGE_RETURN],
+      [DOWN, EXPAND, DOWN, EXPAND, CARRIAGE_RETURN],
       false,
       terminalOfRows(terminalRows),
     );

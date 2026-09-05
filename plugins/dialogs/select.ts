@@ -56,7 +56,7 @@ function selectHint(filtering: boolean, expandable: boolean): string {
   const base = filtering
     ? "↑↓ move · Enter select · type to filter · Esc cancel"
     : "↑↓ move · Enter select · Esc cancel";
-  return expandable ? `${base} · Ctrl+Enter expand` : base;
+  return expandable ? `${base} · Tab expand` : base;
 }
 
 /** One rendered row of the panel, described before it is measured: the panel's
@@ -224,7 +224,7 @@ export function createSelectView<T>(
   return function Select() {
     const { columns, rows } = ink.useWindowSize();
     /** The stack of open levels inside the single render session: the root is
-     * the caller's request, Ctrl+Enter pushes the active option's sub-dialog
+     * the caller's request, Tab pushes the active option's sub-dialog
      * over it, and Escape pops one level above the root. It lives in a ref so
      * a chunk carrying several keys is handled before any of them has
      * re-rendered; every push, pop, and edit bumps `revision` to show the
@@ -541,12 +541,12 @@ export function createSelectView<T>(
       // and ignores input.
       if ("field" in uppermost) return;
       const current = topSelect();
-      // The trigger is the modified key report — return with control — never
-      // typed or pasted text: `value` carries the whole chunk Ink parsed, so
-      // a multi-character chunk (a paste or several keys at once) holds more
-      // than the one return the chord reports and must not open anything.
-      if (key.return && key.ctrl) {
-        if (value.length !== 1) return;
+      // The trigger is Tab, a key the dialogs never otherwise answer: a
+      // standalone input and a field entry never move focus, and the select
+      // has no focus to move, so no text is lost by answering it. Typed or
+      // pasted text can never open anything — Shift+Tab reports the same
+      // name, so it expands too rather than reaching the filter as text.
+      if (key.tab) {
         pushSubDialog(current);
         return;
       }

@@ -106,7 +106,7 @@ The select view gains a stack of levels, each level holding what the flat dialog
 
 ## Open Questions
 
-- [ ] How Ctrl+Enter is delivered on terminals without an enhanced keyboard protocol — the input layer's key report decides: if the chord arrives indistinguishable from Enter there, the implementation either enables the renderer's opt-in keyboard protocol or records the terminals where the trigger cannot work. The spec names the chord without naming the mechanism, so either outcome honors it.
+- [x] How Ctrl+Enter is delivered on terminals without an enhanced keyboard protocol — superseded by [0024](./0024-sub-dialog-trigger-tab.md): the trigger is Tab, which arrives as one keystroke on every terminal with no protocol needed. (Earlier answer preserved for the record: enabling Ink's kitty protocol was tried and reverted — its enable/disable sequences pollute the error-stream frames and its auto mode replays buffered keys as text — and on a terminal that cannot deliver the chord, e.g. tmux 3.4 with `extended-keys off`, Ctrl+Enter arrived as plain Enter and confirmed the option.)
 
 ## References
 

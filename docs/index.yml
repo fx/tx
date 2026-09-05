@@ -204,3 +204,11 @@ changes:
     status: complete
     depends_on:
       - "0021"
+  - id: "0024"
+    name: sub-dialog-trigger-tab
+    path: changes/0024-sub-dialog-trigger-tab.md
+    description: Retarget the select sub-dialog trigger from Ctrl+Enter to Tab so it works on terminals without the kitty keyboard protocol.
+    spec: dialogs
+    status: complete
+    depends_on:
+      - "0023"
