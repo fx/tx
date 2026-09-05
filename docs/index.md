@@ -40,7 +40,7 @@
 | 0022 | [Exempt and Verify the tx Self-Update](changes/0022-exempt-and-verify-the-tx-self-update.md) | [Updates](specs/updates/) | complete | 0015 |
 | 0023 | [Render Sub-Dialogs as Columns](changes/0023-render-sub-dialogs-as-columns.md) | [Dialogs](specs/dialogs/) | complete | 0021 |
 | 0024 | [Relocate and Cover the Demo](changes/0024-relocate-and-cover-the-demo.md) | [Architecture](specs/architecture/) | draft | — |
-| 0025 | [Guarantee Cell Width by Construction](changes/0025-guarantee-cell-width-by-construction.md) | [Dialogs](specs/dialogs/) | draft | — |
+| 0025 | [Guarantee Cell Width by Construction](changes/0025-guarantee-cell-width-by-construction.md) | [Dialogs](specs/dialogs/) | complete | — |
 | 0026 | [Add Theme Variables](changes/0026-add-theme-variables.md) | [Theming](specs/theming/) | draft | — |
 | 0027 | [Add Multi-Cell Select Rows](changes/0027-add-multi-cell-select-rows.md) | [Dialogs](specs/dialogs/) | draft | 0025, 0026 |
 | 0028 | [Add the Grid Plugin](changes/0028-add-the-grid-plugin.md) | [Grid](specs/grid/) | draft | 0026 |

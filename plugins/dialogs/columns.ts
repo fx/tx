@@ -1,4 +1,4 @@
-import { displayWidth, padToWidth, truncateEnd } from "./frame.ts";
+import { displayWidth, padToWidth } from "./frame.ts";
 import type { SelectOption } from "./types.ts";
 import type { OptionWindow } from "./viewport.ts";
 
@@ -148,8 +148,22 @@ export function stretchLastColumn(
   return [...widths.slice(0, last), (widths[last] as number) + slack];
 }
 
-/** One cell, cut and padded to its column, with the marker set on its right
- * edge when the option it draws opens a sub-dialog. */
+/** The narrowest column that can carry a marker: the marker's own reserved
+ * columns and one column of label to mark. Below it the marker is dropped
+ * rather than squeezed — a row reading `▸` alone says where it leads but not
+ * what it is, which is less use than the first character of its label. */
+const markableWidth = expandMarkerWidth + 1;
+
+/**
+ * One cell, cut and padded to its column, with the marker set on its right
+ * edge when the option it draws opens a sub-dialog.
+ *
+ * Whether the column can afford a marker is decided before the width is split,
+ * which is what makes the result exactly `width` columns wide for every width
+ * of one or more. Splitting first and clamping each half afterwards is where
+ * the label's room and the marker's room stop agreeing, and a cell over its
+ * budget is then only as safe as whatever cuts the row it lands in.
+ */
 function cell(
   text: string,
   width: number,
@@ -157,13 +171,13 @@ function cell(
   dim: boolean,
   inverse: boolean,
 ): ColumnCell {
-  if (!marked) return { text: padToWidth(text, width), dim, inverse };
-  const room = Math.max(1, width - expandMarkerWidth);
-  return {
-    text: `${padToWidth(text, room)} ${truncateEnd(expandGlyph, Math.max(0, width - room - 1))}`,
-    dim,
-    inverse,
-  };
+  if (!marked || width < markableWidth) {
+    return { text: padToWidth(text, width), dim, inverse };
+  }
+  // The marker's columns are exactly the separating space and the glyph, so
+  // what is left is the label's and the three parts sum to `width`.
+  const room = width - expandMarkerWidth;
+  return { text: `${padToWidth(text, room)} ${expandGlyph}`, dim, inverse };
 }
 
 /**
