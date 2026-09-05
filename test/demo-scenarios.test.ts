@@ -27,6 +27,20 @@ function columns(
   return found;
 }
 
+/** Every request the walk reaches, its own included: a column is a request of
+ * its own, and it is the request that carries the headers naming that column's
+ * fields. */
+function requests(
+  request: SelectRequest<string>,
+): readonly SelectRequest<string>[] {
+  const found: SelectRequest<string>[] = [request];
+  for (const { dialog } of request.options) {
+    if (dialog !== undefined && "options" in dialog)
+      found.push(...requests(dialog));
+  }
+  return found;
+}
+
 /** Every option the request reaches, at any depth. */
 function reachableOptions(
   request: SelectRequest<string>,
@@ -116,14 +130,44 @@ describe("demo catalogue", () => {
   );
 
   test.each(selectRequests)(
-    "%s labels every option it offers",
+    "%s gives every option display text of one shape",
     (_, request) => {
       for (const options of columns(request)) {
-        const labels = options.map((option) => option.label);
-        expect(labels.every((label) => label !== "")).toBe(true);
-        expect(new Set(labels).size).toBe(labels.length);
+        // A column declares one shape throughout and the same number of cells
+        // on every row of it: the two things a request is rejected for, so the
+        // catalogue has to satisfy both to be presentable at all.
+        const shapes = options.map((option) =>
+          option.cells === undefined ? "label" : "cells",
+        );
+        expect(new Set(shapes).size).toBe(1);
+        const rows = options.map((option) => option.cells ?? [option.label]);
+        expect(new Set(rows.map((row) => row.length)).size).toBe(1);
+        expect(
+          rows.every((row) =>
+            row.every((text) => text !== undefined && text !== ""),
+          ),
+        ).toBe(true);
+        // Nothing is listed twice, and no two options carry the same value.
+        const drawn = rows.map((row) => row.join("|"));
+        expect(new Set(drawn).size).toBe(drawn.length);
         const values = options.map((option) => option.value);
         expect(new Set(values).size).toBe(values.length);
+      }
+    },
+  );
+
+  test.each(selectRequests)(
+    "%s heads a column of cells and names every field of it",
+    (_, request) => {
+      for (const column of requests(request)) {
+        const headers = column.headers;
+        if (headers === undefined) continue;
+        expect(headers.every((header) => header !== "")).toBe(true);
+        // Headers belong to a column of cells and name every one of its
+        // fields, which is what the plugin rejects a request for otherwise.
+        for (const option of column.options) {
+          expect(option.cells?.length).toBe(headers.length);
+        }
       }
     },
   );

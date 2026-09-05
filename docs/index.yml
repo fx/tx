@@ -238,7 +238,7 @@ changes:
     path: changes/0027-add-multi-cell-select-rows.md
     description: Let a select option declare aligned cells instead of one label, let a column declare headers over them, and match filter terms within a cell rather than across the join.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0025"
       - "0026"

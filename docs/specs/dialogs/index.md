@@ -10,7 +10,7 @@
 
 [Change 0026](../../changes/0026-add-theme-variables.md) implements the delegation of every appearance to [Theming](../theming/): the frame, the columns, and the entry name `chrome`, `content`, and `cursor` rather than deciding a dim or an inversion themselves, and the default theme renders exactly what they rendered before. Those requirements are implemented.
 
-The `marker` variable on the glyph that marks an option leading to a sub-dialog and the aligned cells and headers in [Select Request](#select-request), [Filtering](#filtering), and [Presentation](#presentation) are **not yet implemented**. The marker is drawn with the row that carries it until a cell is a field of its own, so it lands with the cell rules rather than with theming. [Change 0027](../../changes/0027-add-multi-cell-select-rows.md) implements them.
+[Change 0027](../../changes/0027-add-multi-cell-select-rows.md) implements the aligned cells and headers in [Select Request](#select-request), [Filtering](#filtering), and [Presentation](#presentation), together with the `marker` variable on the glyph that marks an option leading to a sub-dialog: the marker was drawn with the row carrying it until a cell became a field of its own, so it landed with the cell rules rather than with theming. Those requirements are implemented.
 
 ## Background
 
@@ -613,3 +613,4 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-05 | Implemented the cell-width guarantee: a cell decides whether its column can afford the marker before it splits the width, so it is exactly its field's width by construction and a column too narrow for both drops the marker | [0025-guarantee-cell-width-by-construction](../../changes/0025-guarantee-cell-width-by-construction.md) |
 | 2026-09-05 | Appearance decisions delegated to Theming; the greyscale rule became the default theme's property | [0026-add-theme-variables](../../changes/0026-add-theme-variables.md) |
 | 2026-09-05 | Options may declare aligned cells and a column may declare headers | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |
+| 2026-09-05 | Implemented aligned cells and headers: the two display shapes with the validations that settle a column's, matching within one cell rather than across the join, fields measured over the whole visible list, the header row drawn as chrome at the top of its band at the cost of one option row, and the sub-dialog marker drawn as its own `marker` piece of the row | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |

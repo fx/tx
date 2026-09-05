@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type CellLayout,
+  type ColumnCell,
+  cellsColumnWidth,
   columnCells,
   columnDivider,
   columnsWidth,
@@ -7,7 +10,11 @@ import {
   dividerWidth,
   droppedColumns,
   expandGlyph,
+  fieldGap,
+  fieldsWidth,
+  fieldWidths,
   fitColumnWidths,
+  fitFieldWidths,
   hiddenAboveGlyph,
   hiddenBelowGlyph,
   indicatorText,
@@ -67,6 +74,19 @@ function window(
     hiddenAbove: renderedStart,
     hiddenBelow: Math.max(0, visibleCount - renderedStart - count),
   };
+}
+
+/**
+ * Everything one cell puts on screen, its marker included.
+ *
+ * A cell is a run of pieces rather than one string, because the marker
+ * annotates the row rather than belonging to it and names its own variable.
+ * What the reader sees is still one row, so it is the pieces together that
+ * have to be exactly the column's width.
+ */
+function drawn(cell: ColumnCell | undefined): string {
+  if (cell === undefined) return "";
+  return `${cell.text}${cell.marker?.text ?? ""}`;
 }
 
 /** The dressing of the column being driven, and of one behind it. Only the
@@ -376,11 +396,11 @@ describe("the cells one column contributes to the band", () => {
       DRIVEN,
     );
 
-    expect(cells[0]?.text).toBe(`short${" ".repeat(14)} ${expandGlyph}`);
-    expect(cells[1]?.text).toBe(`a much longer label ${expandGlyph}`);
+    expect(drawn(cells[0])).toBe(`short${" ".repeat(14)} ${expandGlyph}`);
+    expect(drawn(cells[1])).toBe(`a much longer label ${expandGlyph}`);
     for (const cell of cells) {
-      expect(cell?.text.endsWith(expandGlyph)).toBe(true);
-      expect(displayWidth(cell?.text ?? "")).toBe(width);
+      expect(drawn(cell).endsWith(expandGlyph)).toBe(true);
+      expect(displayWidth(drawn(cell))).toBe(width);
     }
   });
 
@@ -401,10 +421,10 @@ describe("the cells one column contributes to the band", () => {
 
     // Eight columns of label room, then the space and the glyph the whole
     // column holds back for the marker.
-    expect(cells[0]?.text).toBe(`leads${" ".repeat(3)} ${expandGlyph}`);
-    expect(cells[1]?.text).toBe("plain     ");
+    expect(drawn(cells[0])).toBe(`leads${" ".repeat(3)} ${expandGlyph}`);
+    expect(drawn(cells[1])).toBe("plain     ");
     for (const cell of cells) {
-      expect(displayWidth(cell?.text ?? "")).toBe(10);
+      expect(displayWidth(drawn(cell))).toBe(10);
     }
   });
 
@@ -430,15 +450,15 @@ describe("the cells one column contributes to the band", () => {
     // Three ideographs are six columns, so four spaces fill the column of ten;
     // two emoji are four columns, so four spaces fill the eight the marker
     // leaves, and then the marker's own separator makes five.
-    expect(cells[0]?.text).toBe(`界界界${" ".repeat(4)}`);
-    expect(cells[1]?.text).toBe(
+    expect(drawn(cells[0])).toBe(`界界界${" ".repeat(4)}`);
+    expect(drawn(cells[1])).toBe(
       `${grinning}${grinning}${" ".repeat(4)} ${expandGlyph}`,
     );
     for (const cell of cells) {
-      expect(displayWidth(cell?.text ?? "")).toBe(10);
+      expect(displayWidth(drawn(cell))).toBe(10);
     }
     // Seven code units, ten columns — which is the whole point.
-    expect(cells[0]?.text).toHaveLength(7);
+    expect(drawn(cells[0])).toHaveLength(7);
   });
 
   /**
@@ -465,7 +485,7 @@ describe("the cells one column contributes to the band", () => {
         DRIVEN,
       );
       for (const cell of cells) {
-        expect(displayWidth(cell?.text ?? "")).toBe(width);
+        expect(displayWidth(drawn(cell))).toBe(width);
       }
     }
   });
@@ -493,7 +513,7 @@ describe("the cells one column contributes to the band", () => {
         1,
         DRIVEN,
       );
-      const text = cells[0]?.text ?? "";
+      const text = drawn(cells[0]);
 
       expect(text.includes(expandGlyph)).toBe(width >= markable);
       expect(displayWidth(text)).toBe(width);
@@ -603,5 +623,514 @@ describe("the cells one column contributes to the band", () => {
         ),
       ).toBe(true);
     }
+  });
+});
+
+/** Options as a column of cells sees them: one row of cells each, with `!` on
+ * the last cell of a row that leads somewhere. The value is never read by the
+ * geometry, so it is only ever something to tell the rows apart by. */
+function cellRows(
+  ...rows: readonly (readonly string[])[]
+): readonly SelectOption<string>[] {
+  return rows.map((row) => {
+    const last = row.at(-1) as string;
+    const marked = last.endsWith("!");
+    const cells = marked ? [...row.slice(0, -1), last.slice(0, -1)] : row;
+    const value = cells.join("|");
+    return marked ? { cells, value, dialog: LEAF } : { cells, value };
+  });
+}
+
+/** How a column of cells is laid out, with the two things a column of labels
+ * has no answer for defaulted: it declares no headers and reserves no marker.
+ */
+function layout(
+  fields: readonly number[],
+  headers: readonly string[] = [],
+  expandable = false,
+): CellLayout {
+  return { fields, headers, expandable };
+}
+
+describe("the widths a column's fields are measured at", () => {
+  /** The vector sibling of the widest label: one width per field, each over
+   * every row of the column rather than over the rows one frame draws, so
+   * scrolling cannot resize a field under the cursor bar. */
+  test("is the widest cell of each field, over every row it is given", () => {
+    expect(
+      fieldWidths([
+        ["alpha", "one"],
+        ["b", "twenty-two"],
+        ["charlie-delta", "three"],
+      ]),
+    ).toEqual([13, 10]);
+  });
+
+  /** A header is drawn over its field, so a field narrower than its own name
+   * would say less than the column it names. */
+  test("counts a header among the cells its field has to hold", () => {
+    const rows = [
+      ["1.6.1", "ok"],
+      ["1.6.0", "ok"],
+    ];
+    expect(fieldWidths(rows)).toEqual([5, 2]);
+    expect(fieldWidths([["Version", "Status"], ...rows])).toEqual([7, 6]);
+  });
+
+  /** Measured in terminal columns, like everything else a panel is sized in:
+   * an ideograph is one code unit and two columns, so a field measured by
+   * `length` would leave every row after it starting in the wrong place. */
+  test("measures in terminal columns rather than in code units", () => {
+    const grinning = String.fromCodePoint(0x1f600);
+    expect(fieldWidths([["界界界", grinning]])).toEqual([6, 2]);
+  });
+
+  test("is no fields at all for a column with no rows", () => {
+    expect(fieldWidths([])).toEqual([]);
+  });
+});
+
+describe("the columns a row of fields takes", () => {
+  /** The gap is part of the same contract that fixes the divider and the
+   * marker, so it is written out here rather than measured from the constant:
+   * a gap asserted in terms of itself would move with a change to it. */
+  test("is its fields and two spaces between each pair of them", () => {
+    expect(fieldGap).toBe("  ");
+    expect(displayWidth(fieldGap)).toBe(2);
+    expect(fieldsWidth([13, 5])).toBe(20);
+    expect(fieldsWidth([1, 1, 1])).toBe(7);
+  });
+
+  test("is the field alone for one field, and nothing for none", () => {
+    expect(fieldsWidth([9])).toBe(9);
+    expect(fieldsWidth([])).toBe(0);
+  });
+});
+
+describe("one column of cells' width", () => {
+  /** Stated in terms of the scalar column's width rather than beside it: the
+   * marker's reserve and the empty column's floor are the same rules whatever
+   * an option's display text is. */
+  test("is its fields, its gaps, and the marker it reserves", () => {
+    expect(cellsColumnWidth([13, 5], false, false)).toBe(20);
+    expect(cellsColumnWidth([13, 5], true, false)).toBe(22);
+    expect(
+      cellsColumnWidth([13, 5], true, false) -
+        cellsColumnWidth([13, 5], false, false),
+    ).toBe(2);
+  });
+
+  test("never falls below the room `no match` needs", () => {
+    expect(cellsColumnWidth([1, 1], false, true)).toBe(NO_MATCH_COLUMNS);
+    expect(cellsColumnWidth([], false, true)).toBe(NO_MATCH_COLUMNS);
+    expect(cellsColumnWidth([], false, false)).toBe(1);
+  });
+});
+
+describe("fitting a column's fields to the width it is drawn at", () => {
+  test("hands back the measured widths when they fit exactly", () => {
+    const measured = [13, 5];
+    expect(fitFieldWidths(measured, 20)).toEqual(measured);
+    expect(fitFieldWidths([], 40)).toEqual([]);
+  });
+
+  /** The room a stretched column gained goes to the last field, exactly as the
+   * room a stretched panel gained goes to the last column: the bar spans the
+   * column either way, and growing a field in the middle would move every
+   * field after it for no reason the reader can see. */
+  test("gives the room left over to the last field", () => {
+    expect(fitFieldWidths([13, 5], 26)).toEqual([13, 11]);
+    expect(fitFieldWidths([4], 9)).toEqual([9]);
+  });
+
+  /** A cut lands at the end of the row rather than in the middle of it, so a
+   * narrow terminal loses characters from the last cell rather than shifting
+   * the fields before it out from under the reader. */
+  test("takes a deficit off the end, leaving the fields before it alone", () => {
+    expect(fitFieldWidths([13, 5], 18)).toEqual([13, 3]);
+    expect(fitFieldWidths([13, 5], 15)).toEqual([13, 0]);
+    expect(fitFieldWidths([13, 5], 10)).toEqual([8, 0]);
+  });
+
+  /** A column too narrow even for the gaps between its fields leaves every one
+   * of them at nothing rather than at a negative width; the row built from it
+   * is cut to the column when it is laid into one. */
+  test("leaves no field narrower than nothing", () => {
+    expect(fitFieldWidths([13, 5], 0)).toEqual([0, 0]);
+    expect(fitFieldWidths([13, 5, 4], 1)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("the cells a column of cell options contributes", () => {
+  const list = cellRows(
+    ["alpha", "one"],
+    ["b", "twenty-two"],
+    ["charlie-delta", "three"],
+  );
+  const fields = fieldWidths([
+    ["alpha", "one"],
+    ["b", "twenty-two"],
+    ["charlie-delta", "three"],
+  ]);
+  const width = cellsColumnWidth(fields, false, false);
+
+  /** The whole point of the shape: every row's second cell begins at the same
+   * terminal column, which is what makes a column of cells a table rather than
+   * a column of padded labels. */
+  test("begins every row's later fields at the same column", () => {
+    const cells = columnCells(
+      list,
+      allOf(list),
+      window(0, 3, 3),
+      0,
+      width,
+      3,
+      DRIVEN,
+      layout(fields),
+    );
+
+    expect(drawn(cells[0])).toBe("alpha          one       ");
+    expect(drawn(cells[1])).toBe("b              twenty-two");
+    expect(drawn(cells[2])).toBe("charlie-delta  three     ");
+    // The second field begins at the same column on every row, whatever the
+    // first cell of that row was.
+    expect(drawn(cells[0]).indexOf("one")).toBe(15);
+    expect(drawn(cells[1]).indexOf("twenty-two")).toBe(15);
+    expect(drawn(cells[2]).indexOf("three")).toBe(15);
+  });
+
+  test("separates one field from the next by exactly the gap", () => {
+    const pair = cellRows(["a", "b"]);
+    const cells = columnCells(
+      pair,
+      allOf(pair),
+      window(0, 1, 1),
+      0,
+      4,
+      1,
+      DRIVEN,
+      layout([1, 1]),
+    );
+
+    expect(drawn(cells[0])).toBe(`a${fieldGap}b`);
+  });
+
+  /**
+   * The invariant the whole layout rests on, swept over every width from one
+   * upward rather than a few round numbers, and with a marked row among the
+   * unmarked ones: the fields, the gaps, and the marker are three budgets that
+   * can disagree, and a row over its budget draws correctly anyway once the
+   * frame has cut the row it sits in. Only measuring the cells catches it.
+   */
+  test("occupies exactly the column's width at every width", () => {
+    const marked = cellRows(
+      ["alpha", "one!"],
+      ["b", "twenty-two"],
+      ["charlie-delta", "three!"],
+    );
+    for (const expandable of [false, true]) {
+      const rows = expandable ? marked : list;
+      for (let column = 1; column <= 30; column += 1) {
+        const cells = columnCells(
+          rows,
+          allOf(rows),
+          window(0, 3, 3),
+          0,
+          column,
+          4,
+          DRIVEN,
+          layout(fields, ["Name", "Count"], expandable),
+        );
+        for (const cell of cells) {
+          if (cell === undefined) continue;
+          expect(displayWidth(drawn(cell))).toBe(column);
+        }
+      }
+    }
+  });
+
+  /**
+   * The invariant holds where the column cannot afford even the gaps between
+   * its fields — nine or more fields in the narrowest supported terminal. The
+   * fields fall to nothing and the assembled row is cut to the column by the
+   * same `padToWidth` a single over-long label goes through, so what the frame
+   * receives is already exactly the column's width and its own row truncation
+   * stays the guard it is rather than the thing that made the row fit.
+   */
+  test("stays exactly its column's width when the gaps alone do not fit", () => {
+    const many = cellRows(Array.from({ length: 10 }, (_, at) => `c${at}`));
+    const measured = fieldWidths([many[0]?.cells as readonly string[]]);
+    for (const column of [12, 16, 20, 30]) {
+      const cells = columnCells(
+        many,
+        allOf(many),
+        window(0, 1, 1),
+        0,
+        column,
+        1,
+        DRIVEN,
+        layout(measured),
+      );
+
+      expect(displayWidth(drawn(cells[0]))).toBe(column);
+    }
+    // The fields nearest the front are the ones that survive, so a column with
+    // room for one of them shows the first rather than a row of ellipses.
+    expect(fitFieldWidths(measured, 20)).toEqual([
+      2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+  });
+
+  /** A field that does not fit loses its own characters at its end. The
+   * alternative is a row cut as one run, which drops the last field of every
+   * row rather than narrowing anything — the caller-side failure the shape
+   * exists to remove. */
+  test("truncates a cell at its end rather than shifting the fields after it", () => {
+    const cells = columnCells(
+      list,
+      allOf(list),
+      window(0, 3, 3),
+      0,
+      18,
+      3,
+      DRIVEN,
+      layout(fields),
+    );
+
+    expect(drawn(cells[2])).toBe("charlie-delta  th…");
+    // The first field keeps the width it was measured at, so the second still
+    // starts where it did — and a cell that fits the narrowed field is left
+    // whole rather than cut along with it.
+    expect(drawn(cells[0])).toBe("alpha          one");
+    expect(drawn(cells[1])).toBe("b              tw…");
+  });
+
+  /** The marker is the column's right edge, past the last field, so a reader
+   * scanning for what leads somewhere reads one line of glyphs. */
+  test("sets the marker on the column's right edge, past the last field", () => {
+    const marked = cellRows(["alpha", "one!"], ["b", "two"]);
+    const columns = cellsColumnWidth([5, 3], true, false);
+    const cells = columnCells(
+      marked,
+      allOf(marked),
+      window(0, 2, 2),
+      0,
+      columns,
+      2,
+      DRIVEN,
+      layout([5, 3], [], true),
+    );
+
+    expect(columns).toBe(12);
+    expect(drawn(cells[0])).toBe(`alpha  one ${expandGlyph}`);
+    // The unmarked row spends the marker's columns on padding, so its fields
+    // start where the marked row's do.
+    expect(drawn(cells[1])).toBe("b      two  ");
+  });
+});
+
+describe("the marker's own piece of a row", () => {
+  /** The marker annotates the row rather than belonging to it, so it names the
+   * variable for one and a theme can dress it without dressing the label. */
+  test("names the marker variable on a row that is not under the bar", () => {
+    const list = options("plain", "leads!");
+    const cells = columnCells(list, allOf(list), window(0, 2, 2), 0, 10, 2, {
+      bar: false,
+    });
+
+    expect(cells[0]?.marker).toBeUndefined();
+    expect(cells[1]?.marker).toEqual({
+      text: ` ${expandGlyph}`,
+      variable: "marker",
+    });
+  });
+
+  /** Under the bar it is the bar: the cursor spans its column's full width, so
+   * a marker naming its own variable there would be a hole in it. */
+  test("is part of the bar under the cursor", () => {
+    const list = options("leads!");
+    const cells = columnCells(
+      list,
+      allOf(list),
+      window(0, 1, 1),
+      0,
+      10,
+      1,
+      DRIVEN,
+    );
+
+    expect(cells[0]?.variable).toBe("cursor");
+    expect(cells[0]?.marker?.variable).toBe("cursor");
+  });
+
+  /** A column too narrow for both drops the marker rather than squeezing it,
+   * so there is no piece to name a variable for at all. */
+  test("is absent from a column too narrow to carry it", () => {
+    const list = options("leads!");
+    const cells = columnCells(list, allOf(list), window(0, 1, 1), 0, 2, 1, {
+      bar: false,
+    });
+
+    expect(cells[0]?.marker).toBeUndefined();
+    expect(displayWidth(drawn(cells[0]))).toBe(2);
+  });
+});
+
+describe("a column's header row", () => {
+  const list = cellRows(["1.6.1", "ok"], ["1.6.0", "stale"]);
+  const headers = ["Version", "Status"];
+  const fields = fieldWidths([headers, ["1.6.1", "ok"], ["1.6.0", "stale"]]);
+  const width = cellsColumnWidth(fields, false, false);
+
+  /** Drawn once at the top of the band and as chrome, because it names the
+   * list rather than belonging to it — and the options begin on the row under
+   * it, so the header costs the band a row rather than an option a place. */
+  test("is the first row of the band, drawn as chrome", () => {
+    const cells = columnCells(
+      list,
+      allOf(list),
+      window(0, 2, 2),
+      0,
+      width,
+      3,
+      DRIVEN,
+      layout(fields, headers),
+    );
+
+    expect(cells[0]).toEqual({
+      text: "Version  Status",
+      variable: "chrome",
+    });
+    expect(drawn(cells[1])).toBe("1.6.1    ok    ");
+    expect(drawn(cells[2])).toBe("1.6.0    stale ");
+  });
+
+  /** The bar can never land on it: the active position is a position in the
+   * visible list, and the header is not in that list at all. */
+  test("is never the row under the bar, whichever row is active", () => {
+    for (const active of [0, 1]) {
+      const cells = columnCells(
+        list,
+        allOf(list),
+        window(0, 2, 2),
+        active,
+        width,
+        3,
+        DRIVEN,
+        layout(fields, headers),
+      );
+
+      expect(cells[0]?.variable).toBe("chrome");
+      expect(cells.map((cell) => cell?.variable)).toEqual([
+        "chrome",
+        active === 0 ? "cursor" : "content",
+        active === 1 ? "cursor" : "content",
+      ]);
+    }
+  });
+
+  /** It does not scroll with the rows beneath it: a header that scrolled away
+   * would take a row with it on the way out and give one back on the way in,
+   * which is the churn nothing in a dialog is allowed to cause. */
+  test("stays at the top of the band while the options scroll under it", () => {
+    const long = cellRows(
+      ["1.6.1", "ok"],
+      ["1.6.0", "stale"],
+      ["1.5.9", "gone"],
+    );
+    const cells = columnCells(
+      long,
+      allOf(long),
+      window(1, 2, 3),
+      1,
+      width,
+      3,
+      DRIVEN,
+      layout(fields, headers),
+    );
+
+    expect(cells[0]?.text).toBe("Version  Status");
+    expect(drawn(cells[1])).toBe("1.6.0    stale ");
+    expect(drawn(cells[2])).toBe("1.5.9    gone  ");
+  });
+
+  /** The filter never sees it, so a filter that has hidden every option leaves
+   * the header naming the fields of a list that is momentarily empty. */
+  test("survives a filter that leaves nothing visible", () => {
+    const cells = columnCells(
+      list,
+      [],
+      window(0, 0, 0),
+      0,
+      width,
+      2,
+      DRIVEN,
+      layout(fields, headers),
+    );
+
+    expect(cells[0]?.text).toBe("Version  Status");
+    expect(cells[1]?.text).toBe(`${noMatch}       `);
+  });
+
+  /** A window the terminal could not afford draws no rows, and a header over
+   * rows that are not there would be one row of chrome the viewport's
+   * arithmetic never budgeted for — which is the row that takes the frame to
+   * the terminal's own height. */
+  test("is not drawn at all when the column has no rows to draw", () => {
+    const cells = columnCells(
+      list,
+      allOf(list),
+      window(0, 0, 2),
+      0,
+      width,
+      0,
+      DRIVEN,
+      layout(fields, headers),
+    );
+
+    expect(cells).toEqual([]);
+  });
+
+  /** A band with no rows is a terminal that could not afford one, so a column
+   * whose filter matched nothing spends no row saying so either: a column that
+   * added a row of its own would be drawing one nothing budgeted for, and the
+   * band it returns would be longer than the one it was asked for. */
+  test("says nothing at all when the band has no row to say it in", () => {
+    expect(
+      columnCells(
+        list,
+        [],
+        window(0, 0, 0),
+        0,
+        width,
+        0,
+        DRIVEN,
+        layout(fields, headers),
+      ),
+    ).toEqual([]);
+    // The same holds for a column of labels, which has no header to give up
+    // first and so is the shorter way to the same row.
+    const labels = options("one", "two");
+    expect(columnCells(labels, [], window(0, 0, 0), 0, 6, 0, DRIVEN)).toEqual(
+      [],
+    );
+  });
+
+  /** An empty header list is a column saying it has none, which is what
+   * omitting it says too. */
+  test("is absent for a column declaring no headers", () => {
+    const cells = columnCells(
+      list,
+      allOf(list),
+      window(0, 2, 2),
+      0,
+      width,
+      2,
+      DRIVEN,
+      layout(fields),
+    );
+
+    expect(drawn(cells[0])).toBe("1.6.1    ok    ");
+    expect(drawn(cells[1])).toBe("1.6.0    stale ");
   });
 });

@@ -286,6 +286,94 @@ function requireCollectableFields<T>(
   }
 }
 
+/**
+ * Rejects a column whose display text could not line up, before any terminal
+ * state changes: an option declaring both shapes or neither, a column mixing
+ * the two, a column of rows with different numbers of cells, and headers a
+ * column has no fields for.
+ *
+ * A column of cells is a table, and a table's shape is a property of the
+ * column rather than of any one row in it — which is why this walks a request
+ * rather than an option, and why it is the request's own `headers` it checks
+ * them against. Every reachable sub-dialog is a column of its own and decides
+ * its own shape and its own headers, so every one of them is validated here
+ * too.
+ *
+ * The cycle guard is on the request rather than on its options list, which is
+ * where the other two validations put theirs. Those read the list alone, so
+ * two requests sharing one list are the same question asked twice; this one
+ * also reads the request's own headers, so they are two different questions —
+ * and a guard keyed on the list would answer the second by skipping it,
+ * letting a column declaring headers its cells cannot carry render anyway.
+ * Keying on the request still terminates, because a cyclic graph revisits the
+ * same request object.
+ *
+ * Two emptinesses are decided by the rules rather than by a check of their
+ * own. An empty cell list is not a list of cells: the option declaring one has
+ * declared neither shape, and the label-or-cells rule rejects it as such. An
+ * empty header list is a column saying it has no headers, which contradicts
+ * nothing and means exactly what omitting it means.
+ */
+function requireAlignedCells<T>(
+  request: {
+    readonly options: readonly SelectOption<T>[];
+    readonly headers?: readonly string[] | undefined;
+  },
+  seen: Set<object> = new Set(),
+): void {
+  const { options, headers } = request;
+  if (seen.has(request)) return;
+  seen.add(request);
+  /** The cell count this column settled on, and so what every later row of it
+   * and its headers are held to. */
+  let cells: number | undefined;
+  let labelled = false;
+  for (const option of options) {
+    const declared =
+      option.cells !== undefined && option.cells.length > 0
+        ? option.cells
+        : undefined;
+    if ((option.label !== undefined) === (declared !== undefined)) {
+      throw new Error(
+        "A select option requires either a label or cells, and not both",
+      );
+    }
+    if (declared === undefined) {
+      labelled = true;
+      continue;
+    }
+    if (cells !== undefined && declared.length !== cells) {
+      throw new Error(
+        "A select column requires the same number of cells on every option",
+      );
+    }
+    cells ??= declared.length;
+  }
+  // A label is not a one-cell row: reading it as one would put it in the first
+  // field among fields that mean something else, which reads as a row that
+  // lost its data rather than as a label.
+  if (labelled && cells !== undefined) {
+    throw new Error(
+      "A select column cannot mix label options with cell options",
+    );
+  }
+  if (headers !== undefined && headers.length > 0) {
+    if (cells === undefined) {
+      throw new Error("Select headers require a column of cell options");
+    }
+    if (headers.length !== cells) {
+      throw new Error(
+        "Select headers require one header for every cell of their column",
+      );
+    }
+  }
+  for (const { dialog } of options) {
+    if (dialog !== undefined && "options" in dialog) {
+      requireAlignedCells(dialog, seen);
+    }
+  }
+}
+
 type DialogSession = {
   readonly context: CommandContext;
   readonly dependencies: CoreDependencies;
@@ -424,11 +512,13 @@ const definition: PluginDefinition = Object.freeze({
         async select<T>({
           message,
           options,
+          headers,
           filter,
           expand,
         }: SelectRequest<T>) {
           requireNonEmptyOptions(options);
           requireCollectableFields(options);
+          requireAlignedCells({ options, headers });
           requireInteractiveStreams(context, "A select dialog");
           const { Entry, Frame } = components();
 
@@ -440,6 +530,7 @@ const definition: PluginDefinition = Object.freeze({
               {
                 message,
                 options,
+                headers: headers ?? [],
                 filter: filter ?? "typed",
                 expandKey: expand ?? "enter",
               },

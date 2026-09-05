@@ -6,11 +6,14 @@ import {
   onPhase,
 } from "./animation.ts";
 import {
+  type CellLayout,
+  cellsColumnWidth,
   columnCells,
   columnDivider,
   columnsWidth,
   columnWidth,
   droppedColumns,
+  fieldWidths,
   fitColumnWidths,
   hiddenAboveGlyph,
   hiddenBelowGlyph,
@@ -42,7 +45,7 @@ import type {
   SelectResult,
   TextField,
 } from "./types.ts";
-import { optionRowCount, optionWindow } from "./viewport.ts";
+import { affordsBandRows, optionRowCount, optionWindow } from "./viewport.ts";
 
 /** The prompt the filter row carries, so the row the user types into is
  * distinguishable from the option rows under it. */
@@ -126,6 +129,7 @@ function movedPosition(
   current: number,
   visibleCount: number,
   terminalRows: number,
+  header: boolean,
 ): number | undefined {
   let target: number | undefined;
   if (key.home) target = 0;
@@ -135,7 +139,7 @@ function movedPosition(
   else if (key.pageUp || key.pageDown) {
     // Navigation is refused once collection begins, so the window this pages
     // by is always the choosing one.
-    const page = optionRowCount(visibleCount, terminalRows, false);
+    const page = optionRowCount(visibleCount, terminalRows, false, header);
     target = current + (key.pageUp ? -page : page);
   }
   if (target === undefined || visibleCount === 0) return undefined;
@@ -158,6 +162,9 @@ type Collection<T> = {
 type SelectLevel<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
+  /** The names this level draws over its fields, or none. Per level, because
+   * each column is its own request and names what that column lists. */
+  readonly headers: readonly string[];
   readonly filter: FilterMode;
   readonly entered: string;
   readonly active: number;
@@ -205,9 +212,76 @@ export function stackedValues(
   return merged;
 }
 
+/**
+ * What one column measures to, and everything about it that only its own
+ * matching can answer: which options the filter left visible, whether any of
+ * them leads somewhere, and how wide the column's display text is.
+ *
+ * The width is one number or a vector of them, because the two option shapes
+ * are measured differently and a column holds exactly one of them. `fields`
+ * present is what says this column is drawn as cells; `widestLabel` is the
+ * scalar a column of labels has always measured to and is left untouched by
+ * everything here.
+ */
+type ColumnMeasurement = {
+  readonly visible: readonly number[];
+  readonly widestLabel: number;
+  readonly expandable: boolean;
+  readonly fields: readonly number[] | undefined;
+};
+
+/** Whether a level draws a header over its options, which is a row of the band
+ * that is not an option row and which its viewport therefore has to budget
+ * for. Absent headers and a declared-but-empty list are the same thing: a
+ * column that names no fields. */
+function drawsHeader<T>(level: SelectLevel<T>): boolean {
+  return level.headers.length > 0;
+}
+
+/**
+ * Measure one column against the options its filter left visible.
+ *
+ * The widest label is kept as a running maximum rather than an array spread
+ * into `Math.max`: measuring every visible option makes the argument count the
+ * length of the list rather than the height of the window, and a spread that
+ * long throws `RangeError` on a list a select can plausibly be given — a
+ * branch, plugin, or version list.
+ *
+ * The column's shape is read from the list rather than from what happens to be
+ * visible: a filter that has hidden every option has not turned a column of
+ * cells into a column of labels, and a column filtered to nothing still draws
+ * the headers it declared, measured against them alone.
+ */
+function measureColumn<T>(
+  options: readonly SelectOption<T>[],
+  visible: readonly number[],
+  headers: readonly string[],
+): ColumnMeasurement {
+  const cells = options[0]?.cells !== undefined;
+  const rows: (readonly string[])[] = headers.length > 0 ? [headers] : [];
+  let widest = 0;
+  let expandable = false;
+  for (const index of visible) {
+    const option = options[index] as SelectOption<T>;
+    if (option.cells === undefined) {
+      widest = Math.max(widest, displayWidth(option.label));
+    } else {
+      rows.push(option.cells);
+    }
+    if (option.dialog !== undefined) expandable = true;
+  }
+  return {
+    visible,
+    widestLabel: widest,
+    expandable,
+    fields: cells ? fieldWidths(rows) : undefined,
+  };
+}
+
 type SelectViewRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
+  readonly headers: readonly string[];
   readonly filter: FilterMode;
   /** Which key opens a sub-dialog, for the whole dialog rather than per
    * level: one dialog answers one set of keys however deep the reader goes. */
@@ -228,7 +302,7 @@ export function createSelectView<T>(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
   { Entry, Frame }: { Entry: EntryComponent; Frame: FrameComponent },
-  { message, options, filter, expandKey }: SelectViewRequest<T>,
+  { message, options, headers, filter, expandKey }: SelectViewRequest<T>,
   settle: (outcome: Outcome<SelectResult<T>>) => void,
 ): DialogView {
   const cancel = () => settle({ type: "cancelled" });
@@ -247,6 +321,7 @@ export function createSelectView<T>(
       {
         message,
         options,
+        headers,
         filter,
         entered: "",
         active: 0,
@@ -300,31 +375,20 @@ export function createSelectView<T>(
      * stale entry. */
     const columnContent = react.useRef<
       readonly (
-        | {
-            readonly level: SelectLevel<T>;
-            readonly visible: readonly number[];
-            readonly widestLabel: number;
-            readonly expandable: boolean;
-          }
+        | ({ readonly level: SelectLevel<T> } & ColumnMeasurement)
         | undefined
       )[]
     >([]);
     const columnMatches = (index: number, level: SelectLevel<T>) => {
       const cached = columnContent.current[index];
       if (cached !== undefined && cached.level === level) return cached;
-      const shown = visibleOptionIndices(level.options, level.entered);
-      let widest = 0;
-      let expandable = false;
-      for (const at of shown) {
-        const option = level.options[at] as SelectOption<T>;
-        widest = Math.max(widest, displayWidth(option.label));
-        if (option.dialog !== undefined) expandable = true;
-      }
       const measurement = {
         level,
-        visible: shown,
-        widestLabel: widest,
-        expandable,
+        ...measureColumn(
+          level.options,
+          visibleOptionIndices(level.options, level.entered),
+          level.headers,
+        ),
       };
       const next = [...columnContent.current];
       next[index] = measurement;
@@ -364,6 +428,7 @@ export function createSelectView<T>(
     const entryOnScreen = collectingField || leaf !== undefined;
     const top = topSelect();
     const topOptions = top.options;
+    const topHeaders = top.headers;
     const topFilter = top.filter;
     // Kept across frames rather than recomputed on each: the animation
     // re-renders the view several times a second, and neither the matching nor
@@ -374,27 +439,15 @@ export function createSelectView<T>(
       () => visibleOptionIndices(topOptions, filterText),
       [topOptions, filterText],
     );
-    /** What the driven column measures to: the widest visible label in
-     * terminal columns, and whether any visible option leads somewhere, which
-     * is what makes the column reserve the marker on its right edge.
-     *
-     * The widest label is kept as a running maximum rather than an array
-     * spread into `Math.max`: measuring every visible option makes the
-     * argument count the length of the list rather than the height of the
-     * window, and a spread that long throws `RangeError` on a list a select
-     * can plausibly be given — a branch, plugin, or version list. One pass
-     * over the same strings, no intermediate array, and only when the filter
-     * has changed what is visible. */
-    const liveMatches = react.useMemo(() => {
-      let widest = 0;
-      let expandable = false;
-      for (const index of visible) {
-        const option = topOptions[index] as SelectOption<T>;
-        widest = Math.max(widest, displayWidth(option.label));
-        if (option.dialog !== undefined) expandable = true;
-      }
-      return { visible, widestLabel: widest, expandable };
-    }, [topOptions, visible]);
+    /** What the driven column measures to: how wide its visible display text
+     * is, and whether any visible option leads somewhere, which is what makes
+     * the column reserve the marker on its right edge. Measured only when the
+     * filter has changed what is visible, so the animation's timer never pays
+     * for it. */
+    const liveMatches = react.useMemo(
+      () => measureColumn(topOptions, visible, topHeaders),
+      [topOptions, topHeaders, visible],
+    );
     /** The option under the bar, which is what the hint describes and what
      * every key that opens or takes something acts on. */
     const activeOption =
@@ -443,6 +496,7 @@ export function createSelectView<T>(
       topStart,
       rows,
       entryOnScreen,
+      drawsHeader(top),
     );
     /** Visible options the window has no room for, whichever side of it they
      * fall on: an indicator is on screen exactly while this is positive, and it
@@ -499,6 +553,7 @@ export function createSelectView<T>(
       const child: SelectLevel<T> = {
         message: nested.message,
         options: nested.options,
+        headers: nested.headers ?? [],
         filter: nested.filter ?? "typed",
         entered: "",
         active: 0,
@@ -660,7 +715,13 @@ export function createSelectView<T>(
         }
         return;
       }
-      const moved = movedPosition(key, current.active, shown.length, rows);
+      const moved = movedPosition(
+        key,
+        current.active,
+        shown.length,
+        rows,
+        drawsHeader(current),
+      );
       if (moved !== undefined) {
         syncTop({ ...current, active: moved });
         // The caret goes back to its visible phase on the frame the movement
@@ -788,6 +849,7 @@ export function createSelectView<T>(
               windowStarts.current[index] ?? 0,
               rows,
               entryOnScreen,
+              drawsHeader(level),
             ),
       };
     });
@@ -804,12 +866,23 @@ export function createSelectView<T>(
       index === drivenColumn ? viewport.rememberedStart : start,
     );
 
+    // A column of labels is as wide as its widest one; a column of cells is as
+    // wide as its fields and the gaps between them. Which of the two it is was
+    // decided when it was measured, and nothing downstream of here asks again:
+    // both answer with one number, and the rest of the layout is the same
+    // arithmetic over those numbers whatever the rows inside them are.
     const widths = laid.map((column) =>
-      columnWidth(
-        column.matched.widestLabel,
-        column.matched.expandable,
-        column.matched.visible.length === 0,
-      ),
+      column.matched.fields === undefined
+        ? columnWidth(
+            column.matched.widestLabel,
+            column.matched.expandable,
+            column.matched.visible.length === 0,
+          )
+        : cellsColumnWidth(
+            column.matched.fields,
+            column.matched.expandable,
+            column.matched.visible.length === 0,
+          ),
     );
     // Running out of room collapses the oldest columns first. The driven
     // column is the rightmost and is never dropped: it is truncated instead,
@@ -832,14 +905,32 @@ export function createSelectView<T>(
     // one row saying so. Nothing but option rows is in the band: the filter
     // and the overflow counts are set into the frame's edges, so neither can
     // move the list by appearing.
-    const bandRows = shown.reduce(
-      (most, column) =>
-        Math.max(
-          most,
-          column.matched.visible.length === 0 ? 1 : column.viewport.count,
-        ),
-      0,
-    );
+    // What each column contributes to the band: the options its window draws,
+    // or the one row a column whose filter matched nothing spends saying so,
+    // plus the header it declared.
+    //
+    // Every row here is weighed against the same budget before it is drawn.
+    // The option rows were weighed by `optionRowCount`, which sized the window
+    // and charged it for a header where one is declared. The other two rows
+    // are the ones that count never saw, so they ask the band themselves: the
+    // `no match` row, which is not an option row, and the header drawn over
+    // it. A row taken without being weighed is the row that takes the frame to
+    // the terminal's own height, which is what Ink reads as full-screen and
+    // answers by clearing what was on screen before the dialog opened.
+    const bands = shown.map((column) => {
+      const drawn =
+        column.matched.visible.length === 0
+          ? affordsBandRows(1, rows, entryOnScreen)
+            ? 1
+            : 0
+          : column.viewport.count;
+      const header =
+        drawn > 0 &&
+        drawsHeader(column.level) &&
+        affordsBandRows(drawn + 1, rows, entryOnScreen);
+      return { rows: drawn === 0 ? 0 : drawn + (header ? 1 : 0), header };
+    });
+    const bandRows = bands.reduce((most, band) => Math.max(most, band.rows), 0);
     const driven = shown.at(-1);
     /** Everything the driven column has off screen, either side of its window
      * together. It is the largest either count can ever reach, so it is the
@@ -911,8 +1002,21 @@ export function createSelectView<T>(
     // the panel wider by belongs to the last column, so its cursor bar spans
     // the panel instead of stopping short of it.
     const drawnWidths = stretchLastColumn(shownWidths, innerWidth(width));
-    const cells = shown.map((column, at) =>
-      columnCells(
+    const cells = shown.map((column, at) => {
+      /** How a column of cells is laid out, or nothing at all for a column of
+       * labels: the fields it measured to, the names drawn over them, and the
+       * marker reserve every row of the column shares. */
+      const layout: CellLayout | undefined =
+        column.matched.fields === undefined
+          ? undefined
+          : {
+              fields: column.matched.fields,
+              // Named only where the band counted the row it takes, so what is
+              // drawn and what was budgeted cannot come apart.
+              headers: bands[at]?.header ? column.level.headers : [],
+              expandable: column.matched.expandable,
+            };
+      return columnCells(
         column.level.options,
         column.matched.visible,
         column.viewport,
@@ -920,8 +1024,9 @@ export function createSelectView<T>(
         drawnWidths[at] as number,
         bandRows,
         { bar: column.bar },
-      ),
-    );
+        layout,
+      );
+    });
 
     const panelRows: FrameRow[] = [];
     for (let row = 0; row < bandRows; row += 1) {
@@ -937,19 +1042,30 @@ export function createSelectView<T>(
         const drawn = column[row];
         // A column with nothing on this row still spends its columns on it, so
         // the column after it starts where the ones above and below it do.
-        segments.push(
-          drawn === undefined
-            ? {
-                key: `cell-${at}`,
-                text: " ".repeat(drawnWidths[at] as number),
-                variable: "content" as const,
-              }
-            : {
-                key: `cell-${at}`,
-                text: drawn.text,
-                variable: drawn.variable,
-              },
-        );
+        if (drawn === undefined) {
+          segments.push({
+            key: `cell-${at}`,
+            text: " ".repeat(drawnWidths[at] as number),
+            variable: "content" as const,
+          });
+          continue;
+        }
+        segments.push({
+          key: `cell-${at}`,
+          text: drawn.text,
+          variable: drawn.variable,
+        });
+        // The marker is its own piece of the row, so it can be the annotation
+        // it is rather than two more characters of the label it follows. The
+        // cell already held its columns back, so the row is the same width
+        // either way.
+        if (drawn.marker !== undefined) {
+          segments.push({
+            key: `marker-${at}`,
+            text: drawn.marker.text,
+            variable: drawn.marker.variable,
+          });
+        }
       }
       panelRows.push({ key: `band-${row}`, segments });
     }

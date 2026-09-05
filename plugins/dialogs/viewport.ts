@@ -41,6 +41,30 @@ function chromeHeight(collecting: boolean): number {
   return collecting ? collectingChromeHeight : selectChromeHeight;
 }
 
+/** The rows the band may take at all: what the terminal has, less the dialog's
+ * own chrome and the one row that keeps the whole dialog strictly shorter than
+ * the terminal. */
+function affordableBandRows(terminalRows: number, collecting: boolean): number {
+  return terminalRows - chromeHeight(collecting) - 1;
+}
+
+/**
+ * Whether a band of this many rows leaves the dialog shorter than the terminal.
+ *
+ * The option rows are budgeted by `optionRowCount`, which already accounts for
+ * a header. This answers for the rows that count budgets nothing about: the
+ * single row a column whose filter matched nothing spends saying so is not an
+ * option row, so nothing has weighed a header drawn over it, and a header and
+ * a `no match` row together are two band rows where the count said none.
+ */
+export function affordsBandRows(
+  bandRows: number,
+  terminalRows: number,
+  collecting: boolean,
+): boolean {
+  return bandRows <= affordableBandRows(terminalRows, collecting);
+}
+
 /** The option rows a select renders, given what is visible, how tall the
  * terminal is, and whether a field is being collected under the list. The `- 1`
  * is load-bearing: Ink treats output as tall as the terminal as full-screen and
@@ -57,11 +81,32 @@ export function optionRowCount(
   visibleCount: number,
   terminalRows: number,
   collecting: boolean,
+  /** Whether this column draws a header, which is a row of the band that is
+   * not an option row. It costs the window one of the rows it had, and it
+   * costs it against both bounds: against the terminal, because the row is
+   * drawn inside the same frame, and against the ceiling, because a band
+   * eleven rows tall is exactly the height the ceiling is there to hold.
+   *
+   * The one row a terminal can still afford is the exception, and the floor is
+   * what wins there: a band with room for one row spends it on the option
+   * rather than on the header, because a header over a list the reader cannot
+   * see names fields that are not on screen, and a column that declared one
+   * would otherwise show nothing at all where a column that did not shows a
+   * choice. The header comes back with the second row. */
+  header = false,
 ): number {
   if (visibleCount < 1) return 0;
-  const affordable = terminalRows - chromeHeight(collecting) - 1;
+  const affordable = affordableBandRows(terminalRows, collecting);
   if (affordable < 1) return 0;
-  return Math.max(1, Math.min(maximumOptionRows, affordable, visibleCount));
+  const headerRows = header && affordable > 1 ? 1 : 0;
+  return Math.max(
+    1,
+    Math.min(
+      maximumOptionRows - headerRows,
+      affordable - headerRows,
+      visibleCount,
+    ),
+  );
 }
 
 /**
@@ -119,8 +164,11 @@ export function optionWindow(
   previousStart: number,
   terminalRows: number,
   collecting: boolean,
+  /** Whether this column draws a header over its options, which costs it one
+   * of the rows it had. */
+  header = false,
 ): OptionWindow {
-  const count = optionRowCount(visibleCount, terminalRows, collecting);
+  const count = optionRowCount(visibleCount, terminalRows, collecting, header);
   const furthestStart = Math.max(0, visibleCount - count);
   // Clamped against the list as it stands, so a start left over from a longer
   // list is pulled back rather than remembered past the end of this one.

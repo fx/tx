@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  affordsBandRows,
   collectingChromeHeight,
   maximumOptionRows,
   optionRowCount,
@@ -375,5 +376,102 @@ describe("column browser budget", () => {
     expect(optionRowCount(30, terminal, true)).toBe(1);
     expect(1 + collectingChromeHeight).toBeLessThan(terminal);
     expect(optionWindow(30, 0, 0, terminal, true).count).toBe(1);
+  });
+});
+
+describe("a column that draws a header", () => {
+  /** The header is a row of the band that is not an option row, so it costs
+   * the window one of the rows it had rather than being drawn over one. */
+  test("shows one fewer option row than the same column without one", () => {
+    for (const [, collecting] of STATES) {
+      expect(optionRowCount(30, ROOMY, collecting, true)).toBe(
+        optionRowCount(30, ROOMY, collecting, false) - 1,
+      );
+    }
+    expect(optionRowCount(30, ROOMY, false, true)).toBe(maximumOptionRows - 1);
+  });
+
+  /** It costs a row against the terminal too, because it is drawn inside the
+   * same frame: a header budgeted only against the ceiling would take the
+   * frame one row past the height every other rule holds it under. */
+  test("gives up a row of a terminal that has few to give", () => {
+    expect(optionRowCount(30, 9, false, true)).toBe(4);
+    expect(optionRowCount(30, 9, false, false)).toBe(5);
+    expect(optionRowCount(30, 12, true, true)).toBe(4);
+  });
+
+  /** Where the terminal affords one row and no more, the floor wins over the
+   * header: the row goes to the option. A header over a list the reader cannot
+   * see names fields that are not on screen, and a column that declared one
+   * would otherwise show nothing at all where a column that did not shows a
+   * choice. */
+  test("gives its last row to an option rather than to the header", () => {
+    expect(optionRowCount(30, 5, false, false)).toBe(1);
+    expect(optionRowCount(30, 5, false, true)).toBe(1);
+    // The header comes back with the second row the terminal can afford.
+    expect(optionRowCount(30, 6, false, true)).toBe(1);
+    expect(optionRowCount(30, 7, false, true)).toBe(2);
+  });
+
+  /** The window is derived through the same count, so a header shortens what a
+   * column scrolls over rather than only what it draws. */
+  test("windows the list against the rows the header left", () => {
+    const withHeader = optionWindow(30, 0, 0, ROOMY, false, true);
+    expect(withHeader.count).toBe(maximumOptionRows - 1);
+    expect(withHeader.hiddenBelow).toBe(30 - (maximumOptionRows - 1));
+    expect(optionWindow(30, 0, 0, ROOMY, false).count).toBe(maximumOptionRows);
+  });
+});
+
+describe("what the band can afford", () => {
+  /** The rows a band may take are the terminal's, less the chrome and the one
+   * row that keeps the whole dialog strictly shorter than the terminal. */
+  test("allows a band that leaves the dialog shorter than the terminal", () => {
+    expect(affordsBandRows(1, selectChromeHeight + 2, false)).toBe(true);
+    expect(affordsBandRows(2, selectChromeHeight + 2, false)).toBe(false);
+    expect(affordsBandRows(2, selectChromeHeight + 3, false)).toBe(true);
+    expect(affordsBandRows(1, collectingChromeHeight + 2, true)).toBe(true);
+    expect(affordsBandRows(2, collectingChromeHeight + 2, true)).toBe(false);
+  });
+
+  /** It answers for the rows `optionRowCount` never counted — the single row a
+   * column whose filter matched nothing spends saying so, and a header drawn
+   * over it. Together they are two band rows where that count said none. */
+  test("answers for the rows the option count never counted", () => {
+    const rows = selectChromeHeight + 2;
+    expect(optionRowCount(0, rows, false, true)).toBe(0);
+    expect(affordsBandRows(1, rows, false)).toBe(true);
+    expect(affordsBandRows(2, rows, false)).toBe(false);
+  });
+
+  /**
+   * Consistent with the count, so a window granted its rows is never then told
+   * the band cannot hold them, and the header is drawn exactly where the count
+   * charged for it.
+   *
+   * The two decisions are made in different places — the count sizes the
+   * window, the band decides whether the header is drawn over it — so what
+   * ties them together is that both read the same affordable height. A header
+   * charged for and then not drawn would leave a column one option short for
+   * nothing; one drawn without being charged for is the row that takes the
+   * frame to the terminal's own height.
+   */
+  test("affords every window the option count granted", () => {
+    for (const terminal of [5, 6, 7, 9, 14, 40]) {
+      for (const header of [false, true]) {
+        for (const visible of [1, 3, 30]) {
+          const count = optionRowCount(visible, terminal, false, header);
+          if (count === 0) continue;
+          expect(affordsBandRows(count, terminal, false)).toBe(true);
+          // A declared header is drawn exactly where the band can hold a
+          // second row, which is exactly where the count charged for it.
+          if (header) {
+            expect(affordsBandRows(count + 1, terminal, false)).toBe(
+              affordsBandRows(2, terminal, false),
+            );
+          }
+        }
+      }
+    }
   });
 });

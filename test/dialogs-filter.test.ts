@@ -69,3 +69,58 @@ describe("select option visibility", () => {
     expect(visibleOptionIndices(options("Beta", "Alpha"), "a")).toEqual([0, 1]);
   });
 });
+
+describe("matching an option's cells", () => {
+  /** The cells of one column, as the matcher sees them: display text and
+   * nothing else. */
+  function rows(...cells: readonly (readonly string[])[]) {
+    return cells.map((row) => ({ cells: row }));
+  }
+
+  const releases = rows(
+    ["alpha", "beta"],
+    ["release/1.4", "shipped"],
+    ["release/2.0", "draft"],
+  );
+
+  test("matches a term within one cell, whichever cell that is", () => {
+    expect(visibleOptionIndices(releases, "alpha")).toEqual([0]);
+    expect(visibleOptionIndices(releases, "beta")).toEqual([0]);
+    expect(visibleOptionIndices(releases, "shipped")).toEqual([1]);
+    expect(visibleOptionIndices(releases, "RELEASE")).toEqual([1, 2]);
+  });
+
+  /**
+   * The spec's own scenario, and the reason cells are matched individually
+   * rather than joined: a term spanning the gap between two cells is a match
+   * the reader can neither see nor predict, and matching the padded row is
+   * exactly the caller-side failure this shape exists to remove.
+   */
+  test("never matches a term that spans the gap between two cells", () => {
+    expect(visibleOptionIndices(releases, "alphab")).toEqual([]);
+    expect(visibleOptionIndices(releases, "alpha  beta")).toEqual([0]);
+  });
+
+  /** Every term still has to match, and each may match in a different cell:
+   * the terms are unordered against the row, not against one cell of it. */
+  test("takes each term in any cell, and needs all of them", () => {
+    expect(visibleOptionIndices(releases, "alpha bet")).toEqual([0]);
+    expect(visibleOptionIndices(releases, "1.4 shipped")).toEqual([1]);
+    expect(visibleOptionIndices(releases, "1.4 draft")).toEqual([]);
+  });
+
+  test("leaves every row visible for blank text", () => {
+    expect(visibleOptionIndices(releases, "  ")).toEqual([0, 1, 2]);
+  });
+
+  /** A cell option's escape hatch is the same escape hatch: an option that
+   * collects input is the caller's "none of these" answer whatever its display
+   * text is, and a filter that could hide it would defeat it. */
+  test("keeps a cell option that declares fields visible", () => {
+    const withEscape = [
+      { cells: ["alpha", "beta"] },
+      { cells: ["Other…", ""], fields: [{ name: "branch" }] },
+    ];
+    expect(visibleOptionIndices(withEscape, "zzz")).toEqual([1]);
+  });
+});
