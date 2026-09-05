@@ -1,4 +1,5 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
+import type { Theme, ThemeVariable } from "./theme.ts";
 import type { DialogElement } from "./types.ts";
 
 /** The columns a panel spends on chrome rather than content: one border column
@@ -97,15 +98,15 @@ export function padToWidth(text: string, columns: number): string {
   return cut.padEnd(cut.length + columns - displayWidth(cut));
 }
 
-/** One piece of a rendered row or edge, carrying its own shading so a line can
- * mix chrome with content — a dimmed divider between two lists, a dimmed
- * prompt before what the user typed — and still be cut as a whole. */
+/** One piece of a rendered row or edge, naming what it is so a line can mix
+ * chrome with content — a divider between two lists, a prompt before what the
+ * user typed — and still be cut as a whole. The variable is a role rather than
+ * an appearance: nothing in this module knows what chrome looks like, and the
+ * theme is not consulted until the row is turned into an element. */
 export type FrameSegment = {
   readonly key: string;
   readonly text: string;
-  readonly dim?: boolean;
-  /** The cursor bar, drawn as the terminal's own inversion. */
-  readonly inverse?: boolean;
+  readonly variable: ThemeVariable;
 };
 
 /** One content row of a panel. */
@@ -155,19 +156,16 @@ export function truncateSegments(
   const edge = (fromStart ? kept[0] : kept.at(-1)) ?? {
     key: "cut",
     text: "",
+    variable: "content" as const,
   };
   const marker: FrameSegment = { ...edge, text: ellipsis };
   const all = fromStart ? [marker, ...kept] : [...kept, marker];
-  // Adjacent characters sharing a shading rejoin, so the renderer is handed
-  // the runs it would have been handed without the cut.
+  // Adjacent characters naming the same variable rejoin, so the renderer is
+  // handed the runs it would have been handed without the cut.
   const cut: FrameSegment[] = [];
   for (const character of all) {
     const open = cut.at(-1);
-    if (
-      open !== undefined &&
-      (open.dim ?? false) === (character.dim ?? false) &&
-      (open.inverse ?? false) === (character.inverse ?? false)
-    ) {
+    if (open !== undefined && open.variable === character.variable) {
       cut[cut.length - 1] = { ...open, text: open.text + character.text };
       continue;
     }
@@ -243,7 +241,7 @@ export function frameEdge(
   const chrome = (key: string, text: string): FrameSegment => ({
     key,
     text,
-    dim: true,
+    variable: "chrome",
   });
   const held = Math.max(reserve, segmentsWidth(right));
   const cut = truncateSegments(left, edgeRoom(width, held), leftTail);
@@ -293,14 +291,30 @@ type FrameProps = {
  *
  * The edges are drawn here rather than by the renderer's own border styles,
  * because a border with things set into it is not a border the renderer can
- * draw. Everything the frame itself draws is dimmed, which together with the
- * inverted cursor bar the caller passes in is the whole palette — no hue is
- * ever named.
+ * draw. Everything the frame itself draws is chrome and the cursor bar the
+ * caller passes in is the cursor; what either of those looks like belongs to
+ * the theme, and this is the only module in the plugin that knows what Ink
+ * calls a dim.
  */
 export function createFrame(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
+  theme: Theme,
 ) {
+  /** One variable as the renderer's own props. The whole appearance is applied
+   * rather than the attributes a dialog happens to use today, so a theme that
+   * bolds or hues a variable reaches the screen without this module changing.
+   * The hue is already gone where hues are disabled — the theme resolved that
+   * before it answered. */
+  const styling = (variable: ThemeVariable) => {
+    const { dim, bold, inverse, hue } = theme.appearance(variable);
+    return {
+      dimColor: dim ?? false,
+      bold: bold ?? false,
+      inverse: inverse ?? false,
+      ...(hue === undefined ? {} : { color: hue }),
+    };
+  };
   return function Frame({
     title,
     double,
@@ -327,11 +341,7 @@ export function createFrame(
         segments.map((segment) =>
           react.createElement(
             ink.Text,
-            {
-              key: segment.key,
-              dimColor: segment.dim ?? false,
-              inverse: segment.inverse ?? false,
-            },
+            { key: segment.key, ...styling(segment.variable) },
             segment.text,
           ),
         ),
@@ -339,7 +349,7 @@ export function createFrame(
     const side = (key: string): FrameSegment => ({
       key,
       text: glyphs.side,
-      dim: true,
+      variable: "chrome",
     });
     const drawn: DialogElement[] = [
       line(
@@ -354,7 +364,7 @@ export function createFrame(
           // title too long for the edge still ends a column short of the fill
           // instead of running straight into it.
           [
-            { key: "title-open", text: " ", dim: true },
+            { key: "title-open", text: " ", variable: "chrome" },
             {
               key: "title",
               text: truncateEnd(
@@ -364,9 +374,9 @@ export function createFrame(
                   Math.max(edgeReserve ?? 0, segmentsWidth(topRight ?? [])),
                 ) - 2,
               ),
-              dim: true,
+              variable: "chrome",
             },
-            { key: "title-close", text: " ", dim: true },
+            { key: "title-close", text: " ", variable: "chrome" },
           ],
           topRight ?? [],
           edgeReserve ?? 0,
@@ -384,10 +394,14 @@ export function createFrame(
           row.key,
           [
             side("open"),
-            { key: "lead", text: " " },
+            { key: "lead", text: " ", variable: "content" },
             ...fitted,
-            { key: "pad", text: " ".repeat(Math.max(0, padding)) },
-            { key: "trail", text: " " },
+            {
+              key: "pad",
+              text: " ".repeat(Math.max(0, padding)),
+              variable: "content",
+            },
+            { key: "trail", text: " ", variable: "content" },
             side("close"),
           ],
           row.tail ?? false,
@@ -417,7 +431,7 @@ export function createFrame(
           { key: "hint", marginLeft: 1, width: cap },
           react.createElement(
             ink.Text,
-            { dimColor: true, wrap: "truncate-end" },
+            { ...styling("chrome"), wrap: "truncate-end" },
             hint,
           ),
         ),

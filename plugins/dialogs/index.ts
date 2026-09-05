@@ -11,6 +11,7 @@ import { animationInterval, onPhase } from "./animation.ts";
 import { createEntry } from "./entry.ts";
 import { createFrame } from "./frame.ts";
 import { createSelectView } from "./select.ts";
+import { requireThemeCapability } from "./theme.ts";
 import type {
   Dialogs,
   DialogView,
@@ -371,15 +372,32 @@ const identity: PluginIdentity = Object.freeze({ name: "dialogs" });
 const definition: PluginDefinition = Object.freeze({
   identity,
   load(): Plugin {
-    return ({ context, dependencies, register }) => {
+    return ({ context, dependencies, register, registrations }) => {
       const { react, ink } = dependencies;
       const session: DialogSession = { context, dependencies };
-      const Frame = createFrame(react, ink);
-      const Entry = createEntry(react, ink, Frame);
+
+      /**
+       * The components for one dialog, built around the theme resolved for the
+       * stream that dialog draws to.
+       *
+       * Resolved while the dialog runs rather than while this plugin
+       * initializes, for two reasons the registry fixes: a plugin reading
+       * during its own initialization sees only what committed before it, and
+       * the theme provider is composed ahead of its consumers. Reading here
+       * sees every committed provider and every committed override.
+       */
+      const components = () => {
+        const theme = requireThemeCapability(registrations).theme(
+          context.stderr,
+        );
+        const Frame = createFrame(react, ink, theme);
+        return { Frame, Entry: createEntry(react, ink, Frame) };
+      };
 
       const dialogs: Dialogs = {
         async input({ message, initialValue }: InputRequest) {
           requireInteractiveStreams(context, "An input dialog");
+          const { Entry } = components();
 
           return runDialog<string>(session, "Input", (settle) => {
             const Input = () => {
@@ -412,6 +430,7 @@ const definition: PluginDefinition = Object.freeze({
           requireNonEmptyOptions(options);
           requireCollectableFields(options);
           requireInteractiveStreams(context, "A select dialog");
+          const { Entry, Frame } = components();
 
           return runDialog<SelectResult<T>>(session, "Select", (settle) =>
             createSelectView(

@@ -12,6 +12,7 @@ import {
 } from "../demo/scenarios.ts";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
 import { captureContext } from "./helpers.ts";
@@ -257,7 +258,7 @@ describe("the demo on a terminal", () => {
 
     const running = main(
       ["demo", "select"],
-      [dialogsPlugin, demoPlugin],
+      [themePlugin, dialogsPlugin, demoPlugin],
       context,
     );
     await until(() => stdin.rawModes.includes(true));

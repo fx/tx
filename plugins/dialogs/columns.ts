@@ -1,4 +1,5 @@
 import { displayWidth, padToWidth } from "./frame.ts";
+import type { ThemeVariable } from "./theme.ts";
 import type { SelectOption } from "./types.ts";
 import type { OptionWindow } from "./viewport.ts";
 
@@ -46,13 +47,13 @@ export const noMatch = "no match";
 
 /** One column's contribution to one row of the band. */
 export type ColumnCell = {
-  /** Already padded to the column's width, so the inverted bar spans the
-   * column and the column after it starts where it should. */
+  /** Already padded to the column's width, so the cursor bar spans the column
+   * and the column after it starts where it should. */
   readonly text: string;
-  readonly dim: boolean;
-  /** The cursor bar, spanning the whole column: the terminal's own inversion,
-   * and the only thing marking the row. */
-  readonly inverse: boolean;
+  /** What the cell is: the row under the cursor is the `cursor` variable and
+   * spans the whole column, and every other row is plain `content`. What
+   * either looks like is the theme's business, not this module's. */
+  readonly variable: ThemeVariable;
 };
 
 /** The text of an overflow indicator carrying a count. Compact, because it is
@@ -168,16 +169,15 @@ function cell(
   text: string,
   width: number,
   marked: boolean,
-  dim: boolean,
-  inverse: boolean,
+  variable: ThemeVariable,
 ): ColumnCell {
   if (!marked || width < markableWidth) {
-    return { text: padToWidth(text, width), dim, inverse };
+    return { text: padToWidth(text, width), variable };
   }
   // The marker's columns are exactly the separating space and the glyph, so
   // what is left is the label's and the three parts sum to `width`.
   const room = width - expandMarkerWidth;
-  return { text: `${padToWidth(text, room)} ${expandGlyph}`, dim, inverse };
+  return { text: `${padToWidth(text, room)} ${expandGlyph}`, variable };
 }
 
 /**
@@ -201,7 +201,7 @@ export function columnCells<T>(
   const cells: (ColumnCell | undefined)[] = [];
   for (let row = 0; row < bandRows; row += 1) cells.push(undefined);
   if (visible.length === 0) {
-    cells[0] = cell(noMatch, width, false, false, false);
+    cells[0] = cell(noMatch, width, false, "content");
     return cells;
   }
   for (let row = 0; row < viewport.count; row += 1) {
@@ -216,8 +216,7 @@ export function columnCells<T>(
       option.label,
       width,
       option.dialog !== undefined,
-      false,
-      barred,
+      barred ? "cursor" : "content",
     );
   }
   return cells;

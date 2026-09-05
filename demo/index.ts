@@ -19,6 +19,7 @@
  */
 
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
 import {
@@ -81,9 +82,14 @@ export const demoPlugin: PluginDefinition = {
     },
 };
 
-/** What the demo runs as: the dialogs plugin providing the capability, and the
+/** What the demo runs as: the theme plugin the dialogs plugin resolves its
+ * appearances from, the dialogs plugin providing the capability, and the
  * demo's own namespace consuming it. */
-const plugins: readonly PluginDefinition[] = [dialogsPlugin, demoPlugin];
+const plugins: readonly PluginDefinition[] = [
+  themePlugin,
+  dialogsPlugin,
+  demoPlugin,
+];
 
 const argv = import.meta.main ? ["demo", ...Bun.argv.slice(2)] : [];
 if (import.meta.main) process.exitCode = await main(argv, plugins);

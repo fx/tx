@@ -5,7 +5,7 @@
 Introduce a bundled theme plugin supplying named appearance variables, make the existing greyscale Norton Commander look its default theme, and move every appearance decision the dialogs plugin makes today behind it. Nothing on screen changes.
 
 **Spec:** [Theming](../specs/theming/)
-**Status:** draft
+**Status:** complete
 **Depends On:** —
 
 ## Motivation
@@ -75,6 +75,9 @@ The existing `FrameSegment` and `ColumnCell` types carry `dim` and `inverse` boo
 - **Decision**: the default theme must be byte-identical, and the existing dialogs tests are the proof.
   - **Why**: this is a refactor of where a decision is made. If a rendered byte moved, every presentation test would be re-baselined in the same commit that introduced the indirection, and a genuine regression would be indistinguishable from an intended restyle.
   - **Alternatives considered**: restyling opportunistically while the code is open — rejected for exactly that reason.
+- **Decision**: the marker on an option that opens a sub-dialog keeps the appearance of the row that carries it, and does not name the `marker` variable in this change.
+  - **Why**: it is not an appearance decision the dialogs plugin makes today. A marked cell is one padded string carrying its label and the glyph together, drawn with the row's own variable, so there is nothing here to move behind the theme — and giving the glyph its own segment would dim it on a plain row and un-invert it under the cursor bar, which is a restyle and would re-baseline the rendering tests this change is proved by. [Dialogs: Presentation](../specs/dialogs/index.md#presentation) states the rule beside the cell-width and field rules that [Change 0025](./0025-guarantee-cell-width-by-construction.md) and [Change 0027](./0027-add-multi-cell-select-rows.md) implement, and the marker becomes separately drawable exactly when a cell becomes a field of its own. The variable and its dimmed default ship here regardless, so those changes have it to name.
+  - **Alternatives considered**: naming `marker` now and re-baselining the marked-row tests (a restyle this change's own non-goals forbid); naming `marker` and defaulting it to no appearance at all (contradicts [Theming: Default Theme](../specs/theming/index.md#default-theme), and leaves a variable that lies about what it is for).
 - **Decision**: colour is resolved per surface, against the stream being drawn to.
   - **Why**: dialogs draw to stderr and a printed grid draws to a consumer-supplied stream, and those can differ in TTY-ness within one invocation — a piped grid alongside an interactive dialog is a normal thing to want.
   - **Alternatives considered**: one process-wide decision made at initialization (wrong whenever the two streams differ, and it would have to guess which stream to test).
@@ -89,23 +92,23 @@ The existing `FrameSegment` and `ColumnCell` types carry `dim` and `inverse` boo
 
 ## Tasks
 
-- [ ] Add the theme plugin
-  - [ ] `plugins/theme/variables.ts` with the variable set and the default appearance of each
-  - [ ] `plugins/theme/colour.ts` resolving hue enablement from injected environment, TTY state, and caller request
-  - [ ] `plugins/theme/index.ts` registering the `theme` capability, which resolves a theme from a supplied stream and composes the `theme-override` snapshot over the defaults in commit order at that point
-  - [ ] Compose the theme plugin in `cli.ts` ahead of its consumers
-  - [ ] Table-driven tests walking the five-input precedence order in both directions, including the pairs it exists to settle: `NO_COLOR` against `FORCE_COLOR`, `FORCE_COLOR=1` against `TERM=dumb` and against a redirected stream, an explicit caller request against every environment input, and blank or whitespace `FORCE_COLOR` deciding nothing
-  - [ ] Tests for partial overrides, override ordering, a failed provider's override being absent, and an override contributed by a plugin composed after the theme plugin still applying
-- [ ] Move the dialogs plugin behind the theme
-  - [ ] Replace the `dim` and `inverse` booleans on `FrameSegment` and `ColumnCell` with theme variables
-  - [ ] Resolve variables where elements are built, so geometry modules carry no appearance concept
-  - [ ] Read the `theme` capability at dialog time, requiring exactly one provider and failing with an error naming the count when none or several are found
-  - [ ] Tests for both failures: no theme provider composed, and two composed
-  - [ ] Confirm every existing dialogs rendering test passes unmodified
+- [x] Add the theme plugin
+  - [x] `plugins/theme/variables.ts` with the variable set and the default appearance of each
+  - [x] `plugins/theme/colour.ts` resolving hue enablement from injected environment, TTY state, and caller request
+  - [x] `plugins/theme/index.ts` registering the `theme` capability, which resolves a theme from a supplied stream and composes the `theme-override` snapshot over the defaults in commit order at that point
+  - [x] Compose the theme plugin in `cli.ts` ahead of its consumers
+  - [x] Table-driven tests walking the five-input precedence order in both directions, including the pairs it exists to settle: `NO_COLOR` against `FORCE_COLOR`, `FORCE_COLOR=1` against `TERM=dumb` and against a redirected stream, an explicit caller request against every environment input, and blank or whitespace `FORCE_COLOR` deciding nothing
+  - [x] Tests for partial overrides, override ordering, a failed provider's override being absent, and an override contributed by a plugin composed after the theme plugin still applying
+- [x] Move the dialogs plugin behind the theme
+  - [x] Replace the `dim` and `inverse` booleans on `FrameSegment` and `ColumnCell` with theme variables
+  - [x] Resolve variables where elements are built, so geometry modules carry no appearance concept
+  - [x] Read the `theme` capability at dialog time, requiring exactly one provider and failing with an error naming the count when none or several are found
+  - [x] Tests for both failures: no theme provider composed, and two composed
+  - [x] Confirm every existing dialogs rendering test passes unmodified
 
 ## Open Questions
 
-- [ ] Whether `strong` and `muted` earn their place before the grid exists to use them, or whether this change should ship the smaller variable set and add them in [Change 0028](./0028-add-the-grid-plugin.md) — shipping them now risks two variables no surface names.
+- [x] Whether `strong` and `muted` earn their place before the grid exists to use them, or whether this change should ship the smaller variable set and add them in [Change 0028](./0028-add-the-grid-plugin.md) — shipping them now risks two variables no surface names. **Resolved: they ship now, with the whole set.** The question turned out to be smaller than it looked, because `strong` and `muted` are not the only variables no surface names: a dialog names `chrome`, `content`, and `cursor` and nothing else, so shipping only what is used would mean shipping three variables rather than nine. [Theming: Theme Variables](../specs/theming/index.md#theme-variables) already fixes the set and requires the theme to define every member of it, so a smaller set would put this change out of step with the specification it implements. The cost of an unnamed variable is one row of a table and a default appearance with no behaviour behind it; the cost of adding one later is an amendment to a merged specification plus a consumer that had already worked around its absence. [Theming: Open Questions](../specs/theming/index.md#open-questions) keeps the real version of this question — whether `strong` and `muted` collapse into `content` once a second surface exists — open, and the grid is still the surface that will answer it.
 - [x] Whether the dialogs plugin should require exactly one theme provider, as `requireConfigCapability` requires exactly one config, rather than falling back. **Resolved: it requires exactly one, and the fallback is gone.** A consumer finding no theme capability, or more than one, fails with an error naming the count. The fallback could not be had honestly: a consumer that falls back knows the default theme, so it carries a copy of it, which is the duplication theming exists to remove — and the alternatives are a cross-plugin import or theme vocabulary in `src/`, both of which the boundaries forbid. The theme plugin is bundled and composed by default, so its absence is a misconfiguration rather than a supported mode, and requiring exactly one settles the two-provider case this question raised at the same time. [Theming: Theme Capability](../specs/theming/index.md#theme-capability) and [Theming: Why There Is No Fallback](../specs/theming/index.md#why-there-is-no-fallback) now carry the rule and its reasoning.
 
 ## References

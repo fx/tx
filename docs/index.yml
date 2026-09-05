@@ -231,7 +231,7 @@ changes:
     path: changes/0026-add-theme-variables.md
     description: Add a bundled theme plugin supplying named appearance variables, make the existing greyscale look its default theme, and move every dialogs appearance decision behind it without changing a rendered byte.
     spec: theming
-    status: draft
+    status: complete
     depends_on: []
   - id: "0027"
     name: add-multi-cell-select-rows
