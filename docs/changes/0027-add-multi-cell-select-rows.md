@@ -96,7 +96,7 @@ The `chrome` variable is also the second dependency. [Change 0026](./0026-add-th
 
 - [ ] Add cells to the option model
   - [ ] Make `label` optional and add `cells` in `plugins/dialogs/types.ts`, with `headers` on the request
-  - [ ] Validate label-or-cells, one shape per column, uniform cell counts within a column, and header count and placement, before rendering — alongside the existing option and field validations, at every reachable sub-dialog depth
+  - [ ] Validate label-or-cells, one shape per column, uniform cell counts within a column, and header count and placement, before rendering — alongside the existing option and field validations, at every reachable sub-dialog depth, and following the empty-collection principle [Dialogs: Select Request](../specs/dialogs/index.md#select-request) states, which decides an empty cell list and an empty header list without a validation of its own for either
   - [ ] Tests asserting each rejection happens before any terminal state changes
 - [ ] Measure and draw aligned fields
   - [ ] Add vector field-width measurement and cell layout to `plugins/dialogs/columns.ts`, leaving the scalar label path untouched

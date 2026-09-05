@@ -223,6 +223,7 @@ Printing is a command producing output and finishing, not an application taking 
 ### Row Actions
 
 - A row MAY declare its own actions, and they MUST be presented as the sub-dialog that row opens, so acting on a row is the drilling [Dialogs: Sub-Dialog Columns](../dialogs/index.md#sub-dialog-columns) already owns. Actions are declared per row rather than once for the grid, so two rows MAY offer different ones and a row MAY offer none while its neighbour does.
+- An empty action list MUST mean that the row declares no actions, exactly as omitting it does, and MUST NOT be rejected — the row resolves alone, by the rule below. This follows the principle [Dialogs: Select Request](../dialogs/index.md#select-request) states and this specification does not restate: emptiness is rejected only where it contradicts the declaration carrying it, and a row saying it has no actions contradicts nothing. It is also the shape a consumer computing actions per row will write, where a row offering none produces an empty list rather than an absent one. The same principle governs an empty header list, which means no headers, and an empty cell list, which is rejected there as a row that declared no cells at all.
 - A selection MUST report which row was chosen and, when the chosen row declared actions, which action was chosen, so a consumer never has to infer one from the other. [Dialogs: Sub-Dialog Columns](../dialogs/index.md#sub-dialog-columns) resolves a nested select with the completing option's value alone, so the grid MUST carry enough through the actions column to recover both and MUST NOT ask the consumer to reconstruct the row from the action.
 - A row declaring no actions MUST resolve on the row alone, so a grid used only to pick something needs no action model.
 - The grid MUST NOT run, spawn, interpret, or name a command. What an action means belongs to the consumer that declared it.
@@ -232,6 +233,12 @@ Printing is a command producing output and finishing, not an application taking 
 - **GIVEN** an interactive grid whose rows declare the actions `connect` and `open logs`
 - **WHEN** the user confirms a row and then confirms `connect`
 - **THEN** the selection carries both that row's value and the `connect` action
+
+#### Scenario: A row offering no actions
+
+- **GIVEN** an interactive grid whose rows compute their actions, leaving one row with an empty action list
+- **WHEN** the user confirms that row
+- **THEN** the selection carries that row's value and no action, and nothing was rejected
 
 #### Scenario: Backing out of the actions
 

@@ -94,7 +94,7 @@ Terminal handover needs no new machinery, which is the point of the design. `run
   - [ ] `plugins/grid/select.ts` mapping a grid request onto a select request and its result back onto a row and an action
   - [ ] Read the `dialogs` capability at command time alongside the theme
   - [ ] Reject the absent-interactive-stream case before rendering, alongside the validations `select` itself performs
-  - [ ] Tests over injected streams for selecting a row, selecting a row and an action, backing out of the actions, cancelling, and each rejection
+  - [ ] Tests over injected streams for selecting a row, selecting a row and an action, backing out of the actions, cancelling, each rejection, and a row whose computed action list is empty resolving on the row alone rather than being rejected
 - [ ] Pin the terminal-handover guarantee
   - [ ] Tests asserting that after a completed, a cancelled, and a failed selection, raw mode is off, the installed input handler is gone, and nothing further is written
   - [ ] Test asserting standard output is untouched throughout an interactive selection

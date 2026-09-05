@@ -84,18 +84,20 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 ### Select Request
 
-- `select` MUST reject a request with no options before rendering or changing terminal state.
+One principle settles every empty list a caller can pass, here and in the specifications that build on this one: **an empty collection MUST be rejected where its emptiness contradicts the declaration carrying it, and MUST mean "none" where it does not.** A list is not harmless merely because it is empty; what decides is whether the caller has said two things that cannot both be true. Declaring a select and supplying no options, or marking an option as collecting input and supplying no fields, are each a statement contradicted by its own contents. Supplying no headers is not: a caller saying a column has none has said one coherent thing, and a rule already says what that means.
+
+- `select` MUST reject a request with no options before rendering or changing terminal state, because a select with nothing to select asks the reader for nothing.
 - `select` MUST render the request message and the display text of every option the [filter](#filtering) leaves visible and the [viewport](#viewport) has room for.
 - `select` MUST treat an option's display text as display text and option values as opaque values.
-- An option MUST declare either one label or a list of cells, and MUST NOT declare both or neither; a request violating that MUST be rejected before rendering or changing terminal state.
+- An option MUST declare either one label or a list of cells, and MUST NOT declare both or neither; a request violating that MUST be rejected before rendering or changing terminal state. An empty cell list is not a list of cells, so an option declaring one has declared neither and is rejected by this rule already; no separate validation of an empty cell list MUST be added, and none is needed.
 - Every option of one column MUST declare the same one of those two shapes. A column mixing label options with cell options MUST be rejected before rendering or changing terminal state: a label is not a one-cell row, and treating it as one would put a lone label into a field measured against cells that mean something else. Each column decides its own shape independently, exactly as it decides its own headers, so a column of labels MAY open a column of cells and the reverse.
 - An option declaring cells MUST have its cells aligned into fields shared with every other option of its column, as [Presentation](#presentation) requires, so a column of cells reads as a table rather than as padded labels.
 - A column of cell options MUST declare the same number of cells on every one of them, and a request violating that MUST be rejected before rendering or changing terminal state.
-- A request MAY declare headers for its own column, and headers MUST be accepted only on a column of cell options and MUST match those cells in number; a request violating either MUST be rejected before rendering or changing terminal state.
+- A request MAY declare headers for its own column, and headers MUST be accepted only on a column of cell options and MUST match those cells in number; a request violating either MUST be rejected before rendering or changing terminal state. An empty header list MUST mean that the column declares no headers, exactly as omitting it does, and MUST NOT be rejected: nothing about a column of cells claims it has headers, so declaring none contradicts nothing.
 - `select` MUST preserve option order and MUST NOT remove options whose display text or values repeat.
 - The first option MUST be active when the dialog opens.
 - An option that declares no fields MUST be a plain option, and an option that declares fields MUST be a user-provided option.
-- `select` MUST reject a request in which an option declares an empty field list or repeats a field name within that same option, before rendering or changing terminal state.
+- `select` MUST reject a request in which an option declares an empty field list or repeats a field name within that same option, before rendering or changing terminal state. The empty list is rejected because an option declaring fields is a user-provided option by the rule above it, and one that collects nothing is that declaration contradicting itself.
 
 #### Scenario: Invalid empty request
 
