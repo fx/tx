@@ -25,7 +25,7 @@ Theming resolves both by moving the decision to one owner. Dialogs stops naming 
 - A consumer MUST read the capability while its command runs rather than during its own initialization, because registry reads during initialization see only earlier providers.
 - A resolved theme MUST answer with an appearance alone. It MUST NOT expose whether hues were enabled, because [Colour Enablement](#colour-enablement) requires every appearance it returns to reflect that decision already, and a consumer given the flag is a consumer that can branch on it.
 - The contract MUST remain a local structural type shared by bundled plugins; nothing about theming MUST enter `src/` or the public `@fx/tx/plugin` contract.
-- A consumer MUST behave correctly when the capability is absent, by falling back to the default theme.
+- Exactly one theme provider MUST be composed. A consumer reading the `theme` key that finds no capability, or finds more than one, MUST fail with an error naming how many it found, exactly as `requireConfigCapability` in `plugins/marketplace/configured.ts` already does for the [Config](../config/) capability. There is deliberately no fallback: the theme plugin is bundled and composed by default, so its absence is a misconfiguration rather than a supported mode, and a fallback would oblige every consumer to carry its own copy of the default theme — the duplication this capability exists to remove. [Why There Is No Fallback](#why-there-is-no-fallback) states the reasoning in full.
 
 The initial shape is conceptual:
 
@@ -38,8 +38,9 @@ type Appearance = {
 }
 
 type Hue =
-  | "red" | "green" | "yellow" | "blue"
-  | "magenta" | "cyan" | "white" | "gray"
+  | "black" | "red" | "green" | "yellow"
+  | "blue" | "magenta" | "cyan" | "white"
+  | "gray"
 
 type ThemeVariable =
   | "chrome" | "content" | "cursor" | "marker"
@@ -66,11 +67,17 @@ type Theming = {
 - **WHEN** a consumer reads the `theme` key while its command runs and resolves a theme for the stream it draws to
 - **THEN** it receives exactly one theming capability and can resolve an appearance for every variable
 
-#### Scenario: Absent capability falls back
+#### Scenario: Absent capability fails
 
 - **GIVEN** no theme provider is composed
-- **WHEN** a consumer draws
-- **THEN** it renders exactly as the default theme would, rather than failing
+- **WHEN** a consumer reads the `theme` key while its command runs
+- **THEN** it fails with an error saying no theme capability was found, and draws nothing
+
+#### Scenario: Duplicate providers fail
+
+- **GIVEN** two theme providers are composed
+- **WHEN** a consumer reads the `theme` key while its command runs
+- **THEN** it fails with an error saying two were found, rather than silently taking either one
 
 ### Theme Variables
 
@@ -192,6 +199,12 @@ A palette exposed to consumers is a palette consumers embed. Naming `red` in a p
 
 It is also what makes the greyscale default honest rather than a restriction. The dialogs rule that no hue is emitted becomes a property of one theme rather than a prohibition written into a layout module, and it can stay the default indefinitely without freezing every other surface to it.
 
+### Why There Is No Fallback
+
+A consumer that falls back to the default theme when the capability is absent has to know the default theme, and knowing it means carrying it: every variable, every default appearance, and the colour-enablement order that decides which of them survive. That is the duplication theming was introduced to delete, reintroduced once per consumer and guaranteed to drift from the theme plugin the first time a variable's default changes. The alternative — reaching into the theme plugin for its defaults — is the cross-plugin import [Composition and Boundaries](../plugin-system/index.md#composition-and-boundaries) forbids, and lifting the defaults into `src/` would put theme vocabulary in core, which is the one thing this specification says core does not carry.
+
+Requiring exactly one provider removes the choice. The theme plugin is bundled and composed by default, so a `tx` without it is misconfigured rather than degraded, and a misconfiguration should say so at the point it is discovered. Requiring exactly one also catches the opposite mistake for free: two composed providers would otherwise be silently the first, which is the kind of ambiguity a consumer can neither see nor report.
+
 ### Why the Default Must Be Byte-Identical
 
 Theming is a refactor of where an appearance decision is made, not a restyle. If adopting it changed a single rendered byte, every dialogs presentation test would have to be re-baselined at the same moment the indirection was introduced, and a real regression would be indistinguishable from an intended restyle. Holding the default byte-identical keeps the existing tests as the proof that the indirection is faithful.
@@ -199,7 +212,7 @@ Theming is a refactor of where an appearance decision is made, not a restyle. If
 ## Constraints
 
 - A user-selectable theme, a theme name, a configuration key, and any persistence of a theme choice are out of scope.
-- Background hues, 256-colour and truecolour palettes, underline, italic, strikethrough, and blink are out of scope; the appearance vocabulary is dim, bold, inverse, and one of the eight named hues plus grey.
+- Background hues, 256-colour and truecolour palettes, underline, italic, strikethrough, and blink are out of scope; the appearance vocabulary is dim, bold, inverse, and one of the eight named ANSI hues — `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, and `white` — plus `gray`, nine in all.
 - Terminal capability detection beyond `TERM` being `dumb` is out of scope; `tx` does not probe terminfo.
 - Per-surface variable sets, theme inheritance, cascading scopes, and any selector language are out of scope. There is one variable set and one composed set of overrides per process; the only thing resolved per surface is [Colour Enablement](#colour-enablement), and it varies only because the stream does.
 - Runtime theme switching, live reloading, and re-rendering on a theme change are out of scope.

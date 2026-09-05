@@ -22,13 +22,16 @@ The interactive grid then costs almost nothing extra: a driveable grid is a sele
 - The capability MUST expose printing a grid and selecting a row of one, and MUST NOT expose a renderer, a component, or a layout primitive.
 - A consumer MUST read the capability while its command runs rather than during its own initialization.
 - The contract MUST remain a local structural type shared by bundled plugins; nothing about grids MUST enter `src/` or the public `@fx/tx/plugin` contract.
-- The grid MUST resolve every appearance through [Theming](../theming/) and MUST NOT decide a hue, a dim, or an inversion itself.
+- The grid MUST resolve every appearance through [Theming](../theming/) and MUST NOT decide a hue, a dim, or an inversion itself, under the one-provider rule [Theming: Theme Capability](../theming/index.md#theme-capability) states; the grid MUST NOT carry a theme of its own to fall back to.
+- A printing request declaring no layout MUST be laid out as a table. It is the shape a caller who said nothing meant, and the only one that needs no width.
 
 The initial shape is conceptual:
 
 ```ts
 // ThemeVariable is [Theming]'s; nothing about it is redefined here.
 
+// `variable` and `align` describe a printed cell. Neither survives into a
+// selecting grid; see the note below this block.
 type Cell = {
   readonly text: string
   readonly variable?: ThemeVariable
@@ -85,6 +88,8 @@ type Grid = {
 }
 ```
 
+A `Cell` is the same shape wherever it appears, but two of its three fields are honoured only when the grid is printed. A cell's `variable` and its `align` are dropped when the same cell is presented for selection, under the rules [Interactive Grid](#interactive-grid) states; a consumer reading this block should not expect either to reach a selectable row. A cell's `align` is dropped by [Flow Layout](#flow-layout) too, for its own reason.
+
 A selecting request carries no stream: a dialog reads and draws through the streams [Dialogs](../dialogs/) was injected with, and [Terminal Handover](#terminal-handover) depends on it being those streams and no others.
 
 #### Scenario: Capability used by a command
@@ -121,11 +126,12 @@ A cell's text arrives from the consumer, and a consumer's text arrives from some
 
 - A table MUST align every cell of a column to one width, and that width MUST be the widest cell in the column, header included.
 - Columns MUST be separated by a fixed gap, and the final column MUST NOT be padded, so no line carries trailing whitespace.
-- A cell MUST be padded to its column's width at its end by default, and a cell asking to be aligned at its end MUST be padded at its start instead, so a column of counts lines up on its digits.
+- A cell declaring no alignment, or declaring `start`, MUST be padded to its column's width at its end; a cell declaring `end` MUST be padded at its start instead, so a column of counts lines up on its digits. Those two are the whole alignment vocabulary.
 - A header row, when supplied, MUST be drawn once above the rows and MUST be emphasized relative to them.
 - A grid asked to draw no rows MUST print its supplied empty message, and MUST NOT print a header row over nothing.
 - A summary, when supplied, MUST be drawn once beneath the rows, separated from them by a blank line, and MUST be de-emphasized relative to them.
 - A grid with no rows and a summary MUST print the empty message, then that same blank line, then the summary. The empty message stands where the rows would have been and is separated from the summary exactly as rows would have been, so the spacing beneath a grid does not change with whether it happened to have anything in it. A grid with no rows and no summary MUST print the empty message alone, with no trailing blank line.
+- A grid with no rows that supplies no empty message MUST print nothing where its rows would have been, and MUST print a supplied summary alone with no leading blank line. The message is the consumer's to word, so a grid whose rows can never be empty MUST NOT be obliged to invent one, and there is nothing for a blank line to separate a summary from.
 - When the terminal is narrower than the table's natural width, the table MUST NOT re-wrap or re-flow a column in a way that changes which row a cell belongs to.
 
 #### Scenario: Aligned columns
@@ -145,6 +151,12 @@ A cell's text arrives from the consumer, and a consumer's text arrives from some
 - **GIVEN** a grid with no rows, the empty message `Nothing to show.`, and a summary
 - **WHEN** it renders
 - **THEN** `Nothing to show.` is printed, then one blank line, then the summary
+
+#### Scenario: Empty grid with no empty message
+
+- **GIVEN** a grid with no rows, no empty message, and a summary
+- **WHEN** it renders
+- **THEN** the summary is the only thing printed
 
 #### Scenario: No trailing whitespace
 
@@ -204,6 +216,9 @@ Printing is a command producing output and finishing, not an application taking 
 - A row's cells MUST be presented as the multi-cell option [Dialogs: Select Request](../dialogs/index.md#select-request) owns, so alignment within a row is one contract rather than two.
 - Every row MUST carry the value that identifies it, declared on the row rather than in a list parallel to the rows, so a row the caller cannot identify is unrepresentable rather than rejected.
 - A cell's declared `variable` MUST NOT survive into a selecting grid: every cell of a row presented through [Dialogs](../dialogs/) is drawn as `content`, whatever role it declared for printing. [Dialogs: Select Request](../dialogs/index.md#select-request) takes an option's cells as display text, and [Dialogs: Presentation](../dialogs/index.md#presentation) requires every column's cursor bar to be the inversion alone with no cell shaded differently beneath it; a per-cell role would have to be composed with that bar on the active row and would contradict it. A consumer that needs a row's state visible while selecting MUST put it in a cell's text.
+- A cell's declared `align` MUST NOT survive into a selecting grid either. [Dialogs: Select Request](../dialogs/index.md#select-request) takes an option's cells as plain display text and [Dialogs](../dialogs/) puts per-field alignment out of scope, so there is nothing on that side for a declared alignment to be expressed against; a selectable row's cells are aligned exactly as [Dialogs: Presentation](../dialogs/index.md#presentation) aligns the fields of a column and no further.
+- A selecting request MAY declare headers, and they MUST be presented as the headers of the column [Dialogs: Select Request](../dialogs/index.md#select-request) owns, under that specification's rules for them; this specification restates none of them.
+- The rows of a selecting request MUST be presented with the same column count and the same placeholder for a missing trailing cell that [Cell Values](#cell-values) fixes for printing, so a set of rows differing in cell count is padded rather than rejected. [Dialogs: Select Request](../dialogs/index.md#select-request) requires every option of a column to declare the same number of cells, and the grid — which already has one column-count rule — MUST satisfy that rather than pass a ragged set of rows through to be rejected.
 - Selecting MUST require the interactive streams a dialog requires, and MUST reject rather than fall back to printing when they are absent.
 - A cancelled selection MUST resolve to nothing, MUST print nothing, and MUST NOT assign an exit code.
 - A grid MUST NOT be both printed and selected in one call; a consumer choosing between them owns that choice.

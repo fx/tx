@@ -39,7 +39,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 - A new bundled plugin under `plugins/theme/`, composed in `cli.ts` before the plugins that consume it. Ordering is not required for correctness — consumers read at command time, when everything has committed — but composing a provider before its consumers is what the ordered defaults in `cli.ts` are for.
 - The dialogs plugin stops naming appearances. `frame.ts` and `columns.ts` currently carry `dim` and `inverse` as booleans on their segment and cell types; those become theme variables resolved at the point the segment is turned into an element, so the geometry modules keep having no opinion about appearance.
-- The dialogs plugin reads the `theme` key while a dialog runs, following the pattern `requireConfigCapability` in `plugins/marketplace/configured.ts` establishes, except that an absent theme falls back to the default rather than throwing — [Theming: Theme Capability](../specs/theming/index.md#theme-capability) requires the fallback and dialogs must keep working with no theme provider composed.
+- The dialogs plugin reads the `theme` key while a dialog runs, following the pattern `requireConfigCapability` in `plugins/marketplace/configured.ts` establishes, including its failure: finding no theme capability, or more than one, throws an error naming the count rather than falling back. [Theming: Theme Capability](../specs/theming/index.md#theme-capability) requires exactly one provider, and [Theming: Why There Is No Fallback](../specs/theming/index.md#why-there-is-no-fallback) says why a per-consumer default would be the duplication theming exists to remove.
 - The capability resolves a theme from the stream a surface draws to rather than handing one out ready-made, because the colour decision depends on that stream. Dialogs pass their injected standard-error stream; a printed grid passes whatever stream its consumer supplied. Only the stream's TTY-ness is read; the capability never writes to it or keeps it.
 - Overrides are read from the separate `theme-override` key and composed at resolution time. [Theming: Plugin Overrides](../specs/theming/index.md#plugin-overrides) owns both rules, and both exist because of what the registry does: one key holds every entry distinctly, and initialization-time reads cannot see a later plugin's contribution.
 
@@ -99,13 +99,14 @@ The existing `FrameSegment` and `ColumnCell` types carry `dim` and `inverse` boo
 - [ ] Move the dialogs plugin behind the theme
   - [ ] Replace the `dim` and `inverse` booleans on `FrameSegment` and `ColumnCell` with theme variables
   - [ ] Resolve variables where elements are built, so geometry modules carry no appearance concept
-  - [ ] Read the `theme` capability at dialog time, falling back to the default when it is absent
+  - [ ] Read the `theme` capability at dialog time, requiring exactly one provider and failing with an error naming the count when none or several are found
+  - [ ] Tests for both failures: no theme provider composed, and two composed
   - [ ] Confirm every existing dialogs rendering test passes unmodified
 
 ## Open Questions
 
 - [ ] Whether `strong` and `muted` earn their place before the grid exists to use them, or whether this change should ship the smaller variable set and add them in [Change 0028](./0028-add-the-grid-plugin.md) — shipping them now risks two variables no surface names.
-- [ ] Whether the dialogs plugin should require exactly one theme provider, as `requireConfigCapability` requires exactly one config, rather than falling back — the spec requires the fallback, but two composed providers is then silently the first one rather than an error.
+- [x] Whether the dialogs plugin should require exactly one theme provider, as `requireConfigCapability` requires exactly one config, rather than falling back. **Resolved: it requires exactly one, and the fallback is gone.** A consumer finding no theme capability, or more than one, fails with an error naming the count. The fallback could not be had honestly: a consumer that falls back knows the default theme, so it carries a copy of it, which is the duplication theming exists to remove — and the alternatives are a cross-plugin import or theme vocabulary in `src/`, both of which the boundaries forbid. The theme plugin is bundled and composed by default, so its absence is a misconfiguration rather than a supported mode, and requiring exactly one settles the two-provider case this question raised at the same time. [Theming: Theme Capability](../specs/theming/index.md#theme-capability) and [Theming: Why There Is No Fallback](../specs/theming/index.md#why-there-is-no-fallback) now carry the rule and its reasoning.
 
 ## References
 

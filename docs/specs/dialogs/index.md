@@ -37,6 +37,8 @@ type TextField = {
 }
 
 type SelectOption<T> = {
+  // Exactly one of `label` and `cells`, never both and never neither, and the
+  // same one on every option of a column; the Select Request rules own this.
   readonly label?: string
   readonly cells?: readonly string[]
   readonly value: T
