@@ -99,9 +99,14 @@ const definition: PluginDefinition = Object.freeze({
           const composed = composeOverrides(
             registrations<ThemeOverride>(themeOverrideKey),
           );
+          // The stream's TTY-ness is passed as something to ask rather than
+          // something already read, because it is the lowest of the five
+          // colour inputs and an input below the one that decides is not read
+          // at all. Nothing here retains the stream: the closure lives no
+          // longer than this call.
           const colour = coloursEnabled({
             env,
-            isTTY: stream.isTTY,
+            isTTY: () => stream.isTTY,
             request: options?.colour,
           });
           return {

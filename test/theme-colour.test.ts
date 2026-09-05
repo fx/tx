@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { type ColourInputs, coloursEnabled } from "../plugins/theme/colour.ts";
+import {
+  type ColourEnvironment,
+  coloursEnabled,
+} from "../plugins/theme/colour.ts";
 
 /**
  * Colour enablement is one fixed order over five inputs, so it is asserted as
@@ -9,14 +12,21 @@ import { type ColourInputs, coloursEnabled } from "../plugins/theme/colour.ts";
  * the order exists to settle.
  */
 
+/** One row of the table: the three inputs as plain data, so the table reads as
+ * a table. The TTY-ness is wrapped in the thunk `coloursEnabled` asks through
+ * where the row is run. */
 type Case = {
   readonly name: string;
-  readonly inputs: ColourInputs;
+  readonly inputs: {
+    readonly env: Record<string, string | undefined>;
+    readonly isTTY?: boolean | undefined;
+    readonly request?: boolean | undefined;
+  };
   readonly enabled: boolean;
 };
 
 /** A terminal with nothing set, which is the case every other row varies. */
-const terminal: ColourInputs = { env: {}, isTTY: true };
+const terminal = { env: {}, isTTY: true } as const;
 
 const cases: readonly Case[] = [
   // 5. The stream, which decides last and only where nothing above it did.
@@ -208,7 +218,10 @@ const cases: readonly Case[] = [
 describe("colour enablement", () => {
   for (const { name, inputs, enabled } of cases) {
     test(`${enabled ? "emits" : "withholds"} hues for ${name}`, () => {
-      expect(coloursEnabled(inputs)).toBe(enabled);
+      const { env, isTTY, request } = inputs;
+      expect(coloursEnabled({ env, isTTY: () => isTTY, request })).toBe(
+        enabled,
+      );
     });
   }
 
@@ -243,11 +256,105 @@ describe("colour enablement", () => {
                       : term === "dumb"
                         ? false
                         : isTTY;
-              expect(coloursEnabled({ env, isTTY, request })).toBe(expected);
+              expect(coloursEnabled({ env, isTTY: () => isTTY, request })).toBe(
+                expected,
+              );
             }
           }
         }
       }
     }
+  });
+});
+
+/**
+ * The order is not only about which input answers: the specification requires
+ * the first decider to settle the question "with the rest unread", so an input
+ * below it must not be consulted at all.
+ *
+ * A table of plain data cannot catch a regression there — every value is
+ * readable, so reading one costs nothing and shows nothing. These cases make
+ * the lower inputs refuse to be read, which turns an eager read into a thrown
+ * error rather than a silent one.
+ */
+describe("the order leaves every input below its decider unread", () => {
+  /** An environment that throws rather than answer for the variables a higher
+   * input has already settled. */
+  function refusing(
+    env: Record<string, string | undefined>,
+    ...forbidden: readonly string[]
+  ): ColourEnvironment {
+    return new Proxy(env, {
+      get(target, name) {
+        if (typeof name === "string" && forbidden.includes(name)) {
+          throw new Error(`${name} was read after the question was settled`);
+        }
+        return Reflect.get(target, name);
+      },
+    });
+  }
+
+  /** A stream that refuses to say whether it is a terminal, which every case
+   * here has already been answered above. */
+  const unreadableStream = (): boolean | undefined => {
+    throw new Error("the stream was read after the question was settled");
+  };
+
+  test("reads nothing below the caller's own request", () => {
+    const env = refusing(
+      { NO_COLOR: "", FORCE_COLOR: "0", TERM: "dumb" },
+      "NO_COLOR",
+      "FORCE_COLOR",
+      "TERM",
+    );
+
+    expect(
+      coloursEnabled({ env, isTTY: unreadableStream, request: true }),
+    ).toBe(true);
+    expect(
+      coloursEnabled({ env, isTTY: unreadableStream, request: false }),
+    ).toBe(false);
+  });
+
+  test("reads nothing below NO_COLOR", () => {
+    expect(
+      coloursEnabled({
+        env: refusing(
+          { NO_COLOR: "", FORCE_COLOR: "1", TERM: "dumb" },
+          "FORCE_COLOR",
+          "TERM",
+        ),
+        isTTY: unreadableStream,
+      }),
+    ).toBe(false);
+  });
+
+  test("reads nothing below a FORCE_COLOR that decides", () => {
+    expect(
+      coloursEnabled({
+        env: refusing({ FORCE_COLOR: "1", TERM: "dumb" }, "TERM"),
+        isTTY: unreadableStream,
+      }),
+    ).toBe(true);
+    expect(
+      coloursEnabled({
+        env: refusing({ FORCE_COLOR: "0", TERM: "dumb" }, "TERM"),
+        isTTY: unreadableStream,
+      }),
+    ).toBe(false);
+  });
+
+  test("reads nothing below TERM=dumb", () => {
+    expect(
+      coloursEnabled({ env: { TERM: "dumb" }, isTTY: unreadableStream }),
+    ).toBe(false);
+  });
+
+  /** The other half of the same claim: an input that decides nothing must
+   * still let the one below it be read. */
+  test("reads on down where an input decides nothing", () => {
+    expect(
+      coloursEnabled({ env: { FORCE_COLOR: "  " }, isTTY: () => true }),
+    ).toBe(true);
   });
 });
