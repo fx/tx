@@ -368,7 +368,7 @@ type Theming = {
 }
 ```
 
-A bundled consumer declares that compatible type locally and reads `registrations<Theming>("theme")` inside its command action, after initialization has committed every provider. Unlike the config and dialogs capabilities, a consumer must find **exactly one**: none and several are both errors naming the count, and there is deliberately no fallback, because a consumer that fell back would have to carry its own copy of the default theme. The theme plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
+A bundled consumer declares that compatible type locally and reads `registrations<Theming>("theme")` inside its command action, after initialization has committed every provider. It must find **exactly one** — as a config consumer already must, through the same rule `requireConfigCapability` applies, and unlike the dialogs capability, where the consumer owns what an absent capability means: none and several are both errors naming the count, and there is deliberately no fallback, because a consumer that fell back would have to carry its own copy of the default theme. The theme plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
 
 A theme is resolved for the stream a surface draws to rather than handed out ready-made, because whether hues are emitted depends on that stream. Only the stream's TTY-ness is read; the capability never writes to it, retains it, or exposes a terminal or renderer. A resolved theme answers with an appearance alone and never says whether hues were enabled — that decision is already inside every appearance it returns.
 
