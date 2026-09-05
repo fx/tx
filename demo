@@ -5,12 +5,13 @@
  *   ./demo              # every scenario, one after another
  *   bun demo            # same via bun
  *   ./demo input        # standalone input: blinking caret
- *   ./demo select       # short list: no filter, confirmation flash
- *   ./demo filter       # long list: type-to-filter + ▲/▼ overflow
- *   ./demo nofilter     # long list with the filter forced off
+ *   ./demo select       # short list, no sub-dialogs: confirmation flash
+ *   ./demo filter       # long list: start typing and it narrows
+ *   ./demo shownfilter  # long list whose filter is shown before you type
  *   ./demo fields       # select whose option collects input fields
- *   ./demo nested       # select whose option opens a nested select (Tab)
- *   ./demo leaf         # select whose option opens a text input leaf (Tab)
+ *   ./demo nested       # three-level column browser (Enter/→ in, ←/Esc out)
+ *   ./demo tab          # the same tree with opening bound to Tab
+ *   ./demo leaf         # select whose option opens a text input leaf (Enter/→)
  *
  * Dialogs render on stderr, results are printed on stdout, so
  * `./demo select > /dev/null` still shows the dialog.
@@ -29,7 +30,8 @@ type TextField = {
 type SelectRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
-  readonly filter?: boolean | "auto";
+  readonly filter?: "typed" | "always";
+  readonly expand?: "enter" | "tab";
 };
 type SelectOption<T> = {
   readonly label: string;
@@ -69,13 +71,148 @@ const branches = [
   "spike/wide-glyphs-😀-and-CJK-漢字",
 ];
 
+/** The scripts a package or app exposes: a column of plain options, which is
+ * where a walk through the tree ends. */
+function scripts(
+  name: string,
+  ...names: readonly string[]
+): SelectRequest<string> {
+  return {
+    message: `Run in ${name}`,
+    options: names.map((script) => ({
+      label: script,
+      value: `${name}:${script}`,
+    })),
+  };
+}
+
+/** Long enough to overflow its column, so the second level shows the ▲/▼
+ * counts set into the frame's edges. The last one is deliberately wide: its
+ * glyphs take two terminal columns each, and the column is padded in columns
+ * rather than in characters. */
+const packages = [
+  "core",
+  "cli",
+  "config",
+  "dialogs",
+  "filter",
+  "frame",
+  "logger",
+  "marketplace",
+  "plugin-api",
+  "registry",
+  "storage",
+  "telemetry",
+  "updater",
+  "viewport",
+  "国际化-i18n 😀",
+];
+
+/**
+ * A monorepo to walk: three levels deep, with columns of very different
+ * lengths beside each other, one long enough to scroll, and two leaves that
+ * are not lists at all — a text field and a pair of collected fields. Wide
+ * enough overall that a narrow terminal has to start dropping columns off its
+ * left.
+ */
+function targets(expand?: "enter" | "tab"): SelectRequest<string> {
+  return {
+    message: "Pick a target",
+    ...(expand === undefined ? {} : { expand }),
+    options: [
+      {
+        label: "apps",
+        value: "apps",
+        dialog: {
+          message: "Pick an app",
+          options: [
+            {
+              label: "web",
+              value: "web",
+              dialog: scripts(
+                "web",
+                "build",
+                "dev",
+                "test",
+                "lint",
+                "typecheck",
+              ),
+            },
+            {
+              label: "admin",
+              value: "admin",
+              dialog: scripts("admin", "build", "dev"),
+            },
+            {
+              label: "docs-site",
+              value: "docs-site",
+              dialog: scripts("docs-site", "build"),
+            },
+          ],
+        },
+      },
+      {
+        label: "packages",
+        value: "packages",
+        dialog: {
+          message: "Pick a package",
+          options: packages.map((name) => ({
+            label: name,
+            value: name,
+            dialog: scripts(name, "build", "test", "lint"),
+          })),
+        },
+      },
+      {
+        label: "infra",
+        value: "infra",
+        dialog: {
+          message: "Pick an action",
+          options: [
+            {
+              label: "deploy…",
+              value: "deploy",
+              // A text field rather than a list: it renders as its own panel
+              // under the browser instead of as another column.
+              dialog: {
+                type: "text",
+                name: "environment",
+                message: "Which environment?",
+                initialValue: "staging",
+              },
+            },
+            {
+              label: "rollback…",
+              value: "rollback",
+              // Collected fields reached three levels in, to show a collection
+              // running under a browser rather than under a flat list.
+              fields: [
+                { type: "text", name: "service", message: "Which service?" },
+                {
+                  type: "text",
+                  name: "revision",
+                  message: "Which revision?",
+                  initialValue: "HEAD~1",
+                },
+              ],
+            },
+            { label: "status", value: "status" },
+          ],
+        },
+      },
+      { label: "everything", value: "everything" },
+    ],
+  };
+}
+
 const order = [
   "input",
   "select",
   "filter",
-  "nofilter",
+  "shownfilter",
   "fields",
   "nested",
+  "tab",
   "leaf",
 ] as const;
 
@@ -115,11 +252,11 @@ const scenarios: Record<
     });
   },
 
-  async nofilter(dialogs) {
+  async shownfilter(dialogs) {
     return await dialogs.select({
-      message: "Pick a branch (filter off)",
+      message: "Pick a branch (filter shown)",
       options: branches.map((label) => ({ label, value: label })),
-      filter: false,
+      filter: "always",
     });
   },
 
@@ -144,31 +281,21 @@ const scenarios: Record<
           ],
         },
       ],
-      // Four options is under the auto threshold, so ask for the filter
-      // explicitly to see it alongside the "Somewhere else…" escape hatch,
-      // which stays visible however hard you filter.
-      filter: true,
+      // Typing filters whatever the list's length, and the "Somewhere else…"
+      // escape hatch stays visible however hard you filter — it declares
+      // fields, and a filter never hides the caller's "none of these" answer.
     });
   },
 
   async nested(dialogs) {
-    return await dialogs.select({
-      message: "Pick a category",
-      options: [
-        {
-          label: "fruit",
-          value: "fruit",
-          dialog: {
-            message: "Pick a fruit",
-            options: [
-              { label: "apple", value: "apple" },
-              { label: "banana", value: "banana" },
-            ],
-          },
-        },
-        { label: "color", value: "color" },
-      ],
-    });
+    return await dialogs.select(targets());
+  },
+
+  async tab(dialogs) {
+    // The same tree under the other binding: Enter takes the row it is on
+    // whether or not it leads anywhere, and Tab is what opens it. Selecting
+    // `apps` here resolves with "apps" instead of drilling into it.
+    return await dialogs.select(targets("tab"));
   },
 
   async leaf(dialogs) {
@@ -192,17 +319,20 @@ function report(context: CommandContext, name: string, result: unknown): void {
 
 const usage = `Usage: demo [scenario]
 
-Showcase every dialog: input, select, filter, nofilter, fields, nested, leaf.
+Showcase every dialog: input, select, filter, shownfilter, fields, nested,
+tab, leaf.
 
-  input     standalone input with an initial value
-  select    short list with no filter
-  filter    long list with type-to-filter
-  nofilter  long list with the filter forced off
-  fields    select whose option collects input fields
-  nested    select whose option opens a nested select
-  leaf      select whose option opens a text input leaf
+  input       standalone input with an initial value
+  select      short list, no sub-dialogs
+  filter      long list: start typing and it narrows
+  shownfilter long list whose filter is shown before you type
+  fields      select whose option collects input fields
+  nested      three-level column browser: lists, a scrolling column, two leaves
+  tab         the same tree with opening bound to Tab instead of Enter
+  leaf        select whose option opens a text input leaf
 
-Press Tab on an option declaring a sub-dialog to expand it.`;
+A ▸ marks an option that opens a sub-dialog: Enter or → opens it as the next
+column, ← or Esc backs out. Typing always filters the column you are in.`;
 
 type CommandLike = {
   error(message: string, options?: { exitCode?: number; code?: string }): never;
