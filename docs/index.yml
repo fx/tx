@@ -224,7 +224,7 @@ changes:
     path: changes/0025-guarantee-cell-width-by-construction.md
     description: Make a select column's cell occupy exactly its measured width by construction, dropping the sub-dialog marker on a column too narrow for it, rather than relying on the frame's row truncation.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on: []
   - id: "0026"
     name: add-theme-variables

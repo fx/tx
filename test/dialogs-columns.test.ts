@@ -445,24 +445,60 @@ describe("the cells one column contributes to the band", () => {
     expect(cells[0]?.text).toHaveLength(7);
   });
 
-  /** Every cell is padded to the column's width, whatever is in it, because the
+  /**
+   * Every cell is padded to the column's width, whatever is in it, because the
    * inverted bar is the padding: a bar that stopped at the end of the label
-   * would be a ragged highlight rather than a row. */
+   * would be a ragged highlight rather than a row.
+   *
+   * Marked options are swept alongside unmarked ones, and every width from one
+   * upward is swept rather than a few round numbers, because the marker's own
+   * columns are the half of the split that can disagree with the label's: a
+   * cell over its budget draws correctly anyway once the frame has cut the row
+   * it sits in, so only measuring the cell itself catches it.
+   */
   test("pads every cell to exactly the column's width", () => {
-    const list = options("tiny", "a label wider than its column");
-    for (const width of [1, 4, 12, 40]) {
+    const list = options("tiny", "a label wider than its column", "leads!");
+    for (const width of [1, 2, 3, 4, 5, 6, 12, 40]) {
       const cells = columnCells(
         list,
         allOf(list),
-        window(0, 2, 2),
+        window(0, 3, 3),
         0,
         width,
-        2,
+        3,
         DRIVEN,
       );
       for (const cell of cells) {
         expect(displayWidth(cell?.text ?? "")).toBe(width);
       }
+    }
+  });
+
+  /**
+   * A column too narrow for both the marker and a column of label drops the
+   * marker rather than squeezing it. The alternative is a cell reading `▸`
+   * about a row indistinguishable from every other row, which says where it
+   * leads but not what it is — and buying that with a cell over its budget.
+   */
+  test("drops the marker on a column too narrow to carry it", () => {
+    const list = options("leads!");
+    // The marker's own two columns and one of label: below that the cell is
+    // built exactly as an unmarked one is.
+    const markable = 3;
+    for (const width of [1, 2, markable, 4, 12]) {
+      const cells = columnCells(
+        list,
+        allOf(list),
+        window(0, 1, 1),
+        0,
+        width,
+        1,
+        DRIVEN,
+      );
+      const text = cells[0]?.text ?? "";
+
+      expect(text.includes(expandGlyph)).toBe(width >= markable);
+      expect(displayWidth(text)).toBe(width);
     }
   });
 

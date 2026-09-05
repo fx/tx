@@ -5,7 +5,7 @@
 `cell()` in `plugins/dialogs/columns.ts` can emit a cell wider than the column it was measured for. The overflow is currently absorbed by the frame's row-level truncation, so nothing visibly breaks, but the invariant every caller relies on holds by rescue rather than by construction. This change makes it hold by construction.
 
 **Spec:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** —
 
 ## Motivation
@@ -77,11 +77,11 @@ The affordability threshold is the marker's reserved width plus one column of te
 
 ## Tasks
 
-- [ ] Make the cell width hold by construction
-  - [ ] Decide marker affordability before splitting the width in `cell()`, and drop the marker below the threshold
-  - [ ] Extend `test/dialogs-columns.test.ts` so the exact-width invariant is asserted over marked options as well as unmarked ones, across widths from 1 upward
-  - [ ] Assert the marker is absent below the affordability threshold and present at and above it
-  - [ ] Confirm the existing rendered-frame tests are unchanged, which is the evidence that no visible output moved
+- [x] Make the cell width hold by construction
+  - [x] Decide marker affordability before splitting the width in `cell()`, and drop the marker below the threshold
+  - [x] Extend `test/dialogs-columns.test.ts` so the exact-width invariant is asserted over marked options as well as unmarked ones, across widths from 1 upward
+  - [x] Assert the marker is absent below the affordability threshold and present at and above it
+  - [x] Confirm the existing rendered-frame tests are unchanged, which is the evidence that no visible output moved
 
 ## Open Questions
 
