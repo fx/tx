@@ -1,18 +1,21 @@
-/** The option count above which `"auto"` turns the filter on. A count, rather
- * than something derived from the terminal, so a caller can predict what the
- * user sees; eight fits under the option rows a select shows at once, so a list
- * that gets a filter is also one long enough to need it. */
-export const automaticFilterThreshold = 8;
+/**
+ * When a column shows its filter.
+ *
+ * Filtering itself is never off: a printable character always narrows the
+ * list, at every level and whatever the list's length, because typing is what
+ * a reader reaches for the moment a list is longer than their patience and
+ * there is no second thing that typing could sensibly mean. What the setting
+ * decides is only whether the filter is on screen before they have typed
+ * anything.
+ */
+export type FilterMode = "typed" | "always";
 
-/** `true` and `false` decide whatever the option count, and an omitted setting
- * means `"auto"`, so a caller that never thinks about the filter still gets one
- * exactly when the list is long. */
-export function filterIsEnabled(
-  setting: boolean | "auto" | undefined,
-  optionCount: number,
-): boolean {
-  if (typeof setting === "boolean") return setting;
-  return optionCount > automaticFilterThreshold;
+/** Whether a column's filter is on screen: once anything has been typed into
+ * it, and from the start for a caller that asked for it. Hidden while it is
+ * empty and unasked-for, because an empty filter is saying nothing and the
+ * edge it sits in has a title and a count to carry instead. */
+export function filterIsShown(mode: FilterMode, entered: string): boolean {
+  return mode === "always" || entered !== "";
 }
 
 /** All the matcher reads: a value is opaque, so it is never matched against. */

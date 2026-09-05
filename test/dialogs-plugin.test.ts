@@ -36,7 +36,8 @@ type SelectOption<T> = {
 type SelectRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
-  readonly filter?: boolean | "auto";
+  readonly filter?: "typed" | "always";
+  readonly expand?: "enter" | "tab";
 };
 
 type SelectResult<T> = {
@@ -51,11 +52,7 @@ type InputRequest = {
 
 type Dialogs = {
   input(request: InputRequest): Promise<string | undefined>;
-  select<T>(request: {
-    readonly message: string;
-    readonly options: readonly SelectOption<T>[];
-    readonly filter?: boolean | "auto";
-  }): Promise<SelectResult<T> | undefined>;
+  select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
 };
 
 const ESCAPE = String.fromCharCode(27);
@@ -65,6 +62,8 @@ const CTRL_C = String.fromCharCode(3);
 const CARRIAGE_RETURN = "\r";
 const UP = `${ESCAPE}[A`;
 const DOWN = `${ESCAPE}[B`;
+const RIGHT = `${ESCAPE}[C`;
+const LEFT = `${ESCAPE}[D`;
 const NEXT_LINE = String.fromCharCode(0x85);
 const GRINNING_FACE = String.fromCodePoint(0x1f600);
 
@@ -296,6 +295,11 @@ async function until(
  * its frames opens with. */
 const SELECT_MESSAGE = "Pick one";
 
+/** The top-left corner of a select's frame, which anchors the frame on screen
+ * whatever its title has become: a browser titles itself with the trail of
+ * columns it is showing, and a narrow terminal cuts that trail short. */
+const PANEL = "╔═";
+
 /** The escape sequences the renderer writes around a frame, so a test that
  * matches on what the user reads can ignore them. Built from the escape
  * character rather than written literally, so the source carries no control
@@ -349,35 +353,148 @@ function frameRows(
 const DIM_OPEN = `${ESCAPE}[2m`;
 const DIM_CLOSE = `${ESCAPE}[22m`;
 
-/** The sequences the renderer wraps an inverted run in. The active option is
- * the only inverted element a dialog draws, so they are how a test tells which
- * row the cursor bar is on now that no marker character says so. */
-const INVERSE_OPEN = `${ESCAPE}[7m`;
-const INVERSE_CLOSE = `${ESCAPE}[27m`;
+/** The marker drawn on the right of a row that opens a sub-dialog. */
+const EXPAND_MARKER = "▸";
 
-/** Every inverted run in the given output, in order, as the text it carries:
- * the bar is padded to the panel's inner width, and the padding is not what a
- * test is asserting about. */
-function invertedRows(text: string): readonly string[] {
-  const rows: string[] = [];
+/**
+ * Every cursor bar in the given output, as the text it carries and the column
+ * it starts at. A bar is the terminal's own inversion and nothing else, and
+ * every column draws the same one on the choice it was left on, so nothing
+ * about a bar says which column is being driven — where it sits does.
+ *
+ * Read line by line, tracking the styling state across each: the renderer
+ * emits only the transitions between adjacent cells, so a pair-matching reader
+ * would mistake where a run begins and ends. The starting column is what tells
+ * the columns apart — they sit left to right in the order they were opened, so
+ * the rightmost bar belongs to the column being driven.
+ */
+function barRuns(
+  text: string,
+): readonly { readonly text: string; readonly column: number }[] {
+  const runs: { text: string; column: number }[] = [];
+  const sequences = new RegExp(`${ESCAPE}\\[([\\d;]*)m`, "g");
+  for (const line of text.split("\n")) {
+    let inverse = false;
+    let column = 0;
+    let carried: { text: string; column: number } | undefined;
+    let cursor = 0;
+    const take = (piece: string) => {
+      if (piece === "") return;
+      if (inverse) {
+        carried ??= { text: "", column };
+        carried.text += piece;
+      }
+      column += piece.length;
+    };
+    const close = () => {
+      if (carried === undefined) return;
+      runs.push(carried);
+      carried = undefined;
+    };
+    for (const match of line.matchAll(sequences)) {
+      take(line.slice(cursor, match.index));
+      cursor = (match.index as number) + match[0].length;
+      for (const code of (match[1] as string).split(";")) {
+        if (code === "" || code === "0" || code === "27") {
+          close();
+          inverse = false;
+        } else if (code === "7") inverse = true;
+      }
+    }
+    take(line.slice(cursor));
+    close();
+  }
+  return runs;
+}
+
+/** Every cursor bar as the label it carries. The bar spans its whole column,
+ * marker and padding included; tests about which row the cursor is on say so
+ * with the label, and that an expandable row carries the marker at all is
+ * asserted where the marker is the subject. */
+function bars(text: string): readonly string[] {
+  return barRuns(text).map((run) => {
+    const label = run.text.trimEnd();
+    return label.endsWith(` ${EXPAND_MARKER}`)
+      ? label.slice(0, -2).trimEnd()
+      : label;
+  });
+}
+
+/** The columns each cursor bar spans, padding included — which is what makes
+ * it a bar across its column rather than a highlighted label. */
+function barWidths(text: string): readonly number[] {
+  return barRuns(text).map((run) => run.text.length);
+}
+
+/** Whether the given text is dimmed where it appears in the output.
+ *
+ * Read by tracking the styling state across the whole frame rather than by
+ * looking for an opening sequence in front of it: the renderer emits only the
+ * transitions between adjacent cells, so a dimmed run that follows a dimmed
+ * border never reopens dimming inside itself. `undefined` means the text is
+ * not on screen at all. */
+function dimmedAt(text: string, needle: string): boolean | undefined {
+  const cells: { char: string; dim: boolean }[] = [];
+  let dim = false;
   let cursor = 0;
-  for (;;) {
-    const open = text.indexOf(INVERSE_OPEN, cursor);
-    if (open < 0) return rows;
-    const start = open + INVERSE_OPEN.length;
-    const close = text.indexOf(INVERSE_CLOSE, start);
-    expect(close).toBeGreaterThanOrEqual(start);
-    rows.push(stripped(text.slice(start, close)).trimEnd());
-    cursor = close + INVERSE_CLOSE.length;
+  const sequences = new RegExp(`${ESCAPE}\\[([\\d;]*)m`, "g");
+  const take = (piece: string) => {
+    for (const char of piece) cells.push({ char, dim });
+  };
+  for (const match of text.matchAll(sequences)) {
+    take(text.slice(cursor, match.index));
+    cursor = (match.index as number) + match[0].length;
+    for (const code of (match[1] as string).split(";")) {
+      if (code === "" || code === "0" || code === "22") dim = false;
+      else if (code === "2") dim = true;
+    }
+  }
+  take(text.slice(cursor));
+  const at = cells
+    .map((cell) => cell.char)
+    .join("")
+    .indexOf(needle);
+  return at < 0 ? undefined : (cells[at] as { dim: boolean }).dim;
+}
+
+/** Whether the frame on screen shows this row as its cursor. Reading a frame
+ * that has not been written yet throws, and a test waiting for one is asking
+ * exactly that question, so the throw is an answer rather than a failure. */
+function showsActiveRow(
+  stderr: CapturedOutput,
+  expected: string,
+  anchor = SELECT_MESSAGE,
+): boolean {
+  try {
+    return activeRow(stderr, anchor) === expected;
+  } catch {
+    return false;
   }
 }
 
-/** The one row the frame on screen renders as the cursor bar, which is the
- * active option. */
+/** The one row the frame on screen renders as the cursor: the active option of
+ * the column being driven, which is the rightmost column and so the bar
+ * starting furthest across. */
 function activeRow(stderr: CapturedOutput, anchor = SELECT_MESSAGE): string {
-  const rows = invertedRows(lastFrame(stderr, anchor));
-  expect(rows).toHaveLength(1);
-  return rows[0] as string;
+  const runs = [...barRuns(lastFrame(stderr, anchor))].sort(
+    (one, other) => one.column - other.column,
+  );
+  expect(runs.length).toBeGreaterThan(0);
+  const label = (runs.at(-1) as { text: string }).text.trimEnd();
+  return label.endsWith(` ${EXPAND_MARKER}`)
+    ? label.slice(0, -2).trimEnd()
+    : label;
+}
+
+/** These tests still say `true`, `false`, and `"auto"` where a request now
+ * says when the filter is shown. Filtering itself is never off, so `false` and
+ * `"auto"` are both the default — shown once something has been typed — and
+ * `true` is a caller asking for it from the start. */
+function filterMode(
+  setting: boolean | "auto" | undefined,
+): "typed" | "always" | undefined {
+  if (setting === undefined) return undefined;
+  return setting === true ? "always" : "typed";
 }
 
 /** Labels are numbered from `01`, so no label is a substring of another and
@@ -436,10 +553,11 @@ async function runSelection<T>(
     [
       dialogsPlugin,
       consumer(async (dialogs) => {
+        const mode = filterMode(filter);
         result = await dialogs.select({
           message,
           options,
-          ...(filter === undefined ? {} : { filter }),
+          ...(mode === undefined ? {} : { filter: mode }),
         });
       }),
     ],
@@ -597,7 +715,10 @@ describe("bundled dialogs provider", () => {
         { label: "Duplicate", value: second },
         { label: "Last", value: first },
       ],
-      ["x", "[A", "[B", "[B", "[B", "[A", "\r"],
+      // The typed character narrows nothing away — every label carries it —
+      // so the list the arrows then move over is the whole list. Typing
+      // always filters now, so there is no length at which it does nothing.
+      ["a", "[A", "[B", "[B", "[B", "[A", "\r"],
     );
 
     expect(result.value).toBe(second);
@@ -1343,48 +1464,55 @@ describe("select filter", () => {
   );
   const nine = [...eight, { label: "Theta", value: "theta" }];
 
-  test("turns itself on above eight options and narrows to the terms typed", async () => {
-    const result = await runSelection(nine, ["alp", CARRIAGE_RETURN]);
+  test("narrows to the terms typed, at any list length", async () => {
+    for (const options of [nine, eight]) {
+      const result = await runSelection(options, ["alp", CARRIAGE_RETURN]);
 
-    expect(result.value).toBe("alpha");
-    expect(result.values).toEqual({});
-    const frame = stripped(lastFrame(result.stderr));
-    expect(frame).toContain("› alp");
-    expect(activeRow(result.stderr)).toBe("Alpha");
-    expect(frame).toContain("Alphabet");
-    expect(frame.indexOf("Alpha")).toBeLessThan(frame.indexOf("Alphabet"));
-    expect(frame).not.toContain("Beta");
-    expect(frame).not.toContain("Gamma");
+      expect(result.value).toBe("alpha");
+      expect(result.values).toEqual({});
+      const frame = stripped(lastFrame(result.stderr));
+      expect(frame).toContain("› alp");
+      expect(activeRow(result.stderr)).toBe("Alpha");
+      expect(frame).toContain("Alphabet");
+      expect(frame.indexOf("Alpha")).toBeLessThan(frame.indexOf("Alphabet"));
+      expect(frame).not.toContain("Beta");
+      expect(frame).not.toContain("Gamma");
+    }
   });
 
-  test("stays off at eight options, leaving typed text ignored", async () => {
-    const result = await runSelection(eight, ["alp", CARRIAGE_RETURN]);
-
-    expect(result.value).toBe("alpha");
-    const frame = stripped(lastFrame(result.stderr));
+  test("stays off screen until something is typed into it", async () => {
+    // Filtering is always live, so there is no list length and no setting at
+    // which typing does nothing. What the reader has not asked for is the
+    // filter taking up an edge before they have typed anything.
+    const untouched = await runSelection(eight, [CARRIAGE_RETURN]);
+    expect(untouched.value).toBe("alpha");
+    const frame = stripped(lastFrame(untouched.stderr));
     expect(frame).not.toContain("›");
-    expect(activeRow(result.stderr)).toBe("Alpha");
     expect(frame).toContain("Gamma");
+
+    const typed = await runSelection(eight, ["gam", CARRIAGE_RETURN]);
+    expect(typed.value).toBe("gamma");
+    expect(stripped(lastFrame(typed.stderr))).toContain("› gam");
   });
 
-  test("honours an explicit setting whatever the option count", async () => {
-    const enabled = await runSelection(
+  test("shows itself from the start when the caller asks", async () => {
+    const asked = await runSelection(
       named("Alpha", "Beta", "Gamma"),
-      ["bet", CARRIAGE_RETURN],
+      [
+        async (stderr) => {
+          // On screen before a single key has reached it.
+          await until(() => stripped(stderr.text()).includes("›"));
+        },
+        "bet",
+        CARRIAGE_RETURN,
+      ],
       true,
     );
-    expect(enabled.value).toBe("beta");
-    const enabledFrame = stripped(lastFrame(enabled.stderr));
-    expect(enabledFrame).toContain("› bet");
-    expect(activeRow(enabled.stderr)).toBe("Beta");
-    expect(enabledFrame).not.toContain("Alpha");
-
-    const disabled = await runSelection(nine, ["alp", CARRIAGE_RETURN], false);
-    expect(disabled.value).toBe("alpha");
-    const disabledFrame = stripped(lastFrame(disabled.stderr));
-    expect(disabledFrame).not.toContain("›");
-    expect(disabledFrame).toContain("Gamma");
-    expect(activeRow(disabled.stderr)).toBe("Alpha");
+    expect(asked.value).toBe("beta");
+    const frame = stripped(lastFrame(asked.stderr));
+    expect(frame).toContain("› bet");
+    expect(activeRow(asked.stderr)).toBe("Beta");
+    expect(frame).not.toContain("Alpha");
   });
 
   test("requires every term, in any order, against the label alone", async () => {
@@ -1463,7 +1591,7 @@ describe("select filter", () => {
     expect(frame).toContain("no match");
     expect(frame).not.toContain("Alpha");
     // Nothing is visible, so nothing is active and no row carries the bar.
-    expect(invertedRows(lastFrame(cancelled.stderr))).toEqual([]);
+    expect(bars(lastFrame(cancelled.stderr))).toEqual([]);
 
     const recovered = await runSelection(
       named("Alpha", "Beta", "Gamma"),
@@ -1577,13 +1705,13 @@ describe("select viewport and extended navigation", () => {
   const SHORT_COLLECTING_TERMINAL = collectingChromeHeight + 2;
 
   /** The frame a thirty-option select leaves in a terminal that short: the
-   * panel, one option row, the count of everything it hides, and the hints. */
+   * panel, one option row, and the hints. The filter and the count of
+   * everything hidden are set into the edges the panel was drawing anyway, so
+   * neither costs it one of the rows it has so few of. */
   const shortTerminalFrame = [
-    "╔═ Pick one ═╗",
-    "║ › █        ║",
-    "║ Option 01  ║",
-    "║ ▼ 29 more  ║",
-    "╚════════════╝",
+    "╔═ Pick one ══════╗",
+    "║ Option 01       ║",
+    "╚═══════════ ▼ 29 ╝",
     " ↑↓ move · Enter select · type to filter · Esc cancel",
   ];
 
@@ -1603,7 +1731,7 @@ describe("select viewport and extended navigation", () => {
     expect(activeRow(result.stderr)).toBe("Option 01");
     expect(frame).toContain("Option 10");
     expect(frame).not.toContain("Option 11");
-    expect(frame).toContain("▼ 20 more");
+    expect(frame).toContain("▼ 20");
     expect(frame).not.toContain("▲");
   });
 
@@ -1617,10 +1745,10 @@ describe("select viewport and extended navigation", () => {
 
     expect(result.value).toBe(11);
     const frame = stripped(lastFrame(result.stderr));
-    expect(frame).toContain("▲ 1 more");
+    expect(frame).toContain("▲ 1");
     expect(frame).toContain("Option 02");
     expect(activeRow(result.stderr)).toBe("Option 11");
-    expect(frame).toContain("▼ 19 more");
+    expect(frame).toContain("▼ 19");
     expect(frame).not.toContain("Option 01");
     expect(frame).not.toContain("Option 12");
   });
@@ -1653,7 +1781,7 @@ describe("select viewport and extended navigation", () => {
         async (stderr) => {
           // Ink batches its writes, so the first frame is not on screen the
           // instant the chunks before it are written.
-          await until(() => stderr.text().includes("▼ 30 more"));
+          await until(() => stderr.text().includes("▼ 30"));
           open = frameRows(stderr);
         },
         CARRIAGE_RETURN,
@@ -1662,18 +1790,16 @@ describe("select viewport and extended navigation", () => {
       // Pinned as a literal rather than as the chrome constant plus one: a
       // bound written in terms of the number under test moves with it, and a
       // constant that grew would keep passing here instead of failing.
-      terminalOfRows(7),
+      terminalOfRows(4),
     );
 
     expect(result.value).toBe(2);
     expect(open).toEqual([
-      "╔═ Pick one ═╗",
-      "║ › █        ║",
-      "║ ▼ 30 more  ║",
-      "╚════════════╝",
+      "╔═ Pick one ══════╗",
+      "╚═══════════ ▼ 30 ╝",
       " ↑↓ move · Enter select · type to filter · Esc cancel",
     ]);
-    expect(open.length).toBeLessThan(7);
+    expect(open.length).toBeLessThan(4);
   });
 
   test("re-derives the window after the terminal is resized", async () => {
@@ -1718,16 +1844,16 @@ describe("select viewport and extended navigation", () => {
         async (stderr) => {
           // The window has to have reached a start of its own on screen before
           // the terminal shrinks; that start is what the collapse must keep.
-          await until(() => stderr.text().includes("▲ 20 more"));
-          // Seven rows is where a choosing select gives up its last option
+          await until(() => stderr.text().includes("▲ 20"));
+          // Four rows is where a choosing select gives up its last option
           // row. Written as a literal rather than off the chrome constant, so a
           // chrome that grows fails here instead of moving the boundary this
           // test collapses at and passing against a case it never meant.
-          stderr.rows = 7;
+          stderr.rows = 4;
           stderr.emit("resize");
         },
         async (stderr) => {
-          await until(() => stderr.text().includes("▼ 30 more"));
+          await until(() => stderr.text().includes("▼ 30"));
           collapsed = frameRows(stderr);
           stderr.rows = 40;
           stderr.emit("resize");
@@ -1747,29 +1873,25 @@ describe("select viewport and extended navigation", () => {
 
     expect(result.value).toBe(26);
     // Nothing sits above rows that are not there, so the collapsed frame still
-    // carries one indicator rather than two.
+    // counts the whole list as hidden below rather than splitting it.
     expect(collapsed).toEqual([
-      "╔═ Pick one ═╗",
-      "║ › █        ║",
-      "║ ▼ 30 more  ║",
-      "╚════════════╝",
+      "╔═ Pick one ══════╗",
+      "╚═══════════ ▼ 30 ╝",
       " ↑↓ move · Enter select · type to filter · Esc cancel",
     ]);
     expect(reopened).toEqual([
-      "╔═ Pick one ═╗",
-      "║ › █        ║",
-      "║ ▲ 20 more  ║",
-      "║ Option 21  ║",
-      "║ Option 22  ║",
-      "║ Option 23  ║",
-      "║ Option 24  ║",
-      "║ Option 25  ║",
-      "║ Option 26  ║",
-      "║ Option 27  ║",
-      "║ Option 28  ║",
-      "║ Option 29  ║",
-      "║ Option 30  ║",
-      "╚════════════╝",
+      "╔═ Pick one  ▲ 20 ╗",
+      "║ Option 21       ║",
+      "║ Option 22       ║",
+      "║ Option 23       ║",
+      "║ Option 24       ║",
+      "║ Option 25       ║",
+      "║ Option 26       ║",
+      "║ Option 27       ║",
+      "║ Option 28       ║",
+      "║ Option 29       ║",
+      "║ Option 30       ║",
+      "╚═════════════════╝",
       " ↑↓ move · Enter select · type to filter · Esc cancel",
     ]);
     expect(activeRow(result.stderr)).toBe("Option 26");
@@ -1784,7 +1906,7 @@ describe("select viewport and extended navigation", () => {
     );
     expect(end.value).toBe(30);
     const endFrame = stripped(lastFrame(end.stderr));
-    expect(endFrame).toContain("▲ 20 more");
+    expect(endFrame).toContain("▲ 20");
     expect(activeRow(end.stderr)).toBe("Option 30");
     expect(endFrame).not.toContain("▼");
 
@@ -1829,16 +1951,15 @@ describe("select viewport and extended navigation", () => {
       listed(30),
       [PAGE_DOWN, CARRIAGE_RETURN],
       undefined,
-      // A literal for the same reason: twelve rows is six option rows, and a
-      // chrome constant that grew must fail this page rather than shrink it.
+      // A literal for the same reason: twelve rows is eight option rows, and
+      // a chrome constant that grew must fail this page rather than shrink it.
       terminalOfRows(12),
     );
 
-    expect(result.value).toBe(6);
+    expect(result.value).toBe(9);
   });
 
-  test("pages by the reduced window while a sub-dialog is open", async () => {
-    const expand = "\t";
+  test("pages by the same window whether or not a sub-dialog is open", async () => {
     const options: readonly SelectOption<number>[] = [
       ...listed(29),
       {
@@ -1847,19 +1968,19 @@ describe("select viewport and extended navigation", () => {
         dialog: { message: "Nested", options: listed(30) },
       },
     ];
-    // Twelve rows leave five option rows flat and four with the open level's
-    // shadow row, so one page from the nested first option lands on its
-    // fifth option's value.
+    // Columns sit beside each other rather than over each other, so opening
+    // one costs the terminal no rows: twelve rows leave eight option rows in
+    // the nested column exactly as they do flat, and one page from its first
+    // option lands on its ninth option's value.
     const result = await runSelection(
       options,
-      [END, expand, PAGE_DOWN, CARRIAGE_RETURN],
+      [END, RIGHT, PAGE_DOWN, CARRIAGE_RETURN],
       false,
       terminalOfRows(12),
     );
-    expect(result.value).toBe(5);
+    expect(result.value).toBe(9);
   });
-  test("clips a stack deeper than the terminal inside its bounds", async () => {
-    const expand = "\t";
+  test("keeps a deep column browser inside a short, narrow terminal", async () => {
     const deep: readonly SelectOption<number>[] = [
       { label: "Known", value: 0 },
       {
@@ -1897,17 +2018,20 @@ describe("select viewport and extended navigation", () => {
     stderr.columns = columns;
     const result = await runSelection(
       deep,
-      [DOWN, expand, DOWN, expand, DOWN, expand, CARRIAGE_RETURN],
+      [DOWN, RIGHT, DOWN, RIGHT, DOWN, RIGHT, CARRIAGE_RETURN],
       false,
       stderr,
     );
     expect(result.value).toBe(6);
-    const rows = frameRows(result.stderr);
+    // Anchored on the frame's corner rather than the root's message: the
+    // browser has collapsed the leftmost columns to fit, and its title names
+    // only the columns still on screen.
+    const rows = frameRows(result.stderr, PANEL);
     expect(rows.length).toBeLessThan(terminalRows);
     for (const row of rows) {
       expect(row.length).toBeLessThanOrEqual(columns);
     }
-    expect(activeRow(result.stderr, "Deepest")).toBe("End");
+    expect(activeRow(result.stderr, PANEL)).toBe("End");
   });
 
   test("leaves room for a collected field in a short terminal", async () => {
@@ -1940,24 +2064,233 @@ describe("select viewport and extended navigation", () => {
     expect(result.value).toBe(0);
     expect(result.values).toEqual({ branch: "abc" });
     // Every chrome row the collecting constant counts, on screen at once: the
-    // panel and its filter, one indicator, the field's own panel, and the
-    // hints. The window gave a row back to make room for that second panel.
-    // The filter keeps its row and its prompt but not its caret: it stops
-    // answering keystrokes the moment a field is collected, and only the row
-    // being typed into carries one.
+    // select's two edges, the field's own panel, and the hints. The window
+    // gave a row back to make room for that second panel, and the count of
+    // what it hides is set into the edge rather than costing another.
     expect(collecting).toEqual([
-      "╔═ Pick one ═╗",
-      "║ ›          ║",
-      "║ ▲ 29 more  ║",
-      "║ Other…     ║",
-      "╚════════════╝",
+      "╔═ Pick one  ▲ 29 ╗",
+      "║ Other…          ║",
+      "╚═════════════════╝",
       "┌─ Branch name ─┐",
       "│ abc█          │",
       "└───────────────┘",
       " Enter submit · Esc cancel",
     ]);
-    expect(collecting).toHaveLength(9);
+    expect(collecting).toHaveLength(7);
     expect(collecting.length).toBeLessThan(SHORT_COLLECTING_TERMINAL);
+  });
+
+  /**
+   * A text leaf draws the same entry panel a collected field does and costs the
+   * frame the same rows, so it has to be budgeted the same way. Budgeting it as
+   * if nothing were under the browser sized the window for the four option rows
+   * an eight-row terminal affords a choosing select, and then drew those four
+   * rows, the panel's two edges, and the entry's four: ten rows in an eight-row
+   * terminal, which is the height at which Ink reads the output as full-screen
+   * and clears the terminal on the way out.
+   */
+  test("leaves room for a text leaf's entry in a short terminal", async () => {
+    const terminalRows = 8;
+    let open: readonly string[] = [];
+    const result = await runSelection(
+      [
+        ...listed(29),
+        {
+          label: "Tagged",
+          value: 0,
+          dialog: { type: "text", name: "tag", message: "Which tag?" },
+        },
+      ],
+      [
+        END,
+        RIGHT,
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes("Which tag?"));
+          // The push is synchronous but the entry subscribes on its mount
+          // effect; wait it out so the typed text is not swallowed before then.
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+          open = frameRows(stderr, PANEL);
+        },
+        "v1",
+        CARRIAGE_RETURN,
+      ],
+      undefined,
+      terminalOfRows(terminalRows),
+    );
+
+    expect(result.value).toBe(0);
+    expect(result.values).toEqual({ tag: "v1" });
+    // The window gave its rows back to the leaf's panel exactly as it does for
+    // a collected field, so the whole frame stays under the terminal's height.
+    expect(open).toEqual([
+      "╔═ Pick one  ▲ 29 ╗",
+      "║ Tagged        ▸ ║",
+      "╚═════════════════╝",
+      "┌─ Which tag? ─┐",
+      "│ █            │",
+      "└──────────────┘",
+      // A leaf's Escape pops back into the column that opened it, so its hint
+      // names backing out rather than cancelling.
+      " Enter submit · Esc back",
+    ]);
+    expect(open).toHaveLength(7);
+    expect(open.length).toBeLessThan(terminalRows);
+  });
+
+  /**
+   * A text leaf holds a level and a window slot of its own without being a
+   * column, so the driven column is the level beneath it. Reading the top slot
+   * instead windowed the scrolled column from the zero the leaf's slot was
+   * pushed with, and wrote that back — so the place the reader had scrolled to
+   * was gone for good rather than restored when the leaf closed.
+   */
+  test("keeps a scrolled column's window across a text leaf", async () => {
+    const listing: readonly SelectOption<number>[] = listed(30).map(
+      (option, index) =>
+        index === 25
+          ? {
+              ...option,
+              dialog: {
+                type: "text" as const,
+                name: "tag",
+                message: "Which tag?",
+              },
+            }
+          : option,
+    );
+    let scrolled: readonly string[] = [];
+    let restored: readonly string[] = [];
+    const result = await runSelection(
+      listing,
+      [
+        END,
+        UP,
+        UP,
+        UP,
+        UP,
+        async (stderr) => {
+          await until(() => showsActiveRow(stderr, "Option 26", PANEL));
+          scrolled = frameRows(stderr, PANEL);
+        },
+        RIGHT,
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes("Which tag?"));
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        },
+        ESCAPE,
+        async (stderr) => {
+          await until(
+            () => !stripped(lastFrame(stderr, PANEL)).includes("Which tag?"),
+          );
+          restored = frameRows(stderr, PANEL);
+        },
+        UP,
+        CARRIAGE_RETURN,
+      ],
+      false,
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBe(25);
+    // The window the reader scrolled to: the last ten options, with the active
+    // one six rows down rather than at either edge, so a window re-derived from
+    // the top would land somewhere else.
+    expect(scrolled[1]).toContain("Option 21");
+    expect(scrolled.at(-3)).toContain("Option 30");
+    // Backing out of the leaf shows exactly the frame the column was left on.
+    expect(restored).toEqual(scrolled);
+  });
+
+  /**
+   * The columns share one band, so an entry panel appearing shrinks that band
+   * for every column, the frozen ones included — otherwise a frozen column
+   * keeping a taller window would take the panel over the terminal's height.
+   * The shrink itself is right; persisting it is not. A frozen column cannot be
+   * scrolled, so the only thing that ever moves its window is the band, and
+   * writing that back drifted the column a row further down every time the band
+   * shrank, with nothing to bring it back when the band grew again.
+   */
+  test("returns a frozen column to its own window once the band grows back", async () => {
+    const listing: readonly SelectOption<number>[] = listed(40).map(
+      (option, index) =>
+        index === 30
+          ? {
+              ...option,
+              dialog: {
+                message: "Nested",
+                options: [
+                  {
+                    label: "Named",
+                    value: 0,
+                    fields: [
+                      {
+                        type: "text" as const,
+                        name: "branch",
+                        message: "Branch name",
+                      },
+                    ],
+                  },
+                ],
+              },
+            }
+          : option,
+    );
+    let scrolled: readonly string[] = [];
+    let shrunk: readonly string[] = [];
+    let restored: readonly string[] = [];
+    const result = await runSelection(
+      listing,
+      [
+        // Scrolled far enough down that the window has a start of its own, and
+        // then back up so the active option sits below the middle of it: the
+        // band shrinking from ten rows to seven is what pulls that option's
+        // window down, and only an option low in the window is pulled.
+        DOWN.repeat(32),
+        UP.repeat(2),
+        async (stderr) => {
+          await until(() => showsActiveRow(stderr, "Option 31", PANEL));
+          scrolled = frameRows(stderr, PANEL);
+        },
+        // Open the sub-dialog, which freezes the column behind it, and choose
+        // the option whose field puts a second panel on screen.
+        RIGHT,
+        CARRIAGE_RETURN,
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes("Branch name"));
+          shrunk = frameRows(stderr, PANEL);
+        },
+        // Escape on a nested collection pops the level rather than cancelling,
+        // which takes the second panel off screen and gives the band its rows
+        // back.
+        ESCAPE,
+        async (stderr) => {
+          await until(
+            () => !stripped(lastFrame(stderr, PANEL)).includes("Branch name"),
+          );
+          restored = frameRows(stderr, PANEL);
+        },
+        UP,
+        CARRIAGE_RETURN,
+      ],
+      false,
+      terminalOfRows(14),
+    );
+
+    expect(result.value).toBe(30);
+    expect(scrolled[1]).toContain("Option 24");
+    expect(scrolled.at(-3)).toContain("Option 33");
+    // The band did shrink, and the frozen column's window came down with it so
+    // the panel stayed inside the terminal. The two frames are the same height
+    // because the rows the band gave up are exactly the rows the field's own
+    // panel took, which is the whole point of the shrink.
+    const optionRows = (frame: readonly string[]) =>
+      frame.filter((row) => row.includes("Option ")).length;
+    expect(optionRows(shrunk)).toBeLessThan(optionRows(scrolled));
+    expect(shrunk.length).toBeLessThan(14);
+    expect(shrunk[1]).toContain("Option 25");
+    // And it went back to where it was left, rather than keeping the row the
+    // shrink moved it to.
+    expect(restored).toEqual(scrolled);
   });
 
   /** The spec's own short-terminal scenario, end to end: thirty options in the
@@ -1976,7 +2309,7 @@ describe("select viewport and extended navigation", () => {
     expect(result.value).toBe(1);
     expect(frameRows(result.stderr).length).toBeLessThan(8);
     expect(activeRow(result.stderr)).toBe("Option 01");
-    expect(stripped(lastFrame(result.stderr))).toContain("▼ 29 more");
+    expect(stripped(lastFrame(result.stderr))).toContain("▼ 26");
   });
 
   /** A list a terminal comfortably fits must be drawn whole. Ten rows and three
@@ -2000,7 +2333,7 @@ describe("select viewport and extended navigation", () => {
       "║ Beta       ║",
       "║ Gamma      ║",
       "╚════════════╝",
-      " ↑↓ move · Enter select · Esc cancel",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
     ]);
     expect(activeRow(result.stderr)).toBe("Alpha");
   });
@@ -2029,11 +2362,11 @@ describe("select viewport and extended navigation", () => {
         END,
         async (stderr) => {
           await until(() => stderr.text().includes("Other…"));
-          stderr.rows = 9;
+          stderr.rows = 6;
           stderr.emit("resize");
         },
         async (stderr) => {
-          await until(() => stderr.text().includes("▲ 29 more"));
+          await until(() => stderr.text().includes("▲ 29"));
           scrolled = frameRows(stderr);
         },
         CARRIAGE_RETURN,
@@ -2051,29 +2384,27 @@ describe("select viewport and extended navigation", () => {
     // The window carried a start of its own into the shortened terminal, so
     // both the scrolled frame and the collecting frame that follows it are
     // worst cases the chrome has to stay under.
-    expect(scrolled.length).toBeLessThan(9);
+    expect(scrolled.length).toBeLessThan(6);
     // Collection collapses the window, and no stale start survives it: nothing
     // is reported hidden above rows that are not there, so one indicator is
     // drawn rather than two and the frame stays under the terminal.
     expect(collecting).toEqual([
-      "╔═ Pick one ═╗",
-      "║ ›          ║",
-      "║ ▼ 31 more  ║",
-      "╚════════════╝",
+      "╔═ Pick one ══════╗",
+      "╚═══════════ ▼ 31 ╝",
       "┌─ Branch ─┐",
       "│ █        │",
       "└──────────┘",
       " Enter submit · Esc cancel",
     ]);
-    expect(collecting).toHaveLength(8);
-    expect(collecting.length).toBeLessThan(9);
+    expect(collecting).toHaveLength(6);
+    expect(collecting.length).toBeLessThan(6 + 1);
   });
 
   /**
    * The panel is sized from every visible option and from an indicator carrying
    * the largest count it can reach, so ordinary navigation never resizes it.
-   * Measured over the current window instead, `▼ 10 more` narrowing to
-   * `▼ 9 more` took a column off the frame on a single Down press.
+   * Measured over the current window instead, `▼ 10` narrowing to
+   * `▼ 9` took a column off the frame on a single Down press.
    */
   test("keeps the panel's width while the window scrolls under it", async () => {
     let opened = "";
@@ -2095,13 +2426,17 @@ describe("select viewport and extended navigation", () => {
         CARRIAGE_RETURN,
       ],
       undefined,
-      terminalOfRows(10),
+      terminalOfRows(7),
       "Zx",
     );
 
     expect(result.value).toBe("d");
     expect(opened).toHaveLength(13);
-    expect(scrolled).toBe(opened);
+    // The edge picks up the count of what is now above the window, and the
+    // panel keeps the width it opened with: the room for that count was held
+    // from the first frame.
+    expect(scrolled).toHaveLength(opened.length);
+    expect(scrolled).toContain("▲ 1");
   });
 
   /**
@@ -2137,8 +2472,9 @@ describe("select viewport and extended navigation", () => {
     // columns of label inside four columns of border.
     expect(frameRows(widened.stderr)[0]).toHaveLength(wide.length + 4);
 
-    // The same list without it falls back to the widest row it does have — a
-    // ten-column label, tied with the `▼ 390 more` indicator at its largest.
+    // The same list without it falls back to the widest row it does have: a
+    // ten-column label, plus the room the edges hold for the count of
+    // everything off screen.
     const plain = await runSelection(
       long(false),
       [CARRIAGE_RETURN],
@@ -2146,7 +2482,9 @@ describe("select viewport and extended navigation", () => {
       terminalOfRows(40),
     );
     expect(plain.value).toBe(1);
-    expect(frameRows(plain.stderr)[0]).toHaveLength(14);
+    // Ten columns of label inside four of border, widened to hold ` ▼ 390 `
+    // on an edge without crushing the title out of it.
+    expect(frameRows(plain.stderr)[0]).toHaveLength(20);
   });
 
   /**
@@ -2213,7 +2551,7 @@ describe("select viewport and extended navigation", () => {
     expect(result.value).toBe(29);
     const frame = stripped(lastFrame(result.stderr));
     expect(frame).toContain("› alpha");
-    expect(frame).toContain("▲ 5 more");
+    expect(frame).toContain("▲ 5");
     expect(frame).toContain("Alpha 11");
     expect(activeRow(result.stderr)).toBe("Alpha 29");
     expect(frame).not.toContain("Alpha 09");
@@ -2560,7 +2898,7 @@ describe("user-provided select options", () => {
     expect(result.values).toEqual({ branch: "" });
     // No frame the dialog ever drew put the bar on the option the Down arrow
     // would have moved to.
-    expect(invertedRows(result.stderr.text())).not.toContain("Known");
+    expect(bars(result.stderr.text())).not.toContain("Known");
     expect(activeRow(result.stderr)).toBe("Custom");
   });
 
@@ -2786,8 +3124,18 @@ describe("user-provided select options", () => {
   });
 });
 
-describe("cascading sub-dialogs", () => {
-  const EXPAND = "\t";
+describe("sub-dialog columns", () => {
+  /** The key these tests open a sub-dialog with. The right arrow opens under
+   * either binding — it is the direction the columns run — so a test about
+   * pushing, popping, or resolving says nothing about which key Enter is
+   * bound to. The bindings themselves are covered on their own below. */
+  const EXPAND = RIGHT;
+  const TAB = "\t";
+  /** The escape sequence a terminal sends for Shift+Tab. Ink's parse-keypress
+   * resolves it to the very same `tab` key report as plain Tab (see
+   * node_modules/ink/build/parse-keypress.js), which is the whole reason the
+   * spec requires it to open too rather than reach the filter as text. */
+  const SHIFT_TAB = `${ESCAPE}[Z`;
   const tag: TextField = {
     type: "text",
     name: "tag",
@@ -2811,21 +3159,429 @@ describe("cascading sub-dialogs", () => {
     ];
   }
 
-  test("names the expand key exactly while a visible option declares a sub-dialog", async () => {
-    const expanded = await runSelection(expandable(), [CARRIAGE_RETURN], false);
-    expect(expanded.value).toBe("known");
-    expect(frameRows(expanded.stderr).at(-1)).toBe(
-      " ↑↓ move · Enter select · Esc cancel · Tab expand",
+  test("names exactly the keys the row under the bar answers", async () => {
+    // A plain row at the root: Enter takes it, and there is nothing open to
+    // back out of.
+    const plain = await runSelection(expandable(), [CARRIAGE_RETURN], false);
+    expect(plain.value).toBe("known");
+    expect(frameRows(plain.stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
     );
 
-    const flat = await runSelection(
-      [{ label: "Known", value: "known" }],
-      [CARRIAGE_RETURN],
+    let onLeadingRow: string | undefined;
+    let insideColumn: string | undefined;
+    const opened = await runSelection(
+      expandable(),
+      [
+        DOWN,
+        async (stderr) => {
+          await until(() => showsActiveRow(stderr, "Category"));
+          onLeadingRow = frameRows(stderr).at(-1);
+        },
+        EXPAND,
+        async (stderr) => {
+          await until(() => showsActiveRow(stderr, "First", PANEL));
+          insideColumn = frameRows(stderr, PANEL).at(-1);
+        },
+        CARRIAGE_RETURN,
+      ],
       false,
     );
-    expect(frameRows(flat.stderr).at(-1)).toBe(
-      " ↑↓ move · Enter select · Esc cancel",
+    expect(opened.value).toBe("first");
+    // A row that leads somewhere is opened rather than taken, so the line
+    // names opening and stops naming selection.
+    expect(onLeadingRow).toBe(
+      " ↑↓ move · →/Enter open · type to filter · Esc cancel",
     );
+    // Inside the opened column there is a column to its left to back out
+    // into, and its own rows lead nowhere further. Escape backs out here as
+    // the left arrow does, so the two are named together and nothing on the
+    // line claims a key cancels the dialog.
+    expect(insideColumn).toBe(
+      " ↑↓ move · Enter select · ←/Esc back · type to filter",
+    );
+  });
+
+  test("names backing out rather than cancelling once a column is open", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: SELECT_MESSAGE,
+            options: expandable(),
+            filter: "typed",
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => showsActiveRow(stderr, "Known"));
+    // At the leftmost column Escape really does cancel, so the line offers it.
+    expect(frameRows(stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    );
+    stdin.write(DOWN);
+    await until(() => showsActiveRow(stderr, "Category"));
+    stdin.write(EXPAND);
+    await until(() => showsActiveRow(stderr, "First", PANEL));
+    const nested = frameRows(stderr, PANEL).at(-1) as string;
+    // The claim the reader would have acted on: Escape does not cancel from
+    // here, and the line must not say it does.
+    expect(nested).not.toContain("Esc cancel");
+    expect(nested).toContain("←/Esc back");
+    // And it is the truth: Escape backs out into the column that opened this
+    // one rather than settling the dialog.
+    stdin.write(ESCAPE);
+    await until(() => showsActiveRow(stderr, "Category"));
+    expect(frameRows(stderr).at(-1)).toBe(
+      " ↑↓ move · →/Enter open · type to filter · Esc cancel",
+    );
+    stdin.write(ESCAPE);
+    expect(await running).toBe(0);
+    expect(result).toBeUndefined();
+  });
+
+  test("names backing out rather than cancelling under a text leaf", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          await dialogs.select({
+            message: SELECT_MESSAGE,
+            options: [{ label: "Tagged", value: "tagged", dialog: tag }],
+            filter: "typed",
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => showsActiveRow(stderr, "Tagged"));
+    stdin.write(EXPAND);
+    await until(() => stripped(stderr.text()).includes("Which tag?"));
+    // The push is synchronous but the entry subscribes on its mount effect;
+    // wait it out so the Escape below is answered by the entry that is on
+    // screen rather than swallowed before it is listening.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    // The claim the reader would have acted on: a leaf is only ever pushed
+    // over the select that opened it, so its Escape always backs out and
+    // there is no depth at which it cancels the dialog.
+    expect(frameRows(stderr, "Which tag?").at(-1)).toBe(
+      " Enter submit · Esc back",
+    );
+    // And it is the truth: the entry goes, the column that opened it answers
+    // keys again, and nothing has settled.
+    stdin.write(ESCAPE);
+    await until(
+      () =>
+        showsActiveRow(stderr, "Tagged", PANEL) &&
+        !stripped(lastFrame(stderr, PANEL)).includes("Which tag?"),
+    );
+    expect(settled).toBe(false);
+    stdin.write(ESCAPE);
+    expect(await running).toBe(0);
+  });
+
+  test("names backing out rather than cancelling under a nested collected field", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: SELECT_MESSAGE,
+            options: [
+              {
+                label: "Category",
+                value: "category",
+                dialog: {
+                  message: "Pick an item",
+                  options: [
+                    {
+                      label: "Custom",
+                      value: "custom",
+                      fields: [
+                        {
+                          type: "text",
+                          name: "owner",
+                          message: "Which account?",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+              { label: "Plain", value: "plain" },
+            ],
+            filter: "typed",
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => showsActiveRow(stderr, "Category"));
+    stdin.write(EXPAND);
+    await until(() => showsActiveRow(stderr, "Custom", PANEL));
+    stdin.write(CARRIAGE_RETURN);
+    await until(() => stripped(stderr.text()).includes("Which account?"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    // A collection begun in an opened column is popped with that column, so
+    // its field's Escape backs out here rather than cancelling.
+    expect(frameRows(stderr, "Which account?").at(-1)).toBe(
+      " Enter submit · Esc back",
+    );
+    stdin.write(ESCAPE);
+    await until(
+      () =>
+        showsActiveRow(stderr, "Category", PANEL) &&
+        !stripped(lastFrame(stderr, PANEL)).includes("Which account?"),
+    );
+    // The root is answering keys again rather than having settled: the plain
+    // row proves it, since the expandable one would only reopen the column.
+    stdin.write(DOWN);
+    await until(() => showsActiveRow(stderr, "Plain"));
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("plain");
+  });
+
+  test("keeps naming cancelling where Escape really cancels", async () => {
+    // The other side of the same rule, so the fix cannot over-apply: a field
+    // collected at the leftmost column and a standalone input both have
+    // nothing to back out into, and their Escape settles the dialog.
+    let rootField: string | undefined;
+    const collected = await runSelection(
+      [
+        {
+          label: "Other…",
+          value: "other",
+          fields: [{ type: "text", name: "branch", message: "Branch name" }],
+        },
+      ],
+      [
+        CARRIAGE_RETURN,
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes("Branch name"));
+          await new Promise<void>((resolve) => setTimeout(resolve, 50));
+          rootField = frameRows(stderr, "Branch name").at(-1);
+        },
+        ESCAPE,
+      ],
+      false,
+    );
+    expect(rootField).toBe(" Enter submit · Esc cancel");
+    expect(collected.value).toBeUndefined();
+
+    let standaloneHint: string | undefined;
+    const standalone = await runEntry({ message: "Branch name" }, [
+      async (stderr) => {
+        await until(() => stripped(stderr.text()).includes("Branch name"));
+        standaloneHint = frameRows(stderr, "Branch name").at(-1);
+      },
+      ESCAPE,
+    ]);
+    expect(standaloneHint).toBe(" Enter submit · Esc cancel");
+    expect(standalone.value).toBeUndefined();
+  });
+
+  test("keeps naming moving and taking when the filter matches nothing", async () => {
+    // Deliberate: the line names the keys of the mode the dialog is in, not
+    // the ones that happen to do something on this keystroke. Dropping these
+    // phrases the moment a filter matched nothing would reflow the line as
+    // the reader typed, which is exactly the churn the filter and the
+    // overflow counts were set into the frame's edges to stop.
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          await dialogs.select({
+            message: SELECT_MESSAGE,
+            options: expandable(),
+            filter: "typed",
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => showsActiveRow(stderr, "Known"));
+    stdin.write("zzz");
+    await until(() => stripped(stderr.text()).includes("no match"));
+    expect(frameRows(stderr).at(-1)).toBe(
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
+    );
+    stdin.write(ESCAPE);
+    expect(await running).toBe(0);
+  });
+
+  test("binds opening to Tab when the caller asks, leaving Enter to select", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: SELECT_MESSAGE,
+            options: expandable(),
+            filter: "typed",
+            expand: "tab",
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(DOWN);
+    await until(() => showsActiveRow(stderr, "Category"));
+    // The line names the binding the caller chose, and keeps naming selection
+    // because Enter still takes the row it is on.
+    expect(frameRows(stderr).at(-1)).toBe(
+      " ↑↓ move · →/Tab open · Enter select · type to filter · Esc cancel",
+    );
+    stdin.write(TAB);
+    await until(() => showsActiveRow(stderr, "First", PANEL));
+    stdin.write(ESCAPE);
+    await until(() => showsActiveRow(stderr, "Category"));
+    // Enter takes the expandable option rather than opening it, which is the
+    // whole point of the binding.
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("category");
+  });
+
+  test("opens on Shift+Tab under the Tab binding too, the same as plain Tab", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: SELECT_MESSAGE,
+            options: expandable(),
+            filter: "typed",
+            expand: "tab",
+          });
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    stdin.write(DOWN);
+    await until(() => showsActiveRow(stderr, "Category"));
+    // Driven with the real terminal sequence rather than a synthesised key
+    // object, so this exercises the same parse-keypress mapping a live
+    // terminal would produce.
+    stdin.write(SHIFT_TAB);
+    await until(() => showsActiveRow(stderr, "First", PANEL));
+    stdin.write(ESCAPE);
+    await until(() => showsActiveRow(stderr, "Category"));
+    stdin.write(CARRIAGE_RETURN);
+    expect(await running).toBe(0);
+    expect(result?.value).toBe("category");
+  });
+
+  test("leaves Shift+Tab inert under the Enter binding, not reaching the filter as text", async () => {
+    // Under the Enter binding, key.tab does not open — the branch in
+    // select.ts requires expandKey === "tab" — so the only way this could
+    // misbehave is falling through to the filter as typed text. That matters
+    // specifically because the sequence starts with the same bytes several
+    // other escape sequences do; the rule exists to rule out exactly that.
+    const cancelled = await runSelection(
+      expandable(),
+      [
+        DOWN,
+        async (stderr) => {
+          await until(() => showsActiveRow(stderr, "Category"));
+        },
+        SHIFT_TAB,
+        async (stderr) => {
+          expect(showsActiveRow(stderr, "Category")).toBe(true);
+          expect(stripped(lastFrame(stderr))).not.toContain("›");
+        },
+        ESCAPE,
+      ],
+      false,
+    );
+    expect(cancelled.value).toBeUndefined();
+  });
+
+  test("types, opens, types, and takes without touching a single arrow", async () => {
+    // The whole point of typing always filtering and Enter always opening:
+    // narrowing a column to the row you want and pressing Enter is the same
+    // gesture at every level, and the last Enter takes the plain row it lands
+    // on. No arrow key is pressed anywhere in this walk.
+    const result = await runSelection(
+      [
+        {
+          label: "apps",
+          value: "apps",
+          dialog: {
+            message: "Apps",
+            options: [{ label: "web", value: "web" }],
+          },
+        },
+        {
+          label: "packages",
+          value: "packages",
+          dialog: {
+            message: "Packages",
+            options: [
+              { label: "core", value: "core" },
+              {
+                label: "cli",
+                value: "cli",
+                dialog: {
+                  message: "Scripts",
+                  options: [
+                    { label: "build", value: "cli:build" },
+                    { label: "test", value: "cli:test" },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ],
+      ["pack", CARRIAGE_RETURN, "cli", CARRIAGE_RETURN, CARRIAGE_RETURN],
+    );
+    expect(result.value).toBe("cli:build");
+  });
+
+  test("opens with Enter by default", async () => {
+    const result = await runSelection(
+      expandable(),
+      [DOWN, CARRIAGE_RETURN, CARRIAGE_RETURN],
+      false,
+    );
+    // The first Enter opens the column the marked row leads to rather than
+    // resolving with its value; the second takes the plain row it lands on.
+    expect(result.value).toBe("first");
   });
 
   test("treats the trigger as a no-op without a declaration", async () => {
@@ -2974,9 +3730,14 @@ describe("cascading sub-dialogs", () => {
       }
     });
     expect(settled).toBe(false);
+    // An expandable row is opened rather than taken, so the choice that ends
+    // the session is the plain one above it — which is also what proves the
+    // root is answering keys again.
+    stdin.write(UP);
+    await until(() => showsActiveRow(stderr, "Known"));
     stdin.write(CARRIAGE_RETURN);
     expect(await running).toBe(0);
-    expect(result?.value).toBe("category");
+    expect(result?.value).toBe("known");
   });
 
   test("resolves a text leaf with the opening value and its submitted text", async () => {
@@ -3005,7 +3766,7 @@ describe("cascading sub-dialogs", () => {
           result = await dialogs.select({
             message: "Pick one",
             options: [{ label: "Tagged", value: "tagged", dialog: tag }],
-            filter: false,
+            filter: "typed",
           });
           settled = true;
         }),
@@ -3101,7 +3862,7 @@ describe("cascading sub-dialogs", () => {
                 },
               },
             ],
-            filter: false,
+            filter: "typed",
           });
         }),
       ],
@@ -3157,7 +3918,7 @@ describe("cascading sub-dialogs", () => {
                 },
               },
             ],
-            filter: false,
+            filter: "typed",
           });
         }),
       ],
@@ -3199,31 +3960,37 @@ describe("cascading sub-dialogs", () => {
       false,
     );
     expect(result.value).toBe("x");
-    // The parent's retained row keeps its bar: inverted and padded across
-    // the minimum's inner width, exactly as the top level's bar spans its.
-    const bars = invertedRows(lastFrame(result.stderr));
-    expect(bars.length).toBe(2);
-    expect(bars).toContain("x");
-    // The child overlaps the parent's bar, so only its tail peeks out right
-    // of the overlap — the same tail the offset test asserts on.
-    expect(bars.some((bar) => bar.includes("eOptionIsLong"))).toBe(true);
+    // The column behind keeps the bar on the choice it was left on, drawn
+    // exactly as the driven column's own is: the same inversion, nothing
+    // shading it differently, because the choice that led here is a choice.
+    const drawn = bars(lastFrame(result.stderr));
+    expect(drawn.length).toBe(2);
+    expect(drawn).toContain("x");
+    expect(drawn).toContain("ParentActiveOptionIsLong");
   });
 
-  test("cuts a stacked entry shadow to its panel rather than the terminal", async () => {
+  test("keeps a covered level's other options on screen", async () => {
     const result = await runSelection(
-      [{ label: "Tagged", value: "tagged", dialog: tag }],
-      [EXPAND, "nightly", CARRIAGE_RETURN],
+      [
+        { label: "PeeksOutFromUnderTheChild", value: "peeks" },
+        {
+          label: "ParentActiveOptionIsLong",
+          value: "category",
+          dialog: {
+            message: "Child",
+            options: [{ label: "x", value: "x" }],
+          },
+        },
+      ],
+      [DOWN, EXPAND, CARRIAGE_RETURN],
       false,
-      terminalOfColumns(40),
     );
-    expect(result.value).toBe("tagged");
-    const raw = lastFrame(result.stderr);
-    // The shadow is the entry's own width: the dimmed block run after the
-    // leaf's frame is shorter than the full forty columns.
-    const shadowed = raw.split(`${DIM_OPEN}█`)[1] ?? "";
-    const run = shadowed.slice(0, shadowed.indexOf(`${DIM_CLOSE}`));
-    expect(run.length).toBeGreaterThan(0);
-    expect(run.length).toBeLessThan(40);
+    expect(result.value).toBe("x");
+    // A level a sub-dialog was opened over is not reduced to its active row:
+    // it keeps drawing the list it was showing, so what was chosen on the way
+    // down stays readable beside what is being chosen now. The child covers
+    // the columns it overlaps, and the rest of the row runs on past it.
+    expect(stripped(lastFrame(result.stderr))).toContain("UnderTheChild");
   });
 
   test("pops a nested field collection instead of cancelling the session", async () => {
@@ -3258,8 +4025,9 @@ describe("cascading sub-dialogs", () => {
                   ],
                 },
               },
+              { label: "Plain", value: "plain" },
             ],
-            filter: false,
+            filter: "typed",
           });
         }),
       ],
@@ -3282,9 +4050,13 @@ describe("cascading sub-dialogs", () => {
         return false;
       }
     });
+    // The root answers keys again, and the plain row proves it: the
+    // expandable one would reopen the column the collection was abandoned in.
+    nestedStdin.write(DOWN);
+    await until(() => showsActiveRow(nestedStderr, "Plain"));
     nestedStdin.write(CARRIAGE_RETURN);
     expect(await nestedRunning).toBe(0);
-    expect(nestedResult?.value).toBe("category");
+    expect(nestedResult?.value).toBe("plain");
     expect(nestedResult?.values).toEqual({});
   });
 
@@ -3310,7 +4082,7 @@ describe("cascading sub-dialogs", () => {
                 },
               },
             ],
-            filter: true,
+            filter: "always",
           });
         }),
       ],
@@ -3346,16 +4118,18 @@ describe("cascading sub-dialogs", () => {
     });
     // Popping restores exactly what the parent showed before it opened.
     expect(stripped(lastFrame(stderr))).toContain("alph");
+    // Backing out left the column live: it still filters, still moves, and
+    // still takes a plain row. The expandable one would reopen instead.
+    stdin.write(UP);
+    await until(() => showsActiveRow(stderr, "Alpha"));
     stdin.write(CARRIAGE_RETURN);
     expect(await running).toBe(0);
-    expect(result?.value).toBe("alphabet");
+    expect(result?.value).toBe("alpha");
     // The filter text never becomes part of the result.
     expect(result?.values).toEqual({});
   });
 
-  test("stacks the nested panel over its parent with an offset", async () => {
-    // The child is narrower than the parent's active row, so the minimum the
-    // parent renders peeks out right of the overlap: exactly its active row.
+  test("draws a sub-dialog as the next column of the same panel", async () => {
     const options: readonly SelectOption<string>[] = [
       { label: "Known", value: "known" },
       {
@@ -3376,36 +4150,96 @@ describe("cascading sub-dialogs", () => {
       false,
     );
     expect(result.value).toBe("x");
+    const rows = frameRows(result.stderr);
+    // One frame, not two: the sub-dialog has no border, no offset and no
+    // shadow of its own, because it is a column of the panel its parent is
+    // already in. Every row of that panel therefore opens and closes with the
+    // one frame's edges.
+    const inside = rows.slice(1, -2);
+    expect(inside.length).toBeGreaterThan(0);
+    for (const row of inside) {
+      expect(row.startsWith("║")).toBe(true);
+      expect(row.endsWith("║")).toBe(true);
+    }
+    expect(rows.filter((row) => row.startsWith("╔"))).toHaveLength(1);
+    // Both lists are on screen, side by side, separated by a divider — the
+    // parent is not reduced to its active row and is not covered by the child.
     const frame = stripped(lastFrame(result.stderr));
-    expect(frame).toContain("Pick one");
-    expect(frame).toContain("Child");
-    const raw = lastFrame(result.stderr);
-    // The child's title lands one row down and one offset right of its
-    // parent: the parent's border run opens the overlapped row before the
-    // child's dimmed title run follows.
-    expect(raw).toContain(`${DIM_OPEN}║${DIM_CLOSE} ${DIM_OPEN}╔`);
-    // The parent renders at minimum: its active option only, no filter row,
-    // no indicators, no hint of its own. The child overlaps it, so the tail
-    // of that row is what peeks out right of the overlap.
-    expect(frame).toContain("eOptionIsLong");
-    expect(frame).not.toContain("Known");
-    expect(frame).not.toContain("expand");
+    expect(frame).toContain("Known");
+    expect(frame).toContain("ParentActiveOptionIsLong");
+    expect(frame).toContain("x");
+    expect(frame).toContain("│");
+    // The title names the trail of columns rather than one level's message.
+    expect(rows[0]).toContain("Pick one › Child");
   });
 
-  test("dims a block-fill shadow behind each panel above the root", async () => {
+  test("marks the rows that lead somewhere and leaves the rest unmarked", async () => {
     const result = await runSelection(
       expandable(),
       [DOWN, EXPAND, CARRIAGE_RETURN],
       false,
     );
     expect(result.value).toBe("first");
-    const raw = lastFrame(result.stderr);
-    expect(raw).toContain("Pick an item");
-    expect(raw).toContain(`${DIM_OPEN}█`);
-    expect(stripped(raw)).toContain("█");
+    const rows = frameRows(result.stderr);
+    const marked = rows.filter((row) => row.includes(EXPAND_MARKER));
+    // Exactly the one option that declares a sub-dialog carries the marker,
+    // and it sits on the right edge of its own column rather than after its
+    // label, so the markers of a column line up on one edge.
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toContain("Category");
+    expect(rows.some((row) => row.includes("Known"))).toBe(true);
+    expect(
+      rows.some((row) => row.includes("Known") && row.includes(EXPAND_MARKER)),
+    ).toBe(false);
   });
 
-  test("clamps stacked panels inside a narrow terminal", async () => {
+  test("backs out of a column with the left arrow and cancels only at the root", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let result: SelectResult<string> | undefined = {
+      value: "stale",
+      values: {},
+    };
+    let settled = false;
+    const running = main(
+      ["choose"],
+      [
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          result = await dialogs.select({
+            message: SELECT_MESSAGE,
+            options: expandable(),
+            filter: "typed",
+          });
+          settled = true;
+        }),
+      ],
+      context(stdin, stderr),
+    );
+    await until(() => stdin.rawModes.includes(true));
+    await until(() => stripped(stderr.text()).includes("Category"));
+    // At the root the arrow has nothing to back out of, and it is Escape
+    // rather than an arrow that closes the dialog, so it does nothing.
+    stdin.write(LEFT);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+    stdin.write(DOWN);
+    await until(() => showsActiveRow(stderr, "Category"));
+    stdin.write(EXPAND);
+    await until(() => showsActiveRow(stderr, "First", PANEL));
+    stdin.write(LEFT);
+    await until(
+      () =>
+        showsActiveRow(stderr, "Category") &&
+        !stripped(lastFrame(stderr)).includes("Pick an item"),
+    );
+    expect(settled).toBe(false);
+    stdin.write(ESCAPE);
+    expect(await running).toBe(0);
+    expect(result).toBeUndefined();
+  });
+
+  test("keeps the columns inside a narrow terminal", async () => {
     const columns = 24;
     const result = await runSelection(
       expandable(),
@@ -3414,14 +4248,44 @@ describe("cascading sub-dialogs", () => {
       terminalOfColumns(columns),
     );
     expect(result.value).toBe("first");
-    const rows = frameRows(result.stderr);
+    const rows = frameRows(result.stderr, PANEL);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.length).toBeLessThanOrEqual(columns);
     }
   });
 
-  test("keeps the stacked dialog shorter than a short terminal", async () => {
+  test("cuts the last column rather than dropping it", async () => {
+    const columns = 20;
+    const result = await runSelection(
+      [
+        {
+          label: "Category",
+          value: "category",
+          dialog: {
+            message: "Sub",
+            options: [{ label: "AVeryLongLeafLabel", value: "leaf" }],
+          },
+        },
+      ],
+      [EXPAND, CARRIAGE_RETURN],
+      false,
+      terminalOfColumns(columns),
+    );
+    expect(result.value).toBe("leaf");
+    const rows = frameRows(result.stderr, PANEL);
+    for (const row of rows) {
+      expect(row.length).toBeLessThanOrEqual(columns);
+    }
+    // Collapsing stops at one column, so the one being driven is truncated to
+    // what is left rather than dropped off the screen with the rest.
+    const frame = stripped(lastFrame(result.stderr, PANEL));
+    expect(frame).toContain("AVeryLong");
+    expect(frame).not.toContain("AVeryLongLeafLabel");
+    expect(frame).toContain("…");
+  });
+
+  test("keeps the browser shorter than a short terminal", async () => {
     const terminalRows = 10;
     const result = await runSelection(
       expandable(),
@@ -3467,15 +4331,21 @@ describe("cascading sub-dialogs", () => {
       terminalOfRows(terminalRows),
     );
     expect(result.value).toBe("d1");
-    expect(activeRow(result.stderr, "Deep")).toBe("D1");
-    expect(frameRows(result.stderr).length).toBeLessThan(terminalRows);
-    // Every level below the top renders at minimum: exactly its active row,
-    // and each frame's title stays on screen with the stack's offset.
-    const frame = stripped(lastFrame(result.stderr));
-    expect(frame).toContain("Middle");
-    expect(frame).toContain("Deep");
+    expect(activeRow(result.stderr, PANEL)).toBe("D1");
+    expect(frameRows(result.stderr, PANEL).length).toBeLessThan(terminalRows);
+    // Three columns in one panel, all three still showing their own lists:
+    // going deeper adds a column to the right rather than a panel over the
+    // one before it, so nothing that was chosen on the way in is covered.
+    const frame = stripped(lastFrame(result.stderr, PANEL));
+    expect(frame).toContain("Category");
+    expect(frame).toContain("MFirst");
+    expect(frame).toContain("Sub");
     expect(frame).toContain("D1");
-    expect(frame).not.toContain("MFirst");
+    expect(frame).toContain("D2");
+    // The title is the trail of the columns on screen.
+    expect(frameRows(result.stderr, PANEL)[0]).toContain(
+      "Pick one › Middle › Deep",
+    );
   });
 
   test("rejects every invalid reachable sub-request before rendering", async () => {
@@ -3546,16 +4416,28 @@ describe("cascading sub-dialogs", () => {
     const nested = { message: "Nested", options: [loop] };
     loop.dialog = nested;
     // The cycle guard skips the back-edge, so validation passes and the
-    // dialog renders the reachable first visit instead of overflowing.
-    const result = await runSelection([loop], [CARRIAGE_RETURN], false);
-    expect(result.value).toBe(1);
+    // dialog renders the reachable first visit instead of overflowing. The
+    // loop is opened once, backed out of, and the plain row beside it taken:
+    // an option that leads somewhere is opened rather than resolved, and this
+    // one leads back to itself.
+    const result = await runSelection(
+      [loop as SelectOption<number>, { label: "Plain", value: 2 }],
+      [EXPAND, LEFT, DOWN, CARRIAGE_RETURN],
+      false,
+    );
+    expect(result.value).toBe(2);
     expect(result.values).toEqual({});
+    expect(stripped(lastFrame(result.stderr))).toContain("Loop");
   });
 });
 
 describe("Norton Commander presentation", () => {
   /** The SGR codes a dialog is allowed to emit: dim on and off, inverse on and
    * off. Any other one would be a hue, which the palette does not have. */
+  /** Every sequence a dialog is allowed to emit: dimming and inversion, on and
+   * off. No color code belongs in the set, which is what "no hue" means — a
+   * dialog names no color at all and leaves the terminal's own foreground and
+   * background wherever it is not dimming or inverting them. */
   const GREYSCALE_CODES = new Set(["2", "22", "7", "27"]);
 
   const SGR = new RegExp(`${ESCAPE}\\[([\\d;]*)m`, "g");
@@ -3578,7 +4460,7 @@ describe("Norton Commander presentation", () => {
       "║ Beta       ║",
       "║ Gamma      ║",
       "╚════════════╝",
-      " ↑↓ move · Enter select · Esc cancel",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
     ]);
     expect(activeRow(result.stderr)).toBe("Beta");
   });
@@ -3615,7 +4497,7 @@ describe("Norton Commander presentation", () => {
       false,
     );
     expect(frameRows(disabled.stderr).at(-1)).toBe(
-      " ↑↓ move · Enter select · Esc cancel",
+      " ↑↓ move · Enter select · type to filter · Esc cancel",
     );
   });
 
@@ -3635,7 +4517,9 @@ describe("Norton Commander presentation", () => {
     for (const row of rows) expect(row.length).toBeLessThanOrEqual(40);
     expect(rows[0]).toHaveLength(40);
     expect(rows[0]?.startsWith("╔═ A question long")).toBe(true);
-    expect(rows[0]?.endsWith("…╗")).toBe(true);
+    // The title is cut inside the spaces that pad it into the edge, so a cut
+    // one still ends a column short of the corner rather than against it.
+    expect(rows[0]?.endsWith("… ╗")).toBe(true);
     // One row, ending in the renderer's ellipsis, exactly as wide as the bar.
     const active = activeRow(result.stderr, "A question long");
     expect(active).toHaveLength(36);
@@ -3663,11 +4547,14 @@ describe("Norton Commander presentation", () => {
       terminalOfColumns(40),
     );
     expect(filtered.value).toBeUndefined();
-    const filterRow = frameRows(filtered.stderr)[1] as string;
+    // The filter is set into the panel's bottom edge, and what it cannot fit
+    // it cuts from its head so the caret is never what goes.
+    const rows = frameRows(filtered.stderr);
+    const filterRow = rows.at(-2) as string;
     expect(filterRow).toHaveLength(40);
-    expect(filterRow.startsWith("║ …")).toBe(true);
-    expect(filterRow.endsWith("f█ ║")).toBe(true);
-    // The prompt is the head of the row, so start truncation is what drops it.
+    expect(filterRow.startsWith("╚═…")).toBe(true);
+    expect(filterRow.endsWith("f█ ╝")).toBe(true);
+    // The prompt is the head of the run, so start truncation is what drops it.
     expect(filterRow).not.toContain("›");
   });
 
@@ -3734,7 +4621,30 @@ describe("Norton Commander presentation", () => {
     expect(narrow).toHaveLength(24);
   });
 
-  test("dims the chrome, inverts the active option, and emits no hue", async () => {
+  test("spans the cursor bar across the panel a wide title made", async () => {
+    // The title is wider than any label, so the frame is wider than the
+    // columns need. The room left over goes to the last column, which is what
+    // keeps the bar spanning the panel rather than stopping short of it.
+    const result = await runSelection(
+      [
+        { label: "up", value: "up" },
+        { label: "down", value: "down" },
+      ],
+      [CARRIAGE_RETURN],
+      false,
+      new CapturedOutput(),
+      "A considerably longer question than any of its answers",
+    );
+    expect(result.value).toBe("up");
+    const rows = frameRows(result.stderr, PANEL);
+    // Every row of the frame is the panel's width, and the bar fills the
+    // content columns between its borders and padding.
+    expect(barWidths(lastFrame(result.stderr, PANEL))).toEqual([
+      (rows[0] as string).length - 4,
+    ]);
+  });
+
+  test("dims the chrome, grounds the active option, and emits no hue", async () => {
     const result = await runSelection(
       Array.from({ length: 30 }, (_, index) => ({
         label: `Option ${String(index + 1).padStart(2, "0")}`,
@@ -3746,20 +4656,27 @@ describe("Norton Commander presentation", () => {
     );
 
     const frame = lastFrame(result.stderr);
-    // The frame edges, the title, the filter prompt, the overflow indicator,
-    // and the hint line, each wrapped in the dim sequence.
-    // The title shares the top edge's dim run, which is what "set into the
-    // frame" means: one dimmed row carrying border and message together.
-    expect(frame).toContain(`${DIM_OPEN}╔═ Pick one ═╗${DIM_CLOSE}`);
-    expect(frame).toContain(`${DIM_OPEN}╚`);
-    expect(frame).toContain(`${DIM_OPEN}› ${DIM_CLOSE}`);
-    expect(frame).toContain(`${DIM_OPEN}▼ 20 more${DIM_CLOSE}`);
+    // The frame edges, the title, the filter prompt, the overflow count, and
+    // the hint line, each dimmed. The title shares the top edge's dim run,
+    // which is what "set into the frame" means: one dimmed row carrying border
+    // and message together — and the same holds for the bottom edge, which
+    // carries the filter and the count the same way.
+    expect(dimmedAt(frame, "╔═ Pick one")).toBe(true);
+    expect(dimmedAt(frame, "╚═")).toBe(true);
+    expect(dimmedAt(frame, "›")).toBe(true);
+    expect(dimmedAt(frame, "▼ 20")).toBe(true);
+    expect(dimmedAt(frame, "↑↓ move")).toBe(true);
     expect(frame).toContain(
       `${DIM_OPEN}↑↓ move · Enter select · type to filter · Esc cancel${DIM_CLOSE}`,
     );
-    // The active option is the one inverted run, and it is not dimmed.
-    expect(invertedRows(frame)).toEqual(["Option 01"]);
-    expect(frame).not.toContain(`${DIM_OPEN}Option 01`);
+    // What has been typed into the filter is content rather than chrome, so it
+    // is the one thing on either edge that is not dimmed.
+    expect(dimmedAt(frame, "█")).toBe(false);
+    // The active option is the one run on the bar's ground, and it is not
+    // dimmed: the label keeps the foreground every other label has, so the
+    // ground is the only thing marking it.
+    expect(bars(frame)).toEqual(["Option 01"]);
+    expect(dimmedAt(frame, "Option 01")).toBe(false);
 
     const codes = [...frame.matchAll(SGR)].map(([, code]) => code as string);
     expect(codes.length).toBeGreaterThan(0);
@@ -3805,9 +4722,12 @@ describe("dialog animations", () => {
    * delivered, which is the difference between a blink and a stall. */
   const RENDER_THROTTLE = Math.ceil(1000 / 30);
 
-  /** The row the filter is typed into, which is the row the caret sits on. */
+  /** The line the filter is typed into, which is the row the caret sits on:
+   * the panel's bottom edge, which is where the filter is set so that turning
+   * it on never moves an option row. */
   function filterRow(stderr: CapturedOutput): string {
-    return frameRows(stderr)[1] ?? "";
+    const rows = frameRows(stderr);
+    return rows.at(rows.at(-1)?.startsWith(" ") === true ? -2 : -1) ?? "";
   }
 
   /** The module the renderer schedules its one shared animation timer from.
@@ -3947,19 +4867,11 @@ describe("dialog animations", () => {
       listed(30),
       [
         async (stderr) => {
-          await until(() => stderr.text().includes("▼ 20 more"));
-          const indicator = () => lastFrame(stderr);
-          await until(
-            () => indicator().includes(`${DIM_OPEN}▼ 20 more${DIM_CLOSE}`),
-            PHASE_BUDGET,
-          );
+          await until(() => stderr.text().includes("▼ 20"));
+          const indicator = () => dimmedAt(lastFrame(stderr), "▼ 20");
+          await until(() => indicator() === true, PHASE_BUDGET);
           phases.push("dim");
-          await until(
-            () =>
-              indicator().includes(" ▼ 20 more") &&
-              !indicator().includes(`${DIM_OPEN}▼ 20 more`),
-            PHASE_BUDGET,
-          );
+          await until(() => indicator() === false, PHASE_BUDGET);
           phases.push("normal");
         },
         CARRIAGE_RETURN,
@@ -3996,12 +4908,12 @@ describe("dialog animations", () => {
         DOWN,
         async (stderr, stdin) => {
           await until(() => stderr.text().includes("Gamma"));
-          await until(() => invertedRows(lastFrame(stderr))[0] === "Beta");
+          await until(() => bars(lastFrame(stderr))[0] === "Beta");
           const confirmedAt = performance.now();
           stdin.write(CARRIAGE_RETURN);
           // The bar blinks off on the flash's odd frames, which is the flash.
-          await until(() => invertedRows(lastFrame(stderr)).length === 0);
-          barsWhileFlashing = invertedRows(lastFrame(stderr));
+          await until(() => bars(lastFrame(stderr)).length === 0);
+          barsWhileFlashing = bars(lastFrame(stderr));
           // "and then Escape 50 milliseconds later": still well inside the
           // flash, and the choice is already made.
           await new Promise<void>((resolve) => setTimeout(resolve, 50));
@@ -4065,9 +4977,11 @@ describe("dialog animations", () => {
     // that is actually being typed into. Typing into the field resets the
     // shared phase, so a filter caret would otherwise blink in lockstep with
     // the field's on a row whose keystrokes are dropped.
-    const filter = collecting[1] as string;
+    // The filter sits in the select panel's own bottom edge, under the list it
+    // filters and above the field's panel.
+    const filter = collecting.find((row) => row.includes("›")) as string;
     const field = collecting.at(-3) as string;
-    expect(filter).toContain("›");
+    expect(filter).toBeDefined();
     expect(filter).not.toContain(CARET);
     expect(field).toContain(`abc${CARET}`);
     // The cell the caret gave up is still there, so the panel kept its width.
@@ -4080,9 +4994,9 @@ describe("dialog animations", () => {
       listed(30),
       [
         async (stderr, stdin) => {
-          await until(() => stderr.text().includes("▼ 30 more"));
+          await until(() => stderr.text().includes("▼ 30"));
           // No option row fits, so no cursor bar is drawn.
-          expect(invertedRows(lastFrame(stderr))).toEqual([]);
+          expect(bars(lastFrame(stderr))).toEqual([]);
           const confirmedAt = performance.now();
           stdin.write(CARRIAGE_RETURN);
           await until(() => stdin.rawModes.includes(false));
@@ -4092,7 +5006,7 @@ describe("dialog animations", () => {
       undefined,
       // One row short of what a choosing select needs for its first option
       // row, so the window collapses to nothing.
-      terminalOfRows(7),
+      terminalOfRows(4),
     );
 
     expect(result.value).toBe(1);

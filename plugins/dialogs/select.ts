@@ -6,17 +6,32 @@ import {
   onPhase,
 } from "./animation.ts";
 import {
-  caretGlyph,
-  type EntryComponent,
-  editedText,
-  withCaret,
-} from "./entry.ts";
-import { filterIsEnabled, visibleOptionIndices } from "./filter.ts";
+  columnCells,
+  columnDivider,
+  columnsWidth,
+  columnWidth,
+  droppedColumns,
+  fitColumnWidths,
+  hiddenAboveGlyph,
+  hiddenBelowGlyph,
+  indicatorText,
+  stretchLastColumn,
+} from "./columns.ts";
+import { type EntryComponent, editedText, withCaret } from "./entry.ts";
 import {
+  type FilterMode,
+  filterIsShown,
+  visibleOptionIndices,
+} from "./filter.ts";
+import {
+  availableInnerWidth,
   displayWidth,
   type FrameComponent,
+  type FrameRow,
+  type FrameSegment,
   innerWidth,
   panelWidth,
+  segmentsWidth,
 } from "./frame.ts";
 import type {
   DialogElement,
@@ -27,69 +42,65 @@ import type {
   SelectResult,
   TextField,
 } from "./types.ts";
-import {
-  optionRowCount,
-  optionWindow,
-  stackedExtraRows,
-  stackedOffsetColumns,
-  stackedShadowRows,
-} from "./viewport.ts";
+import { optionRowCount, optionWindow } from "./viewport.ts";
 
 /** The prompt the filter row carries, so the row the user types into is
  * distinguishable from the option rows under it. */
 const filterPrompt = "›";
 
-/** What the dialog shows when the filter text leaves nothing visible. */
-const noMatch = "no match";
+/** What separates the levels named in the panel's title. */
+const trailSeparator = "›";
 
-/** The overflow indicators, each carrying how many visible options the window
- * hides on its side. */
-const hiddenAboveGlyph = "▲";
-const hiddenBelowGlyph = "▼";
+/** What stands in the title for the columns that have collapsed off its left,
+ * so a title always names exactly the columns on screen. */
+const trailElision = "…";
 
-/** The select's key hint line, written out rather than assembled, so each
- * reads as the spec fixes it. The filter phrase is there exactly when the
- * filter is, so the line never names a key the dialog would ignore, and the
- * expand phrase is there exactly when a visible option declares a sub-dialog.
+/**
+ * How a sub-dialog is opened.
+ *
+ * `enter` is the default and the one the marker on an expandable row
+ * promises: the key that takes a plain option opens an option that leads
+ * somewhere, so there is one key to learn rather than two. `tab` keeps Enter
+ * meaning "take this" at every level, for a caller whose expandable options
+ * are also choices in their own right. The right arrow opens under either
+ * binding, and the left arrow backs out under either.
  */
-function selectHint(filtering: boolean, expandable: boolean): string {
-  const base = filtering
-    ? "↑↓ move · Enter select · type to filter · Esc cancel"
-    : "↑↓ move · Enter select · Esc cancel";
-  return expandable ? `${base} · Tab expand` : base;
-}
+export type ExpandKey = "enter" | "tab";
 
-/** One rendered row of the panel, described before it is measured: the panel's
- * width follows the widest of them, and only then can the cursor bar be padded
- * to span the width that produced. */
-type PanelRow = {
-  readonly key: string;
-  readonly text: string;
-  /** A dimmed run drawn before the text. The filter needs one because its
-   * prompt is chrome while the text after it is what the user typed, and the
-   * two shadings have to meet inside one row for start truncation to trim the
-   * row as a whole. */
-  readonly prefix?: string;
-  /** Chrome rather than content, so it is dimmed relative to the labels. */
-  readonly dim?: boolean;
-  /** The active option, drawn as a bar across the panel's inner width. */
-  readonly inverse?: boolean;
-  /** Text whose tail matters more than its head — entered text — so a row too
-   * wide for the panel keeps its end and its caret rather than its start. */
-  readonly tail?: boolean;
-};
-/** One level placed in a stacked dialog: its framed element already wrapped in
- * its absolutely positioned box, plus the measurements the union height and
- * the shadow behind it are derived from. `panelHeight` is the frame without
- * its hint line; `levelHeight` includes the hint, which only the top level
- * carries. */
-type StackedPanel = {
-  readonly element: DialogElement;
-  readonly index: number;
-  readonly width: number;
-  readonly panelHeight: number;
-  readonly levelHeight: number;
-};
+/**
+ * The select's key hint line, assembled from the phrases that apply rather
+ * than written out whole, because which of them apply depends on where the
+ * reader is: whether the option under the bar leads anywhere, whether there is
+ * a column to their left to back out into, and whether the filter is taking
+ * keys. The line never names a key the dialog would ignore.
+ */
+function selectHint(state: {
+  readonly expandable: boolean;
+  readonly nested: boolean;
+  readonly expandKey: ExpandKey;
+}): string {
+  const phrases = ["↑↓ move"];
+  if (state.expandable) {
+    phrases.push(state.expandKey === "tab" ? "→/Tab open" : "→/Enter open");
+  }
+  // An expandable option under the Enter binding is opened rather than taken,
+  // so naming a select key on it would name one the dialog does not answer.
+  if (!(state.expandable && state.expandKey === "enter")) {
+    phrases.push("Enter select");
+  }
+  // Escape does not cancel from a column: it backs out exactly as the left
+  // arrow does, and only the leftmost column's Escape closes the dialog. The
+  // two keys do one thing here, so they are named as one phrase, and
+  // cancelling is named only where it is what Escape does.
+  if (state.nested) phrases.push("←/Esc back");
+  // Named whether or not the filter is on screen: typing always narrows the
+  // list, so a reader who has not typed yet is exactly the one the phrase is
+  // for, and a phrase that came and went as they typed would be one more
+  // thing moving under them.
+  phrases.push("type to filter");
+  if (!state.nested) phrases.push("Esc cancel");
+  return phrases.join(" · ");
+}
 
 /** The parts of Ink's key report a movement reads. */
 type NavigationKey = {
@@ -115,7 +126,6 @@ function movedPosition(
   current: number,
   visibleCount: number,
   terminalRows: number,
-  extraRows = 0,
 ): number | undefined {
   let target: number | undefined;
   if (key.home) target = 0;
@@ -124,9 +134,8 @@ function movedPosition(
   else if (key.downArrow) target = current + 1;
   else if (key.pageUp || key.pageDown) {
     // Navigation is refused once collection begins, so the window this pages
-    // by is always the choosing one — shrunk by the stacked shadow budget
-    // while a sub-dialog is open, exactly like the rendered window.
-    const page = optionRowCount(visibleCount, terminalRows, false, extraRows);
+    // by is always the choosing one.
+    const page = optionRowCount(visibleCount, terminalRows, false);
     target = current + (key.pageUp ? -page : page);
   }
   if (target === undefined || visibleCount === 0) return undefined;
@@ -149,7 +158,7 @@ type Collection<T> = {
 type SelectLevel<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
-  readonly filtering: boolean;
+  readonly filter: FilterMode;
   readonly entered: string;
   readonly active: number;
   readonly collected: Readonly<Record<string, string>>;
@@ -199,7 +208,10 @@ export function stackedValues(
 type SelectViewRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
-  readonly filtering: boolean;
+  readonly filter: FilterMode;
+  /** Which key opens a sub-dialog, for the whole dialog rather than per
+   * level: one dialog answers one set of keys however deep the reader goes. */
+  readonly expandKey: ExpandKey;
 };
 
 /**
@@ -216,7 +228,7 @@ export function createSelectView<T>(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
   { Entry, Frame }: { Entry: EntryComponent; Frame: FrameComponent },
-  { message, options, filtering }: SelectViewRequest<T>,
+  { message, options, filter, expandKey }: SelectViewRequest<T>,
   settle: (outcome: Outcome<SelectResult<T>>) => void,
 ): DialogView {
   const cancel = () => settle({ type: "cancelled" });
@@ -235,7 +247,7 @@ export function createSelectView<T>(
       {
         message,
         options,
-        filtering,
+        filter,
         entered: "",
         active: 0,
         collected: {},
@@ -277,10 +289,48 @@ export function createSelectView<T>(
      * its presence is what makes every one of those keys too late. */
     const confirmed = react.useRef<SelectResult<T> | undefined>(undefined);
     const [flashing, setFlashing] = react.useState(false);
-    /** The width each stacked entry drew, recorded through its measure
-     * callback so the shadow behind it is cut to its panel. A ref, because
-     * the callback fires after render while the shadow reads it during. */
-    const entryWidths = react.useRef<Record<number, number>>({});
+    /** What each column left of the driven one matched and measured to, kept
+     * per column rather than recomputed on every frame. Those columns are
+     * frozen — nothing about their options or their filter text can change
+     * while a sub-dialog opened from them is on screen — so matching them
+     * again on the animation's timer would be exactly the
+     * lowercase-every-label cost the driven column's own memo exists to
+     * avoid. Keyed by the level object itself, so backing out of a column and
+     * opening a different one in its place recomputes rather than reusing a
+     * stale entry. */
+    const columnContent = react.useRef<
+      readonly (
+        | {
+            readonly level: SelectLevel<T>;
+            readonly visible: readonly number[];
+            readonly widestLabel: number;
+            readonly expandable: boolean;
+          }
+        | undefined
+      )[]
+    >([]);
+    const columnMatches = (index: number, level: SelectLevel<T>) => {
+      const cached = columnContent.current[index];
+      if (cached !== undefined && cached.level === level) return cached;
+      const shown = visibleOptionIndices(level.options, level.entered);
+      let widest = 0;
+      let expandable = false;
+      for (const at of shown) {
+        const option = level.options[at] as SelectOption<T>;
+        widest = Math.max(widest, displayWidth(option.label));
+        if (option.dialog !== undefined) expandable = true;
+      }
+      const measurement = {
+        level,
+        visible: shown,
+        widestLabel: widest,
+        expandable,
+      };
+      const next = [...columnContent.current];
+      next[index] = measurement;
+      columnContent.current = next;
+      return measurement;
+    };
     /** The top select level: every key routes here, and the levels beneath it
      * stay rendered and ignore input until it closes. At most one text leaf
      * can sit on top — nothing pushes above it, since the trigger returns
@@ -294,10 +344,27 @@ export function createSelectView<T>(
       if (!("field" in uppermost)) return uppermost;
       return levels.current[levels.current.length - 2] as SelectLevel<T>;
     };
+    /** The text leaf on top of the stack, if one is open. It holds a level and
+     * a `windowStarts` slot without being a column of the browser: it draws as
+     * its own entry panel beneath the frame, exactly as a collected field does.
+     * Derived here rather than beside the panels it draws, because the viewport
+     * below has to budget the rows that panel takes and index past the slot it
+     * holds. */
+    const uppermost = levels.current[levels.current.length - 1] as
+      | SelectLevel<T>
+      | InputLevel<T>;
+    const leaf = "field" in uppermost ? uppermost : undefined;
     const collectingField = fieldIndex >= 0;
+    /** Whether an entry panel is on screen under the browser, from either of
+     * the two things that put one there. Both spend the frame the same rows, so
+     * both have to be budgeted the same way: a leaf budgeted as if nothing were
+     * under the browser sizes the window against three rows of chrome while the
+     * frame spends six, and the difference is exactly the height at which Ink
+     * reads the output as full-screen and clears the terminal. */
+    const entryOnScreen = collectingField || leaf !== undefined;
     const top = topSelect();
     const topOptions = top.options;
-    const topFiltering = top.filtering;
+    const topFilter = top.filter;
     // Kept across frames rather than recomputed on each: the animation
     // re-renders the view several times a second, and neither the matching nor
     // the width scan below it can change without the filter text changing.
@@ -307,30 +374,42 @@ export function createSelectView<T>(
       () => visibleOptionIndices(topOptions, filterText),
       [topOptions, filterText],
     );
-    /** The widest visible label, in terminal columns.
+    /** What the driven column measures to: the widest visible label in
+     * terminal columns, and whether any visible option leads somewhere, which
+     * is what makes the column reserve the marker on its right edge.
      *
-     * Kept as a running maximum rather than an array spread into `Math.max`:
-     * measuring every visible option makes the argument count the length of the
-     * list rather than the height of the window, and a spread that long throws
-     * `RangeError` on a list a select can plausibly be given — a branch,
-     * plugin, or version list. One pass over the same strings, no intermediate
-     * array, and only when the filter has changed what is visible. */
-    const widestLabel = react.useMemo(() => {
+     * The widest label is kept as a running maximum rather than an array
+     * spread into `Math.max`: measuring every visible option makes the
+     * argument count the length of the list rather than the height of the
+     * window, and a spread that long throws `RangeError` on a list a select
+     * can plausibly be given — a branch, plugin, or version list. One pass
+     * over the same strings, no intermediate array, and only when the filter
+     * has changed what is visible. */
+    const liveMatches = react.useMemo(() => {
       let widest = 0;
+      let expandable = false;
       for (const index of visible) {
-        const { label } = topOptions[index] as SelectOption<T>;
-        widest = Math.max(widest, displayWidth(label));
+        const option = topOptions[index] as SelectOption<T>;
+        widest = Math.max(widest, displayWidth(option.label));
+        if (option.dialog !== undefined) expandable = true;
       }
-      return widest;
+      return { visible, widestLabel: widest, expandable };
     }, [topOptions, visible]);
-    /** The select hint names the expand key exactly while a visible option
-     * declares a sub-dialog, matching the glyph contract in the spec. */
-    const hint = selectHint(
-      topFiltering,
-      visible.some(
-        (index) => (topOptions[index] as SelectOption<T>).dialog !== undefined,
-      ),
-    );
+    /** The option under the bar, which is what the hint describes and what
+     * every key that opens or takes something acts on. */
+    const activeOption =
+      visible[activeIndex] === undefined
+        ? undefined
+        : (topOptions[visible[activeIndex] as number] as SelectOption<T>);
+    /** The filter is on screen once anything has been typed into this column,
+     * and from the start for a caller that asked for it. Filtering itself is
+     * always live, which is why the hint names it whether or not this is set. */
+    const filterShown = filterIsShown(topFilter, filterText);
+    const hint = selectHint({
+      expandable: activeOption?.dialog !== undefined,
+      nested: levels.current.length > 1,
+      expandKey,
+    });
     /** Sync the top select level's runtime state into the stack ref and the
      * render state together: refs answer mid-chunk keys before any
      * re-render, state shows the frame the refs now hold. */
@@ -347,30 +426,23 @@ export function createSelectView<T>(
     };
     // Derived while rendering, and remembered only so the next frame can move
     // each window as little as possible; no window is state of its own.
-    // Deriving the top one against the state the frame is actually in is what
-    // lets it give back rows to the field's panel the moment collection
-    // begins. The shadow row each stacked level above the root adds counts
-    // toward the same budget, so the union of the stacked frames stays
-    // strictly shorter than the terminal; a stack deeper than the budget still
-    // renders the top level with at least one option row, covering whatever
-    // of the lower levels it overlaps.
-    const depth = levels.current.length;
-    const stackedBudget = stackedExtraRows(depth);
-    const topStart = windowStarts.current[depth - 1] ?? 0;
+    // Deriving the driven one against the state the frame is actually in is
+    // what lets it give back rows to the field's panel the moment collection
+    // begins. Every column shares the terminal's rows, because they are
+    // side by side rather than stacked, so no column costs another one a row.
+    /** Where the driven column sits in the stack, which is the top level only
+     * while no text leaf is open: a leaf sits above it and holds a slot of its
+     * own, pushed as a zero. Reading the top slot while one is open would
+     * re-window a scrolled column from that zero and, because the result is
+     * written back, lose the place it was scrolled to for good. */
+    const drivenColumn = levels.current.length - (leaf === undefined ? 1 : 2);
+    const topStart = windowStarts.current[drivenColumn] ?? 0;
     const viewport = optionWindow(
       visible.length,
       activeIndex,
       topStart,
       rows,
-      collectingField,
-      stackedBudget,
-    );
-    // The remembered start, not the rendered one: a terminal too short to draw
-    // the window collapses it to nothing and renders from the top, and storing
-    // that would lose the place the user scrolled to the moment the terminal
-    // grew back.
-    windowStarts.current = windowStarts.current.map((start, index) =>
-      index === depth - 1 ? viewport.rememberedStart : start,
+      entryOnScreen,
     );
     /** Visible options the window has no room for, whichever side of it they
      * fall on: an indicator is on screen exactly while this is positive, and it
@@ -385,7 +457,7 @@ export function createSelectView<T>(
     // with this one, and wake the renderer's shared timer twice an interval.
     const { time, reset } = ink.useAnimation({
       interval: flashing ? flashInterval : animationInterval,
-      isActive: topFiltering || collectingField || flashing || hidden > 0,
+      isActive: filterShown || collectingField || flashing || hidden > 0,
     });
     /** The flash ends on elapsed time reaching its duration, never on a frame
      * number: a tick landing inside the renderer's render throttle is dropped
@@ -427,7 +499,7 @@ export function createSelectView<T>(
       const child: SelectLevel<T> = {
         message: nested.message,
         options: nested.options,
-        filtering: filterIsEnabled(nested.filter, nested.options.length),
+        filter: nested.filter ?? "typed",
         entered: "",
         active: 0,
         collected: current.collected,
@@ -541,23 +613,45 @@ export function createSelectView<T>(
       // and ignores input.
       if ("field" in uppermost) return;
       const current = topSelect();
-      // The trigger is Tab, a key the dialogs never otherwise answer: a
-      // standalone input and a field entry never move focus, and the select
-      // has no focus to move, so no text is lost by answering it. Typed or
-      // pasted text can never open anything — Shift+Tab reports the same
-      // name, so it expands too rather than reaching the filter as text.
-      if (key.tab) {
-        pushSubDialog(current);
-        return;
-      }
       // Read from the level rather than the rendered text: a chunk carrying
       // several keys is handled before any of them has re-rendered.
       const shown = visibleOptionIndices(current.options, current.entered);
+      const chosen = shown[current.active];
+      const option =
+        chosen === undefined
+          ? undefined
+          : (current.options[chosen] as SelectOption<T>);
+      // The columns run left to right, so the arrows that cross them do too:
+      // right opens the column an option leads to, left backs out into the
+      // column that opened this one. They work under either binding, which is
+      // what lets the binding be about Enter alone.
+      //
+      // Tab opens only where the caller has bound it there. Under the Enter
+      // binding it reaches nothing: a standalone input and a field entry never
+      // move focus and the select has no focus to move, and the filter drops
+      // it as the control character it is, so it is simply inert.
+      if (key.rightArrow || (key.tab && expandKey === "tab")) {
+        pushSubDialog(current);
+        return;
+      }
+      if (key.leftArrow) {
+        // Backing out of the leftmost column is backing out of the dialog,
+        // which is Escape's job rather than an arrow's: at the root this does
+        // nothing rather than cancelling.
+        if (levels.current.length > 1) popLevel();
+        return;
+      }
       if (key.return) {
-        const chosen = shown[current.active];
-        // Nothing is visible, so there is nothing to confirm.
-        if (chosen === undefined) return;
-        const option = current.options[chosen] as SelectOption<T>;
+        // Nothing is visible, so there is nothing to open or confirm.
+        if (option === undefined) return;
+        // Under the Enter binding, an option that leads somewhere is opened
+        // rather than taken — which is exactly what the marker on its row
+        // promises, and why the hint on such a row names opening instead of
+        // selecting.
+        if (option.dialog !== undefined && expandKey === "enter") {
+          pushSubDialog(current);
+          return;
+        }
         if (option.fields) {
           collecting.current = { value: option.value, fields: option.fields };
           setFieldIndex(0);
@@ -566,19 +660,18 @@ export function createSelectView<T>(
         }
         return;
       }
-      const moved = movedPosition(
-        key,
-        current.active,
-        shown.length,
-        rows,
-        stackedExtraRows(levels.current.length),
-      );
+      const moved = movedPosition(key, current.active, shown.length, rows);
       if (moved !== undefined) {
         syncTop({ ...current, active: moved });
         // The caret goes back to its visible phase on the frame the movement
         // lands in, matching the filter edit below.
         reset();
-      } else if (current.filtering) {
+      } else {
+        // Typing always filters, at every level and whatever the list's
+        // length. There is no second thing a printable character could mean
+        // here, and a reader who starts typing at a list is asking for exactly
+        // one thing; the setting decides only whether the filter was on screen
+        // before they did.
         const edited = editedText(current.entered, value, key);
         if (edited === current.entered) return;
         // The point of typing is to narrow to the thing you want and press
@@ -657,156 +750,227 @@ export function createSelectView<T>(
      * option that was taken rather than the gap where it was. */
     const barInverted = !flashing || flashOver || onPhase(time, flashInterval);
 
-    const current = top;
-    const renderMessage = current?.message ?? message;
-    const renderOptions = topOptions;
-    const renderFiltering = topFiltering;
-    const uppermost = levels.current[levels.current.length - 1] as
-      | SelectLevel<T>
-      | InputLevel<T>;
-    const leaf = "field" in uppermost ? uppermost : undefined;
-    const depthNow = levels.current.length;
-    const stacked = depthNow > 1;
-    // The fully rendered select level: none while a text leaf sits above its
-    // parent — the parent renders as a minimum like every other covered
-    // level, and the leaf's entry is the top. Otherwise the top select
-    // level, which gets the full treatment and the clamped width below.
-    const fullSelectIndex = leaf !== undefined ? -1 : depthNow - 1;
-    const topSelectIndex = leaf !== undefined ? depthNow - 2 : depthNow - 1;
+    const renderFiltering = filterShown;
     // While a field is collected the entry's own panel follows this one and
     // carries the hints that apply; naming navigation and selection here
     // would name keys the dialog has stopped answering. A text leaf answers
-    // through its own entry the same way. The hint lives on the top panel
-    // only, so stacked parents carry none.
-    const topHint = collectingField || leaf !== undefined ? undefined : hint;
+    // through its own entry the same way — which is the same panel on screen
+    // the viewport is budgeted against, so it is the same predicate.
+    const entryHasKeys = entryOnScreen;
 
-    const panelRows: PanelRow[] = [];
-    if (renderFiltering) {
-      panelRows.push({
-        key: "filter",
-        prefix: `${filterPrompt} `,
-        text: withCaret(filterText, filterCaret),
-        tail: true,
-      });
-    }
-    if (visible.length === 0) {
-      panelRows.push({ key: "no-match", text: noMatch });
-    } else {
-      if (viewport.hiddenAbove > 0) {
-        panelRows.push({
-          key: "hidden-above",
-          text: `${hiddenAboveGlyph} ${viewport.hiddenAbove} more`,
-          // Pulsed between dimmed and normal on the caret's own phase, so an
-          // indicator says "there is more" without a second timer and without
-          // ever being on screen when nothing is hidden.
-          dim: showPhase,
-        });
-      }
-      const windowed = visible.slice(
-        viewport.renderedStart,
-        viewport.renderedStart + viewport.count,
-      );
-      for (const [offset, index] of windowed.entries()) {
-        const option = renderOptions[index] as SelectOption<T>;
-        const position = viewport.renderedStart + offset;
-        panelRows.push({
-          key: `option-${index}`,
-          text: option.label,
-          inverse: position === activeIndex && barInverted,
-        });
-      }
-      if (viewport.hiddenBelow > 0) {
-        panelRows.push({
-          key: "hidden-below",
-          text: `${hiddenBelowGlyph} ${viewport.hiddenBelow} more`,
-          dim: showPhase,
-        });
-      }
-    }
-
-    // The panel is measured over every visible option and over an indicator
-    // carrying the largest count it can ever carry — not over the rows this
-    // frame happens to draw — so scrolling the window does not resize the panel
-    // under the cursor bar. Whatever the window's position, one side or the
-    // other hides exactly the options the window has no room for, so that total
-    // is the widest either indicator ever gets.
-    let content = widestLabel;
-    const measure = (text: string) => {
-      content = Math.max(content, displayWidth(text));
-    };
-    // Measured with the caret's own glyph whatever phase it is on, because the
-    // blank standing in for it is exactly as wide: the panel is sized once for
-    // both.
-    if (renderFiltering) measure(`${filterPrompt} ${filterText}${caretGlyph}`);
-    if (visible.length === 0) measure(noMatch);
-    if (hidden > 0) measure(`${hiddenAboveGlyph} ${hidden} more`);
-    // A stacked panel leaves room for the levels above it: measured against
-    // the columns right of its own offset, so its left edge plus its width
-    // never passes the terminal's edge. A flat dialog sits at offset zero, so
-    // it measures against the whole terminal exactly as today. The extra cut
-    // caps what the frame's own twenty-column floor would otherwise let
-    // through on a narrow terminal; flat dialogs keep that floor.
-    const topAvail = Math.max(
-      1,
-      columns - topSelectIndex * stackedOffsetColumns,
-    );
-    const measured = panelWidth(
-      renderMessage,
-      content,
-      stacked ? topAvail : columns,
-    );
-    const width = stacked ? Math.min(measured, topAvail) : measured;
-    const inner = innerWidth(width);
-    const children: DialogElement[] = panelRows.map((panelRow) =>
-      react.createElement(
-        ink.Text,
-        {
-          key: panelRow.key,
-          dimColor: panelRow.dim ?? false,
-          inverse: panelRow.inverse ?? false,
-          wrap: panelRow.tail ? "truncate-start" : "truncate-end",
-        },
-        panelRow.prefix === undefined
-          ? undefined
-          : react.createElement(
-              ink.Text,
-              { key: "prefix", dimColor: true },
-              panelRow.prefix,
+    // Every select level is a column of one browser. The frame is the root's
+    // and stays the root's however deep the stack goes: a sub-dialog is the
+    // next column of the panel its parent is already in, not a panel of its
+    // own over it. Nothing here is offset, bordered, or shadowed, because
+    // there is nothing to be offset from.
+    const selectLevels = (
+      leaf !== undefined ? levels.current.slice(0, -1) : levels.current
+    ) as readonly SelectLevel<T>[];
+    const laid = selectLevels.map((level, index) => {
+      // The driven column reads live state; the ones behind it are frozen, so
+      // their matching comes from the cache rather than being repeated on the
+      // animation's timer.
+      const driven = index === drivenColumn;
+      const matched = driven ? liveMatches : columnMatches(index, level);
+      return {
+        level,
+        driven,
+        matched,
+        active: driven ? activeIndex : level.active,
+        // Frozen columns keep their bar on; only the driven one blinks it out
+        // while a choice is confirmed.
+        bar: driven ? barInverted : true,
+        viewport: driven
+          ? viewport
+          : optionWindow(
+              matched.visible.length,
+              level.active,
+              windowStarts.current[index] ?? 0,
+              rows,
+              entryOnScreen,
             ),
-        // The bar spans the panel rather than the label, so padding to the
-        // inner width is what makes it a bar at all; truncation then trims a
-        // label too long for the panel back to exactly that width.
-        // Padded in columns, not code units, so the bar spans the panel for a
-        // label the terminal draws wider than its `length`.
-        panelRow.inverse
-          ? panelRow.text.padEnd(
-              panelRow.text.length + inner - displayWidth(panelRow.text),
-            )
-          : panelRow.text,
+      };
+    });
+    // Only the driven column's window is written back. Every column keeps its
+    // own place in its own list, but a frozen one re-derives its window from
+    // the start it already remembers on every frame, so it needs no write of
+    // its own — and taking one would be wrong: the columns share one band, so
+    // an entry panel appearing shrinks the band for all of them, and the start
+    // `optionWindow` moves down to keep a frozen column's active option in a
+    // shorter window is the state of this frame rather than the place that
+    // column was left on. Persisting it would drift the column away from that
+    // place every time the band shrank, and it would never come back.
+    windowStarts.current = windowStarts.current.map((start, index) =>
+      index === drivenColumn ? viewport.rememberedStart : start,
+    );
+
+    const widths = laid.map((column) =>
+      columnWidth(
+        column.matched.widestLabel,
+        column.matched.expandable,
+        column.matched.visible.length === 0,
+      ),
+    );
+    // Running out of room collapses the oldest columns first. The driven
+    // column is the rightmost and is never dropped: it is truncated instead,
+    // like every other row that runs out of columns.
+    const available = availableInnerWidth(columns);
+    const dropped = droppedColumns(widths, available);
+    const shown = laid.slice(dropped);
+    // The last column left is cut back rather than dropped: collapsing stops
+    // at one, and the one being driven has to stay on screen.
+    const shownWidths = fitColumnWidths(widths.slice(dropped), available);
+    // The title names exactly the columns on screen, and says so when earlier
+    // ones have collapsed off its left.
+    const trail = shown.map((column) => column.level.message);
+    const title = (dropped > 0 ? [trailElision, ...trail] : trail).join(
+      ` ${trailSeparator} `,
+    );
+
+    // The columns share one band, so a list of three and a list of thirty
+    // start on the same row. A column whose filter matched nothing spends its
+    // one row saying so. Nothing but option rows is in the band: the filter
+    // and the overflow counts are set into the frame's edges, so neither can
+    // move the list by appearing.
+    const bandRows = shown.reduce(
+      (most, column) =>
+        Math.max(
+          most,
+          column.matched.visible.length === 0 ? 1 : column.viewport.count,
+        ),
+      0,
+    );
+    const driven = shown.at(-1);
+    /** Everything the driven column has off screen, either side of its window
+     * together. It is the largest either count can ever reach, so it is the
+     * room both edges hold for one — held whether a count is showing or not,
+     * because a title that retruncates as the reader scrolls past the first
+     * hidden row is the same restlessness the counts were moved out of the
+     * panel to stop. */
+    const hiddenEitherSide = driven
+      ? driven.matched.visible.length - driven.viewport.count
+      : 0;
+    const edgeReserve =
+      hiddenEitherSide > 0
+        ? displayWidth(` ${indicatorText(hiddenAboveGlyph, hiddenEitherSide)} `)
+        : 0;
+    /** An overflow count set into an edge, or nothing when the driven column
+     * hides nothing on that side. Pulsed between dimmed and normal on the
+     * caret's own phase, so it says "there is more" without a second timer and
+     * without ever being on screen when nothing is hidden. Only the driven
+     * column reports: it is the only one that scrolls, and the columns behind
+     * it are already showing the choice that was made in them. */
+    const overflow = (
+      key: string,
+      glyph: string,
+      count: number,
+    ): readonly FrameSegment[] =>
+      count > 0
+        ? [
+            { key: `${key}-open`, text: " ", dim: true },
+            { key, text: indicatorText(glyph, count), dim: showPhase },
+            { key: `${key}-close`, text: " ", dim: true },
+          ]
+        : [];
+    /** The filter, set into the bottom edge rather than drawn as a row of the
+     * panel. Turning it on as a column that filters is opened would otherwise
+     * push every option row down by one, which is exactly the moment the
+     * reader is looking at the list. */
+    const filterEdge: readonly FrameSegment[] = renderFiltering
+      ? [
+          { key: "prompt", text: ` ${filterPrompt} `, dim: true },
+          { key: "filter", text: withCaret(filterText, filterCaret) },
+          { key: "prompt-close", text: " ", dim: true },
+        ]
+      : [];
+
+    // Sized for its columns, and for whichever of its two edges carries the
+    // most: the title and the filter are both set into one, and both compete
+    // with the count held on its right.
+    const edgeColumns =
+      Math.max(displayWidth(title) + 2, segmentsWidth(filterEdge)) +
+      edgeReserve;
+    const width = panelWidth(
+      title,
+      columnsWidth(shownWidths),
+      columns,
+      edgeColumns,
+    );
+    // Sized last, once the frame's own width is known: whatever the title made
+    // the panel wider by belongs to the last column, so its cursor bar spans
+    // the panel instead of stopping short of it.
+    const drawnWidths = stretchLastColumn(shownWidths, innerWidth(width));
+    const cells = shown.map((column, at) =>
+      columnCells(
+        column.level.options,
+        column.matched.visible,
+        column.viewport,
+        column.active,
+        drawnWidths[at] as number,
+        bandRows,
+        { bar: column.bar },
       ),
     );
 
-    const panel = react.createElement(
-      Frame,
-      {
-        key: "select",
-        title: renderMessage,
-        double: true,
-        width,
-        columns,
-        hint: topHint,
-        hintWidth: stacked ? Math.max(1, topAvail) : undefined,
-      },
-      children,
-    );
+    const panelRows: FrameRow[] = [];
+    for (let row = 0; row < bandRows; row += 1) {
+      const segments: FrameSegment[] = [];
+      for (const [at, column] of cells.entries()) {
+        if (at > 0) {
+          segments.push({
+            key: `divider-${at}`,
+            text: ` ${columnDivider} `,
+            dim: true,
+          });
+        }
+        const drawn = column[row];
+        // A column with nothing on this row still spends its columns on it, so
+        // the column after it starts where the ones above and below it do.
+        segments.push(
+          drawn === undefined
+            ? {
+                key: `cell-${at}`,
+                text: " ".repeat(drawnWidths[at] as number),
+              }
+            : {
+                key: `cell-${at}`,
+                text: drawn.text,
+                dim: drawn.dim,
+                inverse: drawn.inverse,
+              },
+        );
+      }
+      panelRows.push({ key: `band-${row}`, segments });
+    }
+
+    const panel = react.createElement(Frame, {
+      key: "select",
+      title,
+      double: true,
+      width,
+      columns,
+      hint: entryHasKeys ? undefined : hint,
+      topRight: overflow(
+        "hidden-above",
+        hiddenAboveGlyph,
+        driven?.viewport.hiddenAbove ?? 0,
+      ),
+      bottomLeft: filterEdge,
+      // What has been typed keeps its end and its caret when it runs longer
+      // than the edge.
+      bottomLeftTail: true,
+      edgeReserve,
+      bottomRight: overflow(
+        "hidden-below",
+        hiddenBelowGlyph,
+        driven?.viewport.hiddenBelow ?? 0,
+      ),
+      rows: panelRows,
+    });
     let fieldPanel: DialogElement | undefined;
     if (collectingField) {
-      // A stacked field entry measures against the columns right of its own
-      // offset, so its frame never passes the terminal's edge; a flat one
-      // measures against the whole terminal exactly as today.
       const collection = collecting.current as Collection<T>;
       const pending = collection.fields[fieldIndex] as TextField;
-      const entryIndex = stacked ? depthNow : 0;
       fieldPanel = react.createElement(Entry, {
         key: `field-${fieldIndex}`,
         message: pending.message,
@@ -821,20 +985,20 @@ export function createSelectView<T>(
         onCancel: () => {
           if (collecting.current) cancel();
         },
-        availableColumns: stacked
-          ? Math.max(1, columns - entryIndex * stackedOffsetColumns)
-          : undefined,
-        onMeasure: (measured) => {
-          entryWidths.current[entryIndex] = measured;
-        },
+        // Keyed on the same condition the main handler branches on above, so
+        // the line and the key cannot drift apart: where that handler pops,
+        // Escape backs out of the collection's column and the entry's own
+        // handler never runs; where it cancels, so does this.
+        escapeAction: levels.current.length > 1 ? "back" : "cancel",
       });
     } else if (leaf !== undefined) {
       // A text leaf reuses the existing entry logic: its editing is the same
       // implementation a standalone input and a collected field use. Its
       // cancel pops one level rather than cancelling the session, so Escape
-      // above the root and Escape on a leaf stay distinct.
+      // above the root and Escape on a leaf stay distinct. It is a panel under
+      // the browser rather than a column in it, because a column is a list and
+      // this is a line being typed into.
       const activeLeaf = leaf;
-      const entryIndex = stacked ? depthNow - 1 : 0;
       fieldPanel = react.createElement(Entry, {
         key: "leaf",
         message: activeLeaf.field.message,
@@ -843,178 +1007,17 @@ export function createSelectView<T>(
         onEdit: reset,
         onSubmit: (value: string) => submitLeaf(activeLeaf, value),
         onCancel: () => popLevel(),
-        availableColumns: stacked
-          ? Math.max(1, columns - entryIndex * stackedOffsetColumns)
-          : undefined,
-        onMeasure: (measured) => {
-          entryWidths.current[entryIndex] = measured;
-        },
+        // A leaf is only ever pushed over the select that opened it, so it is
+        // never at the leftmost level and that pop always pops: Escape here
+        // backs out and never cancels.
+        escapeAction: "back",
       });
-    }
-    if (!stacked) {
-      return react.createElement(
-        ink.Box,
-        { flexDirection: "column" },
-        panel,
-        fieldPanel,
-      );
-    }
-    // Every level below the top renders at minimum: no filter row, no
-    // overflow indicators, exactly the one active option row, in its full
-    // double-line frame. The top level renders fully as above, and a text
-    // leaf's entry renders as itself above that. Each sits one row down and
-    // one offset right of its parent, with a dimmed block-fill shadow behind
-    // every panel above the root.
-    const panels: StackedPanel[] = [];
-    const selectLevels =
-      leaf !== undefined ? levels.current.slice(0, -1) : levels.current;
-    for (const [index, level] of selectLevels.entries()) {
-      if (index === fullSelectIndex) {
-        panels.push({
-          element: panel,
-          index,
-          width,
-          panelHeight: panelRows.length + 2,
-          levelHeight: panelRows.length + 2 + (topHint !== undefined ? 1 : 0),
-        });
-        continue;
-      }
-      // The parent's filter text and active position froze when this level
-      // was pushed — pushing needs a visible option to open — so the active
-      // position still names a visible option and the minimum is exactly its
-      // row.
-      const parent = level as SelectLevel<T>;
-      const shown = visibleOptionIndices(parent.options, parent.entered);
-      const at = Math.min(parent.active, shown.length - 1);
-      const labelled = parent.options[shown[at] as number] as SelectOption<T>;
-      const minimumText = labelled.label;
-      const avail = Math.max(1, columns - index * stackedOffsetColumns);
-      const minimumWidth = Math.min(
-        panelWidth(parent.message, displayWidth(minimumText), avail),
-        avail,
-      );
-      const inner = innerWidth(minimumWidth);
-      panels.push({
-        element: react.createElement(
-          Frame,
-          {
-            key: `select-${index}`,
-            title: parent.message,
-            double: true,
-            width: minimumWidth,
-            columns,
-            hint: undefined,
-          },
-          // The retained row keeps the active bar it had when the child
-          // opened: inverted and padded across the minimum's inner width,
-          // exactly as the top level's own bar spans its panel.
-          react.createElement(
-            ink.Text,
-            { key: "option", wrap: "truncate-end", inverse: true },
-            minimumText.padEnd(
-              minimumText.length + inner - displayWidth(minimumText),
-            ),
-          ),
-        ),
-        index,
-        width: minimumWidth,
-        panelHeight: 3,
-        levelHeight: 3,
-      });
-    }
-    if (fieldPanel !== undefined) {
-      // The shadow is cut to the entry's own frame. The entry reports its
-      // measured width through the callback above; until that first report
-      // lands, the remaining columns are the bound. The callback fires after
-      // render without re-rendering, so the shadow tightens on the frame
-      // after the entry's first paint — one frame of overhang at most.
-      const entryIndex = leaf !== undefined ? depthNow - 1 : depthNow;
-      const recorded = entryWidths.current[entryIndex];
-      const entryWidth = Math.max(
-        1,
-        recorded ?? columns - entryIndex * stackedOffsetColumns,
-      );
-      panels.push({
-        element: fieldPanel,
-        index: entryIndex,
-        width: entryWidth,
-        panelHeight: 3,
-        levelHeight: 4,
-      });
-    }
-    // The union of the offset frames: each panel's bottom plus one shadow row
-    // above the root, clamped strictly shorter than the terminal. Clamping
-    // may cover lower levels entirely; the top keeps its viewport row. The
-    // container clips, because absolutely positioned panels would otherwise
-    // paint past its height, and each offset is clamped, because a deep
-    // stack's own margin would otherwise push it past the terminal's edge.
-    let union = 0;
-    for (const sized of panels) {
-      union = Math.max(
-        union,
-        sized.index +
-          sized.levelHeight +
-          (sized.index > 0 ? stackedShadowRows : 0),
-      );
-    }
-    const unionHeight = Math.min(union, Math.max(1, rows - 1));
-    const placed: DialogElement[] = [];
-    for (const stackedPanel of panels) {
-      const left = Math.min(
-        stackedPanel.index * stackedOffsetColumns,
-        Math.max(0, columns - 1),
-      );
-      const top = Math.min(stackedPanel.index, Math.max(0, unionHeight - 1));
-      if (stackedPanel.index > 0) {
-        const filler = "█".repeat(stackedPanel.width);
-        const shadowRows: DialogElement[] = [];
-        for (let row = 0; row < stackedPanel.panelHeight; row += 1) {
-          shadowRows.push(
-            react.createElement(
-              ink.Text,
-              { key: `shade-${row}`, dimColor: true, wrap: "truncate-end" },
-              filler,
-            ),
-          );
-        }
-        placed.push(
-          react.createElement(
-            ink.Box,
-            {
-              key: `shadow-${stackedPanel.index}`,
-              position: "absolute",
-              marginTop: Math.min(top + 1, Math.max(0, unionHeight - 1)),
-              marginLeft: Math.min(left + 1, Math.max(0, columns - 1)),
-              width: stackedPanel.width,
-              flexDirection: "column",
-            },
-            shadowRows,
-          ),
-        );
-      }
-      placed.push(
-        react.createElement(
-          ink.Box,
-          {
-            key: `level-${stackedPanel.index}`,
-            position: "absolute",
-            marginTop: top,
-            marginLeft: left,
-          },
-          stackedPanel.element,
-        ),
-      );
     }
     return react.createElement(
       ink.Box,
-      {
-        position: "relative",
-        flexDirection: "column",
-        width: columns,
-        height: unionHeight,
-        overflow: "hidden",
-      },
-      placed,
+      { flexDirection: "column" },
+      panel,
+      fieldPanel,
     );
   };
 }
