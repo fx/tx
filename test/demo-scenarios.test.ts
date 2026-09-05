@@ -422,6 +422,13 @@ describe("presenting a scenario", () => {
         expect(prints).toEqual([]);
         expect(written()).toBe("");
         const first = scenario.request.rows[0];
+        // `toEqual` reads a key holding `undefined` as one that is not there,
+        // so this pins what the two halves are and not whether `action` is
+        // present — which is what says a row offered none. It is sound here
+        // because this row declares actions; repointed at one that does not,
+        // it would silently stop testing what it looks like it tests. Where
+        // the presence itself is the subject, it is asserted with `"action"
+        // in` — see test/grid-select.test.ts.
         expect(result).toEqual({
           value: first?.value,
           action: first?.actions?.[0]?.value,
