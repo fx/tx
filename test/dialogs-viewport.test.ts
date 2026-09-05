@@ -400,12 +400,17 @@ describe("a column that draws a header", () => {
     expect(optionRowCount(30, 12, true, true)).toBe(4);
   });
 
-  /** A terminal that can afford one row and a header can afford neither: a
-   * header over a list with nothing in it is a list the reader cannot use, and
-   * drawing both is the row that would clear the screen. */
-  test("draws nothing where the terminal affords the header alone", () => {
+  /** Where the terminal affords one row and no more, the floor wins over the
+   * header: the row goes to the option. A header over a list the reader cannot
+   * see names fields that are not on screen, and a column that declared one
+   * would otherwise show nothing at all where a column that did not shows a
+   * choice. */
+  test("gives its last row to an option rather than to the header", () => {
     expect(optionRowCount(30, 5, false, false)).toBe(1);
-    expect(optionRowCount(30, 5, false, true)).toBe(0);
+    expect(optionRowCount(30, 5, false, true)).toBe(1);
+    // The header comes back with the second row the terminal can afford.
+    expect(optionRowCount(30, 6, false, true)).toBe(1);
+    expect(optionRowCount(30, 7, false, true)).toBe(2);
   });
 
   /** The window is derived through the same count, so a header shortens what a
@@ -439,16 +444,33 @@ describe("what the band can afford", () => {
     expect(affordsBandRows(2, rows, false)).toBe(false);
   });
 
-  /** Consistent with the count, so a window that was granted its rows is never
-   * then told the band cannot hold them. */
+  /**
+   * Consistent with the count, so a window granted its rows is never then told
+   * the band cannot hold them, and the header is drawn exactly where the count
+   * charged for it.
+   *
+   * The two decisions are made in different places — the count sizes the
+   * window, the band decides whether the header is drawn over it — so what
+   * ties them together is that both read the same affordable height. A header
+   * charged for and then not drawn would leave a column one option short for
+   * nothing; one drawn without being charged for is the row that takes the
+   * frame to the terminal's own height.
+   */
   test("affords every window the option count granted", () => {
-    for (const terminal of [5, 6, 9, 14, 40]) {
+    for (const terminal of [5, 6, 7, 9, 14, 40]) {
       for (const header of [false, true]) {
-        const count = optionRowCount(30, terminal, false, header);
-        if (count === 0) continue;
-        expect(affordsBandRows(count + (header ? 1 : 0), terminal, false)).toBe(
-          true,
-        );
+        for (const visible of [1, 3, 30]) {
+          const count = optionRowCount(visible, terminal, false, header);
+          if (count === 0) continue;
+          expect(affordsBandRows(count, terminal, false)).toBe(true);
+          // A declared header is drawn exactly where the band can hold a
+          // second row, which is exactly where the count charged for it.
+          if (header) {
+            expect(affordsBandRows(count + 1, terminal, false)).toBe(
+              affordsBandRows(2, terminal, false),
+            );
+          }
+        }
       }
     }
   });

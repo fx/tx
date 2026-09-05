@@ -5533,6 +5533,45 @@ describe("aligned cells and headers", () => {
     expect(emptied.join("\n")).not.toContain("Version");
   });
 
+  /**
+   * The viewport's one-row floor outranks the header. A terminal with one band
+   * row to give spends it on an option: a column that declared a header would
+   * otherwise show nothing at all where a column that did not shows a choice,
+   * and a header over a list the reader cannot see names fields that are not
+   * on screen.
+   */
+  test("keeps its last option row rather than spending it on the header", async () => {
+    const short = selectChromeHeight + 2;
+    let open: readonly string[] = [];
+    const result = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: releases, headers: HEADERS },
+      [
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes("1.6.1"));
+          open = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+      terminalOfRows(short),
+    );
+
+    expect(result.value).toBe("1.6.1");
+    expect(open.length).toBeLessThan(short);
+    expect(open.join("\n")).toContain("1.6.1");
+    expect(open.join("\n")).not.toContain("Version");
+    // The header comes back with the second row the terminal can afford, and
+    // costs the list one option there.
+    const taller = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: releases, headers: HEADERS },
+      [CARRIAGE_RETURN],
+      terminalOfRows(short + 2),
+    );
+    const rendered = frameRows(taller.stderr);
+    expect(rendered[1]).toContain("Version");
+    expect(rendered[2]).toContain("1.6.1");
+    expect(rendered.length).toBeLessThan(short + 2);
+  });
+
   /** A cell option leading somewhere is marked exactly as a label option is:
    * on the column's right edge, past the last field. */
   test("marks a cell row that opens a sub-dialog", async () => {

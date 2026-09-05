@@ -85,16 +85,27 @@ export function optionRowCount(
    * not an option row. It costs the window one of the rows it had, and it
    * costs it against both bounds: against the terminal, because the row is
    * drawn inside the same frame, and against the ceiling, because a band
-   * eleven rows tall is exactly the height the ceiling is there to hold. */
+   * eleven rows tall is exactly the height the ceiling is there to hold.
+   *
+   * The one row a terminal can still afford is the exception, and the floor is
+   * what wins there: a band with room for one row spends it on the option
+   * rather than on the header, because a header over a list the reader cannot
+   * see names fields that are not on screen, and a column that declared one
+   * would otherwise show nothing at all where a column that did not shows a
+   * choice. The header comes back with the second row. */
   header = false,
 ): number {
   if (visibleCount < 1) return 0;
-  const headerRows = header ? 1 : 0;
-  const affordable = affordableBandRows(terminalRows, collecting) - headerRows;
+  const affordable = affordableBandRows(terminalRows, collecting);
   if (affordable < 1) return 0;
+  const headerRows = header && affordable > 1 ? 1 : 0;
   return Math.max(
     1,
-    Math.min(maximumOptionRows - headerRows, affordable, visibleCount),
+    Math.min(
+      maximumOptionRows - headerRows,
+      affordable - headerRows,
+      visibleCount,
+    ),
   );
 }
 
