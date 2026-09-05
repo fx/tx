@@ -221,7 +221,10 @@ describe("demo catalogue", () => {
             row.every((text) => text !== undefined && text !== ""),
           ),
         ).toBe(true);
-        // Nothing is listed twice, and no two options carry the same value.
+        // Nothing is listed twice, and no two options carry the same value —
+        // the catalogue's curation on the same terms as the interactive
+        // grid's below, and not something a select requires either: [Dialogs:
+        // Selection] returns a value by exact identity and retains duplicates.
         const drawn = rows.map((row) => row.join("|"));
         expect(new Set(drawn).size).toBe(drawn.length);
         const values = options.map((option) => option.value);
@@ -288,6 +291,15 @@ describe("demo catalogue", () => {
     (_, request) => {
       expect(request.message).not.toBe("");
       expect(request.rows.length).toBeGreaterThan(0);
+      // This and the action-value check below are the catalogue's own
+      // curation rather than a grid requirement. A demo listing two rows, or
+      // two actions, that mean the same thing would be confusing to read, so
+      // the catalogue does not — but the capability itself does not care: a
+      // selection is carried back by position, so nothing about a consumer's
+      // values has to be unique, comparable, or hashable, and
+      // test/grid-select.test.ts pins two rows sharing one value resolving
+      // distinctly. A scenario that deliberately reused one would be changing
+      // this rule, not breaking the grid's.
       const values = request.rows.map((row) => row.value);
       expect(new Set(values).size).toBe(values.length);
       for (const row of request.rows) {
@@ -303,6 +315,8 @@ describe("demo catalogue", () => {
         for (const action of row.actions ?? []) {
           expect(action.label).not.toBe("");
         }
+        // The catalogue's curation again, on the terms the row values above
+        // are held to, and not something the grid asks of an action.
         const actionValues = (row.actions ?? []).map((action) => action.value);
         expect(new Set(actionValues).size).toBe(actionValues.length);
       }
