@@ -535,42 +535,44 @@ A row's `actions` are the sub-dialog that row opens, so acting on a row is the d
 Once the promise settles, the terminal is yours. `select` does not settle until the dialog has restored the terminal and unmounted its renderer, on completion, cancellation, and failure alike, so the process you start next finds no raw mode, no input handler the grid installed, and nothing further written by it. Standard output is untouched throughout, so your own output and a launched process's are the only things on it. That is the one thing about the capability you cannot read off a type signature, and it is why the whole shape is worth writing out:
 
 ```ts
-command((namespace) =>
-  namespace.action(async () => {
-    const [grid] = registrations<Grid>("grid")
-    if (!grid) throw new Error("grid capability missing")
+const plugin: Plugin = ({ command, context, registrations }) => {
+  command((namespace) => {
+    namespace.action(async () => {
+      const [grid] = registrations<Grid>("grid");
+      if (!grid) throw new Error("grid capability missing");
 
-    const chosen = await grid.select({
-      message: "Pick a service",
-      headers: ["SERVICE", "STATE"],
-      rows: services.map((service) => ({
-        cells: [service.name, service.state],
-        value: service,
-        // Computed per row, so a retired service offers none while its
-        // neighbours offer two. An empty list is not a rejected request.
-        actions:
-          service.state === "retired"
-            ? []
-            : [
-                { label: "connect", value: "connect" as const },
-                { label: "open logs", value: "logs" as const },
-              ],
-      })),
-    })
-    if (!chosen) return
-    if (chosen.action === undefined) {
-      context.stdout.write(`${chosen.value.name}\n`)
-      return
-    }
+      const chosen = await grid.select({
+        message: "Pick a service",
+        headers: ["SERVICE", "STATE"],
+        rows: services.map((service) => ({
+          cells: [service.name, service.state],
+          value: service,
+          // Computed per row, so a retired service offers none while its
+          // neighbours offer two. An empty list is not a rejected request.
+          actions:
+            service.state === "retired"
+              ? []
+              : [
+                  { label: "connect", value: "connect" as const },
+                  { label: "open logs", value: "logs" as const },
+                ],
+        })),
+      });
+      if (!chosen) return;
+      if (chosen.action === undefined) {
+        context.stdout.write(`${chosen.value.name}\n`);
+        return;
+      }
 
-    // The dialog is gone and the terminal is back to what it was, so this
-    // process gets the user's keystrokes and leaves the terminal unbroken.
-    const command = chosen.action === "logs" ? "journalctl" : "ssh"
-    Bun.spawnSync([command, chosen.value.host], {
-      stdio: ["inherit", "inherit", "inherit"],
-    })
-  }),
-)
+      // The dialog is gone and the terminal is back to what it was, so this
+      // process gets the user's keystrokes and leaves the terminal unbroken.
+      const executable = chosen.action === "logs" ? "journalctl" : "ssh";
+      Bun.spawnSync([executable, chosen.value.host], {
+        stdio: ["inherit", "inherit", "inherit"],
+      });
+    });
+  });
+};
 ```
 
 Running, spawning, and supervising a process are the consumer's, not the grid's: it reports a chosen row and a chosen action and never runs, spawns, names, or interprets one. Returning to the rows after you have acted — the file-manager loop — is not offered; call `select` again if you want it.
