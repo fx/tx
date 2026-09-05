@@ -5534,6 +5534,40 @@ describe("aligned cells and headers", () => {
   });
 
   /**
+   * The `no match` row is a row of the band like any other, so it asks the
+   * band for its row rather than taking one. A terminal that cannot afford a
+   * band row at all gets none — a row taken anyway would be the row that takes
+   * the frame to the terminal's own height, which is what Ink reads as
+   * full-screen and answers by clearing what was on screen before the dialog
+   * opened. The frame still draws its edges, still answers keys, and still
+   * cancels on the choice it can no longer draw.
+   */
+  test("draws no `no match` row in a terminal that cannot afford one", async () => {
+    let emptied: readonly string[] = [];
+    const result = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: releases, headers: HEADERS },
+      [
+        "zzz",
+        async (stderr) => {
+          await until(() => stderr.text().includes("zzz"));
+          emptied = frameRows(stderr);
+        },
+        ESCAPE,
+      ],
+      // Pinned as a literal rather than as the chrome constant plus one: a
+      // bound written in terms of the number under test moves with it, and a
+      // constant that grew would keep passing here instead of failing.
+      terminalOfRows(4),
+    );
+
+    expect(result.value).toBeUndefined();
+    expect(emptied.join("\n")).not.toContain(noMatchRow);
+    expect(emptied.join("\n")).not.toContain("Version");
+    expect(emptied.length).toBe(3);
+    expect(emptied.length).toBeLessThan(4);
+  });
+
+  /**
    * The viewport's one-row floor outranks the header. A terminal with one band
    * row to give spends it on an option: a column that declared a header would
    * otherwise show nothing at all where a column that did not shows a choice,

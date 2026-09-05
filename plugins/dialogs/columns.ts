@@ -369,6 +369,12 @@ export function columnCells<T>(
 ): readonly (ColumnCell | undefined)[] {
   const cells: (ColumnCell | undefined)[] = [];
   for (let row = 0; row < bandRows; row += 1) cells.push(undefined);
+  // A band of no rows is a terminal that could not afford one, and nothing
+  // this column has to say is worth a row nobody budgeted for — not its
+  // header, and not the row it would otherwise spend saying that its filter
+  // matched nothing. Returning early keeps what this function hands back
+  // exactly as long as the band it was asked for.
+  if (bandRows === 0) return cells;
   // Fitted once for the whole column rather than per row: the marker's reserve
   // is the column's, so an unmarked row among marked ones lays its cells into
   // the same fields and simply spends the marker's columns on padding.

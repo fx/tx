@@ -1091,6 +1091,31 @@ describe("a column's header row", () => {
     expect(cells).toEqual([]);
   });
 
+  /** A band with no rows is a terminal that could not afford one, so a column
+   * whose filter matched nothing spends no row saying so either: a column that
+   * added a row of its own would be drawing one nothing budgeted for, and the
+   * band it returns would be longer than the one it was asked for. */
+  test("says nothing at all when the band has no row to say it in", () => {
+    expect(
+      columnCells(
+        list,
+        [],
+        window(0, 0, 0),
+        0,
+        width,
+        0,
+        DRIVEN,
+        layout(fields, headers),
+      ),
+    ).toEqual([]);
+    // The same holds for a column of labels, which has no header to give up
+    // first and so is the shorter way to the same row.
+    const labels = options("one", "two");
+    expect(columnCells(labels, [], window(0, 0, 0), 0, 6, 0, DRIVEN)).toEqual(
+      [],
+    );
+  });
+
   /** An empty header list is a column saying it has none, which is what
    * omitting it says too. */
   test("is absent for a column declaring no headers", () => {

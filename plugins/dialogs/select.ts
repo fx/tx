@@ -909,16 +909,21 @@ export function createSelectView<T>(
     // or the one row a column whose filter matched nothing spends saying so,
     // plus the header it declared.
     //
-    // The header is decided here rather than inside the column, because it is
-    // the frame's height that decides it. A column drawing nothing draws no
-    // header, and a band with no room for another row gives the header up
-    // rather than taking the frame to the terminal's own height, which is what
-    // Ink reads as full-screen and answers by clearing the screen. The option
-    // rows were budgeted against a header already; the `no match` row was not,
-    // because it is not an option row and `optionRowCount` never counted it.
+    // Every row here is weighed against the same budget before it is drawn.
+    // The option rows were weighed by `optionRowCount`, which sized the window
+    // and charged it for a header where one is declared. The other two rows
+    // are the ones that count never saw, so they ask the band themselves: the
+    // `no match` row, which is not an option row, and the header drawn over
+    // it. A row taken without being weighed is the row that takes the frame to
+    // the terminal's own height, which is what Ink reads as full-screen and
+    // answers by clearing what was on screen before the dialog opened.
     const bands = shown.map((column) => {
       const drawn =
-        column.matched.visible.length === 0 ? 1 : column.viewport.count;
+        column.matched.visible.length === 0
+          ? affordsBandRows(1, rows, entryOnScreen)
+            ? 1
+            : 0
+          : column.viewport.count;
       const header =
         drawn > 0 &&
         drawsHeader(column.level) &&
