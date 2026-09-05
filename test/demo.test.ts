@@ -88,9 +88,7 @@ function stubGrid(asked: Asked[]): PluginDefinition {
               kind: "rows",
               request: request as unknown as GridSelectRequest<string, string>,
             });
-            const [first] = request.rows;
-            if (!first) throw new Error("an interactive grid with no rows");
-            return { value: first.value } as GridSelection<T, A>;
+            return firstSelection(request);
           },
         });
       },
@@ -142,6 +140,31 @@ function firstRow(request: SelectRequest<unknown>): SelectResult<unknown> {
   return { value: first.value, values: {} };
 }
 
+/**
+ * The answer the real grid gives when the person takes the first row.
+ *
+ * Which action it takes is arbitrary; that it takes one at all is not. A row
+ * declaring actions opens them rather than resolving, so it can only complete
+ * on one of them — a selection carrying that row's value and no action is a
+ * shape the capability cannot produce for it, and a stub answering that way
+ * would have the runner asserted against an output that can never occur. A row
+ * declaring none resolves on the row alone, and says so by carrying no
+ * `action` key rather than one holding `undefined`.
+ *
+ * The stub and the expectation both go through this, so the two cannot come to
+ * disagree about what the capability would have said.
+ */
+function firstSelection<T, A>(
+  request: GridSelectRequest<T, A>,
+): GridSelection<T, A> {
+  const [first] = request.rows;
+  if (!first) throw new Error("an interactive grid with no rows");
+  const [action] = first.actions ?? [];
+  return action === undefined
+    ? { value: first.value }
+    : { value: first.value, action: action.value };
+}
+
 describe("the demo runner", () => {
   test("presents every scenario in order when given none", async () => {
     const asked: Asked[] = [];
@@ -168,7 +191,7 @@ describe("the demo runner", () => {
           if (scenario.kind === "grid") return "";
           if (scenario.kind === "input") return reported(name, "spring");
           if (scenario.kind === "rows") {
-            return reported(name, { value: scenario.request.rows[0]?.value });
+            return reported(name, firstSelection(scenario.request));
           }
           return reported(name, firstRow(scenario.request));
         })
