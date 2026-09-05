@@ -6,9 +6,11 @@
 |------|-------------|--------|
 | [Architecture](specs/architecture/) | Generic core runtime, neutral composition, packaging, and development conventions for tx. | active |
 | [Plugin System](specs/plugin-system/) | Generic plugin hosting, opaque capability registration, and externalized marketplace-plugin ownership contracts. | active |
-| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, text input composed through user-provided options, and a greyscale Norton Commander presentation. | active |
+| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, aligned multi-cell option rows with headers, text input composed through user-provided options, and a themed Norton Commander presentation. | active |
 | [Updates](specs/updates/) | User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited. | active |
 | [Config](specs/config/) | Shared per-user JSON config persistence supplied by a bundled plugin, covering validated key definition, reads, writes, and atomic storage. | active |
+| [Theming](specs/theming/) | Named appearance variables supplied by a bundled plugin, covering the default greyscale Norton Commander theme, plugin overrides, and colour enablement. | active |
+| [Grid](specs/grid/) | Aligned cell layout supplied by a bundled plugin, covering table and flowed presentations, one-shot printing, interactive row selection, and row actions. | active |
 
 ## Changes
 
@@ -37,3 +39,9 @@
 | 0021 | [Restyle Dialogs as Norton Commander](changes/0021-restyle-dialogs-as-norton-commander.md) | [Dialogs](specs/dialogs/) | complete | 0020 |
 | 0022 | [Exempt and Verify the tx Self-Update](changes/0022-exempt-and-verify-the-tx-self-update.md) | [Updates](specs/updates/) | complete | 0015 |
 | 0023 | [Render Sub-Dialogs as Columns](changes/0023-render-sub-dialogs-as-columns.md) | [Dialogs](specs/dialogs/) | complete | 0021 |
+| 0024 | [Relocate and Cover the Demo](changes/0024-relocate-and-cover-the-demo.md) | [Architecture](specs/architecture/) | draft | — |
+| 0025 | [Guarantee Cell Width by Construction](changes/0025-guarantee-cell-width-by-construction.md) | [Dialogs](specs/dialogs/) | draft | — |
+| 0026 | [Add Theme Variables](changes/0026-add-theme-variables.md) | [Theming](specs/theming/) | draft | — |
+| 0027 | [Add Multi-Cell Select Rows](changes/0027-add-multi-cell-select-rows.md) | [Dialogs](specs/dialogs/) | draft | 0025 |
+| 0028 | [Add the Grid Plugin](changes/0028-add-the-grid-plugin.md) | [Grid](specs/grid/) | draft | 0026 |
+| 0029 | [Add Interactive Grid Row Actions](changes/0029-add-interactive-grid-row-actions.md) | [Grid](specs/grid/) | draft | 0027, 0028 |
