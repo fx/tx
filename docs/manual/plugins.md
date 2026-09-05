@@ -530,7 +530,7 @@ Printing writes to the stream on the request and never to the process's own stan
 
 Every row carries the value that identifies it, so a row you cannot identify is unrepresentable rather than rejected, and there is no list running parallel to the rows to fall out of step with them. Rows are padded to the grid's column count with the same `—` a printed one uses, so a set of rows differing in cell count is laid out rather than rejected. A cell's declared `variable` and `align` do not survive: a select takes an option's cells as display text and draws its cursor bar as the inversion alone, so every cell of a selectable row is drawn as `content` whatever role it declared. Put a row's state in a cell's text where it has to be visible while selecting.
 
-A row's `actions` are the sub-dialog that row opens, so acting on a row is the drilling sub-dialog columns already own rather than a second mechanism beside it — Enter or → opens the actions of the row under the bar, ← or Esc backs out to the rows, and no key is introduced. Actions are declared per row, so two rows may offer different ones; an empty list means the row declares none, exactly as omitting it does, and such a row is taken by Enter and resolves on the row alone. A selection reports both halves — the chosen row's `value` and the chosen `action` — so you never reconstruct one from the other. An absent `action` means the chosen row offered none: backing out of an actions column returns to the rows rather than selecting the row without one.
+A row's `actions` are the sub-dialog that row opens, so acting on a row is the drilling sub-dialog columns already own rather than a second mechanism beside it — Enter or → opens the actions of the row under the bar, ← or Esc backs out to the rows, and no key is introduced. Actions are declared per row, so two rows may offer different ones; an empty list means the row declares none, exactly as omitting it does, and such a row is taken by Enter and resolves on the row alone. A selection reports both halves — the chosen row's `value` and the chosen `action` — so you never reconstruct one from the other. An absent `action` means the chosen row offered none: backing out of an actions column returns to the rows rather than selecting the row without one. **Absent means the key is not there, so test it with `"action" in chosen` rather than `chosen.action === undefined`.** An action's value is yours and is never inspected, so `undefined` is a value you may legitimately give one; a selection carrying it is a row that offered actions and had one taken, which the equality test would misread as a row that offered none. The grid never writes the key it does not mean.
 
 Once the promise settles, the terminal is yours. `select` does not settle until the dialog has restored the terminal and unmounted its renderer, on completion, cancellation, and failure alike, so the process you start next finds no raw mode, no input handler the grid installed, and nothing further written by it. Standard output is untouched throughout, so your own output and a launched process's are the only things on it. That is the one thing about the capability you cannot read off a type signature, and it is why the whole shape is worth writing out:
 
@@ -558,8 +558,14 @@ const plugin: Plugin = ({ command, context, registrations }) => {
                 ],
         })),
       });
-      if (!chosen) return;
-      if (chosen.action === undefined) {
+      // Nothing chosen at all: the reader cancelled.
+      if (chosen === undefined) return;
+      // Which of the two answers this is, is said by whether the key is
+      // there — not by what it holds. An action's value is your own, so
+      // `undefined` is a value you may legitimately give an action, and
+      // `chosen.action === undefined` would then read a row that offered
+      // actions and had one taken as a row that offered none.
+      if (!("action" in chosen)) {
         context.stdout.write(`${chosen.value.name}\n`);
         return;
       }

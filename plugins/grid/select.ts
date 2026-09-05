@@ -35,9 +35,19 @@ import type {
  * come back whole.
  */
 
-/** What the grid carries through the dialog in place of the consumer's own
+/**
+ * What the grid carries through the dialog in place of the consumer's own
  * value: which row the choice was made on, and — where the choice was made in
- * that row's actions column — which action it was. */
+ * that row's actions column — which action it was.
+ *
+ * Both fields are the grid's own indices rather than anything a consumer
+ * supplied, which is what makes `action === undefined` a safe reading of "no
+ * action was chosen" here: this module is the only writer, and it never writes
+ * the key without a number in it. That reasoning does not carry over to the
+ * selection this produces, whose `action` holds a consumer's own value —
+ * `undefined` included, where a consumer chose it — so there the absence is
+ * said by the key not being there at all.
+ */
 export type RowChoice = {
   readonly row: number;
   readonly action?: number;
@@ -122,6 +132,11 @@ export function selectRequest<T, A>(
  * Both come back from the request the caller supplied rather than from
  * anything reconstructed, so a consumer never has to infer one from the other
  * and nothing about its values has to be re-identified.
+ *
+ * A row taken without an action gets a selection with no `action` key rather
+ * than one holding `undefined`, because that key is where a consumer's own
+ * action value lands and `undefined` is a value a consumer may choose. Absence
+ * is therefore said by the key, and a consumer reads it with `"action" in`.
  */
 export function selection<T, A>(
   request: GridSelectRequest<T, A>,
