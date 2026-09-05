@@ -247,7 +247,7 @@ changes:
     path: changes/0028-add-the-grid-plugin.md
     description: Add a bundled grid plugin supplying aligned table and flowed cell layouts that print once and terminate, with sanitized cells, display-width measurement, and themed appearances.
     spec: grid
-    status: draft
+    status: complete
     depends_on:
       - "0026"
   - id: "0029"

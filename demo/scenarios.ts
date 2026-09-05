@@ -1,6 +1,6 @@
 /**
- * The demo's catalogue: what each scenario shows and the exact dialog it
- * presents.
+ * The demo's catalogue: what each scenario shows and the exact dialog it asks
+ * or grid it prints.
  *
  * Everything here is a pure value or a pure builder, so the whole catalogue can
  * be asserted without a terminal. Rendering it — and waiting for the person
@@ -47,8 +47,55 @@ export type Dialogs = {
   select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
 };
 
+/** The grid vocabulary, restated here for the same reason the dialog one is:
+ * the capability is internal to the grid plugin, so a consumer describes
+ * structurally what it asks for rather than importing it. */
+export type ThemeVariable =
+  | "chrome"
+  | "content"
+  | "cursor"
+  | "marker"
+  | "muted"
+  | "strong"
+  | "positive"
+  | "caution"
+  | "danger";
+export type Cell = {
+  readonly text: string;
+  readonly variable?: ThemeVariable;
+  readonly align?: "start" | "end";
+};
+export type Row = readonly (Cell | string)[];
+export type OutputStream = {
+  write(chunk: string): unknown;
+  readonly columns?: number;
+  readonly isTTY?: boolean;
+};
+/** A printing request without the stream it goes to, which is the runner's to
+ * supply rather than the catalogue's. */
+export type PrintRequest = {
+  readonly layout?: "table" | "flow";
+  readonly headers?: readonly string[];
+  readonly rows: readonly Row[];
+  readonly empty?: string;
+  readonly summary?: string;
+};
+export type GridRequest = PrintRequest & { readonly stream: OutputStream };
+export type Grid = {
+  print(request: GridRequest): void;
+};
+
+/** The surfaces a scenario is presented on: the dialogs it drives, the grid it
+ * prints through, and the stream a printed grid goes to. */
+export type Surfaces = {
+  readonly dialogs: Dialogs;
+  readonly grid: Grid;
+  readonly stream: OutputStream;
+};
+
 /** One scenario: the line the help text gives it, and the request it presents.
- * The two kinds are the two dialogs there are to show. */
+ * The kinds are the two dialogs there are to show and the grid that prints
+ * instead of asking. */
 export type Scenario =
   | {
       readonly kind: "input";
@@ -59,6 +106,11 @@ export type Scenario =
       readonly kind: "select";
       readonly description: string;
       readonly request: SelectRequest<string>;
+    }
+  | {
+      readonly kind: "grid";
+      readonly description: string;
+      readonly request: PrintRequest;
     };
 
 const branches = [
@@ -263,6 +315,8 @@ export const order = [
   "nested",
   "tab",
   "leaf",
+  "grid",
+  "flow",
 ] as const;
 
 export type ScenarioName = (typeof order)[number];
@@ -377,17 +431,72 @@ export const scenarios = {
       ],
     },
   },
+
+  grid: {
+    kind: "grid",
+    // Everything a printed table has: a header row, a column of counts lined
+    // up on its digits, cells naming a role, a row that stops short and is
+    // filled out rather than shortened, a cell of wide glyphs measured in the
+    // columns it occupies, and a summary a blank line beneath the rows.
+    description: "printed table: aligned columns, a right-aligned count, roles",
+    request: {
+      headers: ["PACKAGE", "STATUS", "TESTS"],
+      rows: [
+        [
+          "core",
+          { text: "ready", variable: "positive" },
+          { text: "128", align: "end" },
+        ],
+        [
+          "dialogs",
+          { text: "ready", variable: "positive" },
+          { text: "1042", align: "end" },
+        ],
+        [
+          "marketplace",
+          { text: "stale", variable: "caution" },
+          { text: "97", align: "end" },
+        ],
+        [
+          "国际化-i18n 😀",
+          { text: "ready", variable: "positive" },
+          { text: "6", align: "end" },
+        ],
+        ["telemetry", { text: "failing", variable: "danger" }],
+      ],
+      empty: "No packages.",
+      summary: "5 packages",
+    },
+  },
+
+  flow: {
+    kind: "grid",
+    // The same cells with no column meaning: short items filling the width the
+    // stream reports, read down each column before across.
+    description: "printed flow: short items filling the width, read down first",
+    request: {
+      layout: "flow",
+      rows: packages.map((name) => [name]),
+      empty: "No packages.",
+      summary: `${packages.length} packages`,
+    },
+  },
 } as const satisfies Record<ScenarioName, Scenario>;
 
 /** Presents one scenario and resolves with what the person answered, or
- * `undefined` if they cancelled. The only dispatch in the catalogue: which of
- * the two dialogs a scenario is. */
+ * `undefined` if they cancelled. The only dispatch in the catalogue: which
+ * surface a scenario is presented on. A printed grid answers nothing — it is
+ * output rather than a question — so it resolves with nothing. */
 export async function present(
-  dialogs: Dialogs,
+  { dialogs, grid, stream }: Surfaces,
   name: ScenarioName,
 ): Promise<unknown> {
   const scenario = scenarios[name];
   if (scenario.kind === "input") return await dialogs.input(scenario.request);
+  if (scenario.kind === "grid") {
+    grid.print({ ...scenario.request, stream });
+    return undefined;
+  }
   return await dialogs.select(scenario.request);
 }
 
@@ -398,11 +507,12 @@ const nameWidth = Math.max(...order.map((name) => name.length));
  * being in it. */
 export const usage = `Usage: bun run demo [scenario]
 
-Showcase every dialog: ${order.join(", ")}.
+Showcase every dialog and printed layout: ${order.join(", ")}.
 
 ${order
   .map((name) => `  ${name.padEnd(nameWidth)}  ${scenarios[name].description}`)
   .join("\n")}
 
-A ▸ marks an option that opens a sub-dialog: Enter or → opens it as the next
-column, ← or Esc backs out. Typing always filters the column you are in.`;
+In a dialog, a ▸ marks an option that opens a sub-dialog: Enter or → opens it
+as the next column, ← or Esc backs out, and typing always filters the column
+you are in. A printed layout answers nothing and waits for no key.`;

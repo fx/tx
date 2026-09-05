@@ -159,6 +159,7 @@ describe("main", () => {
       "update",
       "theme",
       "dialogs",
+      "grid",
       "config",
       "executable",
     ]);

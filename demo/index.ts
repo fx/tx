@@ -1,5 +1,6 @@
 /**
- * Shippable demo showcasing every dialogs-plugin feature.
+ * Shippable demo showcasing every dialogs-plugin and grid-plugin feature:
+ * the dialogs it asks with, and the layouts it prints.
  *
  *   bun run demo              # every scenario, one after another
  *   bun run demo input        # standalone input: blinking caret
@@ -11,24 +12,31 @@
  *   bun run demo nested       # three-level column browser (Enter/→ in, ←/Esc out)
  *   bun run demo tab          # the same tree with opening bound to Tab
  *   bun run demo leaf         # select whose option opens a text input leaf
+ *   bun run demo grid         # printed table: aligned columns and a summary
+ *   bun run demo flow         # printed flow: short items filling the width
  *
- * It runs from a source checkout: it imports the bundled dialogs plugin and the
- * core entry point directly, and neither is in the published package.
+ * It runs from a source checkout: it imports the bundled dialogs and grid
+ * plugins and the core entry point directly, and none of them is in the
+ * published package.
  *
- * Dialogs render on stderr, results are printed on stdout, so
- * `bun run demo select > /dev/null` still shows the dialog.
+ * Dialogs render on stderr, results and printed grids go to stdout, so
+ * `bun run demo select > /dev/null` still shows the dialog and
+ * `bun run demo grid | cat` prints the same bytes a terminal gets.
  */
 
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import gridPlugin from "../plugins/grid/index.ts";
 import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
 import {
   type Dialogs,
+  type Grid,
   isScenario,
   order,
   present,
   type ScenarioName,
+  scenarios,
   usage,
 } from "./scenarios.ts";
 
@@ -48,13 +56,22 @@ export const demoPlugin: PluginDefinition = {
       const run = async (names: readonly ScenarioName[]) => {
         const [dialogs] = registrations<Dialogs>("dialogs");
         if (!dialogs) throw new Error("dialogs capability missing");
+        const [grid] = registrations<Grid>("grid");
+        if (!grid) throw new Error("grid capability missing");
+        // A printed grid goes to the same stream the answers do, which is what
+        // makes `bun run demo grid | cat` the piped case the grid promises to
+        // print identically.
+        const surfaces = { dialogs, grid, stream: context.stdout };
         for (const name of names) {
-          report(context, name, await present(dialogs, name));
+          const result = await present(surfaces, name);
+          // A printed grid is its own output: a line reporting what it
+          // returned would be noise underneath it.
+          if (scenarios[name].kind !== "grid") report(context, name, result);
         }
       };
       command((namespace) => {
         namespace
-          .description("Showcase every dialogs-plugin feature")
+          .description("Showcase every dialogs-plugin and grid-plugin feature")
           .argument("[scenario]", `one of: ${order.join(", ")}`)
           .addHelpText("after", `\n${usage}\n`)
           .action(
@@ -83,12 +100,13 @@ export const demoPlugin: PluginDefinition = {
     },
 };
 
-/** What the demo runs as: the theme plugin the dialogs plugin resolves its
- * appearances from, the dialogs plugin providing the capability, and the
- * demo's own namespace consuming it. */
+/** What the demo runs as: the theme plugin the drawing surfaces resolve their
+ * appearances from, the dialogs and grid plugins providing the capabilities,
+ * and the demo's own namespace consuming them. */
 const plugins: readonly PluginDefinition[] = [
   themePlugin,
   dialogsPlugin,
+  gridPlugin,
   demoPlugin,
 ];
 

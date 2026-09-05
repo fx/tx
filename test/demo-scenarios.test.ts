@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type Cell,
   type Dialogs,
+  type Grid,
+  type GridRequest,
   type InputRequest,
   isScenario,
   order,
+  type PrintRequest,
   present,
   type SelectOption,
   type SelectRequest,
@@ -78,30 +82,67 @@ const inputRequests: readonly (readonly [string, InputRequest])[] =
     return scenario.kind === "input" ? [[name, scenario.request] as const] : [];
   });
 
-/** A dialogs double that answers immediately and records what it was asked,
- * so what a scenario presents can be asserted without a terminal. */
-function recordingDialogs(): {
-  readonly dialogs: Dialogs;
+/** Every printed grid in the catalogue, named the same way. */
+const gridRequests: readonly (readonly [string, PrintRequest])[] =
+  order.flatMap((name) => {
+    const scenario = scenarios[name];
+    return scenario.kind === "grid" ? [[name, scenario.request] as const] : [];
+  });
+
+/** Every cell a grid request carries, whichever notation it was written in. */
+function cells(request: PrintRequest): readonly Cell[] {
+  return request.rows.flatMap((row) =>
+    row.map((cell) => (typeof cell === "string" ? { text: cell } : cell)),
+  );
+}
+
+/** Surfaces that answer immediately and record what they were asked, so what a
+ * scenario presents can be asserted without a terminal. */
+function recordingSurfaces(): {
+  readonly surfaces: {
+    readonly dialogs: Dialogs;
+    readonly grid: Grid;
+    readonly stream: { write(chunk: string): unknown };
+  };
   readonly inputs: InputRequest[];
   readonly selects: SelectRequest<unknown>[];
+  readonly prints: GridRequest[];
+  written(): string;
 } {
   const inputs: InputRequest[] = [];
   const selects: SelectRequest<unknown>[] = [];
+  const prints: GridRequest[] = [];
+  let written = "";
+  const stream = {
+    write(chunk: string) {
+      written += chunk;
+      return true;
+    },
+  };
+  const dialogs: Dialogs = {
+    async input(request) {
+      inputs.push(request);
+      return "answered";
+    },
+    async select<T>(request: SelectRequest<T>) {
+      selects.push(request as SelectRequest<unknown>);
+      const [first] = request.options;
+      if (!first) throw new Error("a select with no options");
+      return { value: first.value, values: {} } as SelectResult<T>;
+    },
+  };
+  const grid: Grid = {
+    print(request) {
+      prints.push(request);
+      request.stream.write("printed\n");
+    },
+  };
   return {
     inputs,
     selects,
-    dialogs: {
-      async input(request) {
-        inputs.push(request);
-        return "answered";
-      },
-      async select<T>(request: SelectRequest<T>) {
-        selects.push(request as SelectRequest<unknown>);
-        const [first] = request.options;
-        if (!first) throw new Error("a select with no options");
-        return { value: first.value, values: {} } as SelectResult<T>;
-      },
-    },
+    prints,
+    surfaces: { dialogs, grid, stream },
+    written: () => written,
   };
 }
 
@@ -199,6 +240,30 @@ describe("demo catalogue", () => {
     expect(request.message).not.toBe("");
   });
 
+  test.each(gridRequests)(
+    "%s has rows to show and words for none",
+    (_, request) => {
+      expect(request.rows.length).toBeGreaterThan(0);
+      expect(request.empty).not.toBe("");
+      expect(request.summary).not.toBe("");
+      for (const cell of cells(request)) expect(cell.text).not.toBe("");
+    },
+  );
+
+  test("shows both layouts a grid has", () => {
+    const table: PrintRequest = scenarios.grid.request;
+    const flow: PrintRequest = scenarios.flow.request;
+
+    // A request declaring no layout is a table, so the table scenario says
+    // nothing rather than saying "table": the two are a comparison.
+    expect(table.layout).toBeUndefined();
+    expect(flow.layout).toBe("flow");
+    // The table is the one that names columns; a flow ignores headers, so
+    // declaring them there would say nothing.
+    expect(table.headers?.length).toBeGreaterThan(0);
+    expect(flow.headers).toBeUndefined();
+  });
+
   test("shows one list under both filter settings", () => {
     const { request: shown } = scenarios.shownfilter;
     const { request: typed } = scenarios.filter;
@@ -237,19 +302,35 @@ describe("presenting a scenario", () => {
   test.each([...order])(
     "%s presents exactly what it declares",
     async (name) => {
-      const { dialogs, inputs, selects } = recordingDialogs();
+      const { surfaces, inputs, selects, prints, written } =
+        recordingSurfaces();
       const scenario = scenarios[name];
 
-      const result = await present(dialogs, name);
+      const result = await present(surfaces, name);
 
       if (scenario.kind === "input") {
         expect(inputs).toEqual([scenario.request]);
         expect(selects).toEqual([]);
+        expect(prints).toEqual([]);
         expect(result).toBe("answered");
+        return;
+      }
+      if (scenario.kind === "grid") {
+        // The stream is the runner's to supply, so the catalogue carries
+        // everything else and nothing more.
+        expect(prints).toEqual([
+          { ...scenario.request, stream: surfaces.stream },
+        ]);
+        expect(inputs).toEqual([]);
+        expect(selects).toEqual([]);
+        expect(written()).toBe("printed\n");
+        // A printed grid answers nothing: it is output, not a question.
+        expect(result).toBeUndefined();
         return;
       }
       expect(selects).toEqual([scenario.request]);
       expect(inputs).toEqual([]);
+      expect(prints).toEqual([]);
       expect(result).toEqual({
         value: scenario.request.options[0]?.value,
         values: {},
