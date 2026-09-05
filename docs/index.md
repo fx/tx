@@ -36,5 +36,4 @@
 | 0020 | [Add Select Filter and Viewport](changes/0020-add-select-filter-and-viewport.md) | [Dialogs](specs/dialogs/) | complete | 0017 |
 | 0021 | [Restyle Dialogs as Norton Commander](changes/0021-restyle-dialogs-as-norton-commander.md) | [Dialogs](specs/dialogs/) | complete | 0020 |
 | 0022 | [Exempt and Verify the tx Self-Update](changes/0022-exempt-and-verify-the-tx-self-update.md) | [Updates](specs/updates/) | complete | 0015 |
-| 0023 | [Cascading Sub-Dialogs](changes/0023-cascading-sub-dialogs.md) | [Dialogs](specs/dialogs/) | complete | 0021 |
-| 0024 | [Sub-Dialog Trigger Tab](changes/0024-sub-dialog-trigger-tab.md) | [Dialogs](specs/dialogs/) | complete | 0023 |
+| 0023 | [Render Sub-Dialogs as Columns](changes/0023-render-sub-dialogs-as-columns.md) | [Dialogs](specs/dialogs/) | complete | 0021 |
