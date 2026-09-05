@@ -277,10 +277,12 @@ describe("printing a grid", () => {
     ]);
   });
 
-  test("keeps a cell's own trailing spaces out of the printed line", async () => {
-    // The layout rewrites nothing the consumer supplied — it only declines to
-    // add padding it does not need — and the printed line still ends on a
-    // character rather than on a space.
+  test("prints a cell's own trailing spaces and adds none of its own", async () => {
+    // Two different rules, one per row. The grid rewrites nothing the consumer
+    // supplied, so the first row's last cell keeps the two spaces it was given.
+    // The grid also pads no column past the last cell with anything in it, so
+    // the second row ends on a character even though its column is a space
+    // wider than the cell that ends it.
     const output = await print({
       rows: [
         ["alpha", "b  "],
@@ -288,7 +290,32 @@ describe("printing a grid", () => {
       ],
     });
 
-    expect(lines(output)).toEqual(["alpha  b", "c      dd"]);
+    expect(lines(output)).toEqual(["alpha  b  ", "c      dd"]);
+  });
+
+  test("prints those spaces the same whether or not the cell is hued", async () => {
+    // The renderer ends a line by removing what trails it, and it cannot see a
+    // styled run to remove — so a cell ending in spaces would survive with a
+    // hue and be rewritten without one, which would make the printed
+    // characters depend on the colour decision.
+    const request = { rows: [["b  "]] } as const;
+    const hue = [hueing("red")];
+
+    const coloured = await print(request, recorder({ isTTY: true }), hue, {});
+    const plain = await print(request, recorder({ isTTY: true }), hue, {
+      NO_COLOR: "1",
+    });
+
+    expect(plain).toBe("b  \n");
+    expect(unstyled(coloured)).toBe(plain);
+  });
+
+  test("prints a cell of nothing but spaces as those spaces", async () => {
+    // Held back in their entirety, so the line the renderer draws is empty and
+    // what is printed is the consumer's spaces alone. It is not the
+    // placeholder either: that is for a cell left with nothing after its
+    // control characters are removed, and a space is not one of those.
+    expect(await print({ rows: [["alpha", "   "]] })).toBe("alpha     \n");
   });
 
   test("draws a cell left empty as the placeholder", async () => {

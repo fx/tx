@@ -126,7 +126,7 @@ A cell's text arrives from the consumer, and a consumer's text arrives from some
 ### Table Layout
 
 - A table MUST align every cell of a column to one width, and that width MUST be the widest cell in the column, header included.
-- Columns MUST be separated by a fixed gap, and the final column MUST NOT be padded, so no line carries trailing whitespace.
+- Columns MUST be separated by a fixed gap, and the final column MUST NOT be padded, so the grid never adds trailing whitespace to a line. That clause states what not padding the final column achieves; it binds the grid's own padding and nothing else. A cell's own trailing characters are preserved exactly as [Cell Values](#cell-values) preserves every other character it was handed, so a line whose last cell ends in spaces MUST still end in them. What a line MUST NOT carry is whitespace the grid put there.
 - A cell declaring no alignment, or declaring `start`, MUST be padded to its column's width at its end; a cell declaring `end` MUST be padded at its start instead, so a column of counts lines up on its digits. Those two are the whole alignment vocabulary.
 - A header row, when supplied, MUST be drawn once above the rows and MUST be emphasized relative to them.
 - A grid asked to draw no rows MUST print its supplied empty message, and MUST NOT print a header row over nothing.
@@ -159,11 +159,17 @@ A cell's text arrives from the consumer, and a consumer's text arrives from some
 - **WHEN** it renders
 - **THEN** the summary is the only thing printed
 
-#### Scenario: No trailing whitespace
+#### Scenario: The grid adds no trailing whitespace
 
-- **GIVEN** any table whose last column's cells differ in width
+- **GIVEN** any table whose last column's cells differ in width, none of them ending in a space
 - **WHEN** it renders
 - **THEN** no printed line ends in a space
+
+#### Scenario: A cell's own trailing spaces survive
+
+- **GIVEN** a table whose last column holds a cell whose text ends in two spaces
+- **WHEN** it renders
+- **THEN** that line ends in exactly those two spaces, whether or not the cell carries a hue
 
 ### Flow Layout
 
@@ -172,7 +178,7 @@ A flow is the same cells with no column meaning: a list of short items filling t
 - A flow's items MUST be the cells of its rows, flattened into one sequence in row order and, within a row, in cell order. A row of one cell therefore contributes one item, and a row of several contributes several. The rows are how a request carries cells; only a table gives a row's shape any further meaning, so a flow MUST NOT reject a multi-cell row, MUST NOT join one into a single item, and MUST NOT pad rows out to a common length.
 - A flow MUST place its items into as many equal columns as the width available affords, and MUST use one column when it affords no more.
 - Items MUST read down each column before across, so a flowed list stays alphabetical down the page.
-- Every item MUST be padded to the shared column width except the last on its line, so no line carries trailing whitespace.
+- Every item MUST be padded to the shared column width except the last on its line, so the grid adds no trailing whitespace here either. As in [Table Layout](#table-layout), that binds the padding alone: an item's own trailing characters are preserved, and only the whitespace the grid would have added is the whitespace it does not add.
 - A flow MUST ignore a supplied header row and MUST ignore a cell's declared alignment, because its columns carry no per-column meaning and there is nothing for a cell to be aligned against; supplying either MUST NOT be an error. A cell's declared variable MUST still be honoured, because that is a property of the cell rather than of a column.
 - A flow MUST draw the empty message and the summary exactly as [Table Layout](#table-layout) requires, so the two layouts differ only in how the cells are placed.
 
@@ -196,6 +202,7 @@ Printing is a command producing output and finishing, not an application taking 
 - Printing MUST render once and terminate, and MUST NOT hold the terminal open, install an input handler, enter an alternate screen buffer, or patch the console.
 - The bytes printed MUST be identical whether the stream is a terminal or a pipe, given the same width, apart from the hues [Theming: Colour Enablement](../theming/index.md#colour-enablement) drops. Nothing about the output MUST depend on the stream beyond the width it reports and that colour decision.
 - Printed output MUST NOT contain cursor-positioning, screen-clearing, or repaint escape sequences.
+- What is printed MUST be the lines the layout produced, character for character, so nothing a renderer does on the way to the stream MUST be allowed to change them. A renderer that ends a line by removing whatever trails it would rewrite a cell's own characters, which [Cell Values](#cell-values) forbids, and would do it only where those characters carried no hue — which would make the printed bytes depend on the colour decision the rule above says they may not.
 - The grid MUST take the width it lays out against from the stream the consumer supplied, and MUST NOT probe the terminal by any other means. A stream reporting no width — one whose `columns` is absent or `undefined` — MUST be treated as eighty columns, so a layout that depends on the width — the [flow](#flow-layout) — still produces one determinate answer through a pipe.
 - Whether that same stream is a terminal MUST be read exactly as [Theming: Colour Enablement](../theming/index.md#colour-enablement) reads it, so an absent `isTTY` is not a terminal here either. That reading has one owner and this specification adds no second one.
 - Printing MUST NOT require an interactive stream, so a grid remains printable when output is redirected.

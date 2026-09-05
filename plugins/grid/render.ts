@@ -4,6 +4,7 @@ import {
   defaultLayoutColumns,
   gridLines,
   type Line,
+  type LineSegment,
 } from "./geometry.ts";
 import type { Theme, ThemeVariable } from "./theme.ts";
 import type { GridRequest, OutputStream } from "./types.ts";
@@ -50,9 +51,50 @@ function styling(theme: Theme, variable: ThemeVariable) {
 
 /** What a blank line is drawn as. A line with nothing in it would take no
  * height, and the blank line above a summary is spacing the layout decided on
- * rather than an accident of what happened to be in the grid. The renderer
- * trims the trailing space away again, so the printed line is empty. */
+ * rather than an accident of what happened to be in the grid. This space is
+ * the grid's own rather than anything a consumer supplied, so letting the
+ * renderer take it back off the end is exactly what is wanted here. */
 const blankLine = " ";
+
+/**
+ * A line split into the part the renderer draws and the spaces held back from
+ * it, which are appended to the line it produced.
+ *
+ * The renderer ends every line it draws with `trimEnd`, and it is not
+ * consistent about it: an unstyled run of spaces at the end of a line is
+ * removed while a styled one survives. A cell whose text genuinely ends in
+ * spaces would therefore have them rewritten away — which [Grid: Cell Values]
+ * forbids, a supplied string never being rewritten beyond having its control
+ * characters removed — and would be rewritten only where it carried no hue,
+ * which would make the printed bytes depend on the colour decision that
+ * [Grid: Printing] says they may not.
+ *
+ * So the renderer is handed no line ending in a space and has nothing to take
+ * back. Nothing is rewritten: the characters held back before the render are
+ * exactly the characters restored after it. The layout has already declined to
+ * pad past the last cell with anything in it, so what is held back here is
+ * only ever the consumer's own text.
+ */
+type SplitLine = { readonly head: Line; readonly trailing: string };
+
+function splitTrailing(line: Line): SplitLine {
+  const head = [...line];
+  let trailing = "";
+  while (head.length > 0) {
+    const last = head[head.length - 1] as LineSegment;
+    const core = last.text.replace(/ +$/u, "");
+    trailing = last.text.slice(core.length) + trailing;
+    // A segment that was nothing but spaces leaves no text behind, so the one
+    // before it is what the drawn line now ends on.
+    if (core === "") {
+      head.pop();
+      continue;
+    }
+    head[head.length - 1] = { ...last, text: core };
+    break;
+  }
+  return { head, trailing };
+}
 
 /** The grid as one column of lines, every run shaded by the role it named. */
 export function gridElement(
@@ -103,9 +145,21 @@ export function printGrid(
     columns: layoutColumns(request.stream),
   });
   if (lines.length === 0) return;
-  const element = gridElement(react, ink, theme, lines);
+  const split = lines.map(splitTrailing);
+  const element = gridElement(
+    react,
+    ink,
+    theme,
+    split.map(({ head }) => head),
+  );
   // One column is the floor: a grid of nothing but blank lines still has to be
-  // drawn on a canvas with a column in it.
+  // drawn on a canvas with a column in it. The canvas is measured from the
+  // whole lines rather than the drawn part of them, so it is the grid's own
+  // width whatever a line happens to end on.
   const columns = Math.max(1, canvasWidth(lines));
-  request.stream.write(`${ink.renderToString(element, { columns })}\n`);
+  const drawn = ink.renderToString(element, { columns }).split("\n");
+  const printed = drawn
+    .map((line, index) => `${line}${split[index]?.trailing ?? ""}`)
+    .join("\n");
+  request.stream.write(`${printed}\n`);
 }
