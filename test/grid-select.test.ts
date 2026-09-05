@@ -580,6 +580,36 @@ describe("driving an interactive grid", () => {
     expect(stderr.text()).not.toContain(RED);
   });
 
+  test("lets no control character a cell carried reach the terminal", async () => {
+    const stderr = new TerminalOutput();
+
+    const { chosen } = await drive(
+      {
+        message: `Pick${CLEAR_SCREEN} a service`,
+        headers: [`SERV${CLEAR_SCREEN}ICE`],
+        rows: [
+          {
+            cells: [`a${CLEAR_SCREEN}pi`],
+            value: "api",
+            actions: [{ label: `conn${CLEAR_SCREEN}ect`, value: "connect" }],
+          },
+        ],
+      },
+      // What is on screen is the text the escape character was removed from,
+      // so the row and the action are waited for and matched by that.
+      [RIGHT, shown(stderr, "conn[2Ject"), CARRIAGE_RETURN],
+      { stderr },
+    );
+
+    // Selecting is bound by the same rule printing is: the grid is where text
+    // the consumer did not author enters tx, so nothing it hands the dialog
+    // can reach the terminal as a command.
+    expect(chosen).toEqual({ value: "api", action: "connect" });
+    expect(stderr.text()).not.toContain(CLEAR_SCREEN);
+    expect(screen(stderr)).toContain("a[2Jpi");
+    expect(screen(stderr)).toContain("Pick[2J a service");
+  });
+
   test("fills a row that stopped short out to the placeholder", async () => {
     const { stderr, chosen } = await drive(
       {

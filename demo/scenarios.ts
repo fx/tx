@@ -336,6 +336,51 @@ const releases: SelectRequest<string> = {
   ],
 };
 
+/** One service the fleet holds, before anything turns it into a row. */
+type Service = {
+  readonly name: string;
+  readonly environment: string;
+  readonly state: "running" | "degraded" | "retired";
+  readonly uptime: string;
+};
+
+const services: readonly Service[] = [
+  { name: "api", environment: "production", state: "running", uptime: "12d" },
+  {
+    name: "worker",
+    environment: "production",
+    state: "running",
+    uptime: "12d",
+  },
+  {
+    name: "scheduler",
+    environment: "staging",
+    state: "degraded",
+    uptime: "4h",
+  },
+  {
+    name: "国际化-i18n 😀",
+    environment: "staging",
+    state: "running",
+    uptime: "3d",
+  },
+  {
+    name: "legacy-import",
+    environment: "production",
+    state: "retired",
+    uptime: "—",
+  },
+];
+
+/** What a state's cell says it is. The role is dropped when the row is
+ * presented for selection and kept when the same cells are printed, which is
+ * what makes the pair a comparison rather than an omission. */
+const stateVariables: Readonly<Record<Service["state"], ThemeVariable>> = {
+  running: "positive",
+  degraded: "caution",
+  retired: "muted",
+};
+
 /**
  * The actions a service offers, computed from its state rather than declared
  * once for the grid — which is the shape a consumer writes, and the shape that
@@ -343,7 +388,9 @@ const releases: SelectRequest<string> = {
  * list means the row declares no actions and is taken on the row alone; it is
  * not a request the grid rejects.
  */
-function serviceActions(state: string): readonly GridAction<string>[] {
+function serviceActions(
+  state: Service["state"],
+): readonly GridAction<string>[] {
   if (state === "retired") return [];
   return [
     { label: "connect", value: "connect" },
@@ -354,34 +401,21 @@ function serviceActions(state: string): readonly GridAction<string>[] {
 
 /**
  * A fleet to drive: rows that identify themselves, actions computed per row,
- * and one row left with none.
- *
- * The `danger` cell is here to be visibly dropped — a selectable row's cells
- * are drawn as `content` whatever role they declared, because a cursor bar is
- * the inversion alone and a per-cell hue underneath it would contradict that.
- * The same cells printed through `demo grid` keep their roles, which is what
- * makes the pair a comparison.
+ * one row left with none, and a name whose glyphs take two terminal columns
+ * each so the fields are visibly measured rather than guessed.
  */
 const fleet: GridSelectRequest<string, string> = {
   message: "Pick a service",
   headers: ["SERVICE", "ENVIRONMENT", "STATE", "UPTIME"],
-  rows: [
-    ["api", "production", "running", "12d"],
-    ["worker", "production", "running", "12d"],
-    ["scheduler", "staging", "degraded", "4h"],
-    ["国际化-i18n 😀", "staging", "running", "3d"],
-    ["legacy-import", "production", "retired", "—"],
-  ].map(([name, environment, state, uptime]) => ({
+  rows: services.map((service) => ({
     cells: [
-      name as string,
-      environment as string,
-      state === "running"
-        ? { text: state, variable: "positive" as const }
-        : { text: state as string, variable: "danger" as const },
-      { text: uptime as string, align: "end" as const },
+      service.name,
+      service.environment,
+      { text: service.state, variable: stateVariables[service.state] },
+      { text: service.uptime, align: "end" },
     ],
-    value: name as string,
-    actions: serviceActions(state as string),
+    value: service.name,
+    actions: serviceActions(service.state),
   })),
 };
 
