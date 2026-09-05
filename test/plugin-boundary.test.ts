@@ -410,6 +410,7 @@ test("bundled plugin module graphs stay behind the public boundary", async () =>
   expect(discovered).toContain(join("plugins", "update", "index.ts"));
   expect(discovered).toContain(join("plugins", "config", "index.ts"));
   expect(discovered).toContain(join("plugins", "dialogs", "index.ts"));
+  expect(discovered).toContain(join("plugins", "theme", "index.ts"));
   expect(discovered).toContain(join("plugins", "executable", "index.ts"));
   await withProgram(
     join(repositoryRoot, "tsconfig.json"),

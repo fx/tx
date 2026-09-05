@@ -331,6 +331,63 @@ The file may be absent and is safe to hand-edit or pre-seed. Its top level must 
 
 There is no `tx config` command, key listing or deletion API, schema language, migration mechanism, encryption, or cross-process transaction.
 
+## Use the bundled theme capability
+
+The namespace-free bundled theme provider registers one internal capability under the exact opaque key `theme`. It is the one place `tx` decides what its terminal output looks like: a surface names what a piece of text *is* and the theme answers with an appearance. Its local structural shape is:
+
+```ts
+type Hue =
+  | "black" | "red" | "green" | "yellow"
+  | "blue" | "magenta" | "cyan" | "white"
+  | "gray"
+
+type Appearance = {
+  readonly dim?: boolean
+  readonly bold?: boolean
+  readonly inverse?: boolean
+  readonly hue?: Hue
+}
+
+type ThemeVariable =
+  | "chrome" | "content" | "cursor" | "marker"
+  | "muted" | "strong"
+  | "positive" | "caution" | "danger"
+
+type Theme = {
+  appearance(variable: ThemeVariable): Appearance
+}
+
+// A partial override, registered under `theme-override` by any plugin.
+type ThemeOverride = Partial<Record<ThemeVariable, Appearance>>
+
+type Theming = {
+  theme(
+    stream: { readonly isTTY?: boolean },
+    options?: { readonly colour?: boolean },
+  ): Theme
+}
+```
+
+A bundled consumer declares that compatible type locally and reads `registrations<Theming>("theme")` inside its command action, after initialization has committed every provider. Unlike the config and dialogs capabilities, a consumer must find **exactly one**: none and several are both errors naming the count, and there is deliberately no fallback, because a consumer that fell back would have to carry its own copy of the default theme. The theme plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
+
+A theme is resolved for the stream a surface draws to rather than handed out ready-made, because whether hues are emitted depends on that stream. Only the stream's TTY-ness is read; the capability never writes to it, retains it, or exposes a terminal or renderer. A resolved theme answers with an appearance alone and never says whether hues were enabled — that decision is already inside every appearance it returns.
+
+An appearance asserts only what it carries: an absent `dim`, `bold`, or `inverse` means the attribute is not applied, and an absent `hue` means no hue is emitted. The default theme is the greyscale Norton Commander look the dialogs already had — `chrome`, `muted`, and `marker` dimmed, `content`, `positive`, `caution`, and `danger` in the terminal's default foreground, `strong` bold, and `cursor` inverted — and it names no hue anywhere, so a `tx` that overrides nothing emits only the terminal's own foreground and background, their dimmed and bold forms, and their inversion.
+
+Any plugin may contribute a partial override by registering a `ThemeOverride` under the separate opaque key `theme-override`. Overrides are composed over the defaults when a surface resolves a theme, which is while a command runs, so an override contributed by a plugin composed after the theme plugin still applies; a plugin that fails initialization contributes none. A variable is the unit: an unspecified one keeps its default, a contributed appearance replaces the default rather than merging into it, and a later override of the same variable wins in the registry's commit order. Overriding is supported because a surface will occasionally need it, not because varying the look is encouraged.
+
+Whether hues are emitted is decided by five inputs in one fixed order, the first that decides settling it with the rest unread:
+
+1. The `colour` option, where the invoking command supplied one. Only exactly `true` or exactly `false` counts as a request; an omitted option and an `undefined` field are passed over.
+2. `NO_COLOR` present in the environment with any value, an empty one included, disables hues.
+3. `FORCE_COLOR` decides in both directions: `0` and `false` disable hues even on a terminal, and any other value enables them even off one. Absent, empty, or only whitespace decides nothing.
+4. `TERM` being `dumb` disables hues.
+5. The stream not being a terminal disables hues. A stream counts as a terminal only where its `isTTY` is exactly `true`; an absent `isTTY` is not a terminal.
+
+Where nothing decides, hues are enabled. Two consequences follow from the order: `NO_COLOR` beats `FORCE_COLOR`, and `FORCE_COLOR=1` beats both `TERM=dumb` and a redirected stream, which is what makes it a way of forcing colour rather than a hint. With hues disabled a theme still resolves dim, bold, and inverse, so a surface keeps its structure when it loses its colour.
+
+A user-selectable theme, a theme name, a config key, persistence, background hues, 256-colour and truecolour, underline, italic, and blink are all out of scope, and glyph choice is not a theme variable.
+
 ## Use the bundled dialogs capability
 
 The namespace-free bundled dialogs provider registers one internal capability under the exact opaque key `dialogs`. Its current local structural shape is:
@@ -378,7 +435,7 @@ type SubDialogRequest<T> = {
 
 A bundled consumer declares that compatible type locally and reads `registrations<Dialogs>("dialogs")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`; an absent capability and multiple registered providers remain the consumer's responsibility, and tx defines no winner semantics.
 
-Every dialog requires both the provider's injected standard input and standard error to be TTYs and rejects a non-interactive stream before rendering or changing terminal state; there is no fallback. Dialogs use the injected React and Ink instances, read only injected standard input, and render only on injected standard error, so standard output stays untouched for the consuming command.
+Every dialog requires both the provider's injected standard input and standard error to be TTYs and rejects a non-interactive stream before rendering or changing terminal state; there is no fallback. It then resolves a theme for its standard error stream through the theme capability above, so a `tx` composed without exactly one theme provider fails the dialog with an error naming the count rather than drawing an appearance of its own. Dialogs use the injected React and Ink instances, read only injected standard input, and render only on injected standard error, so standard output stays untouched for the consuming command.
 
 `select` additionally rejects an empty options list before rendering, and renders the message plus the label of every option the filter leaves visible that its viewport has room for, in supplied order. Labels are display text; values are opaque and returned by exact identity, with duplicates retained and the first option initially active.
 

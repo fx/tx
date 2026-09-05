@@ -157,6 +157,7 @@ describe("main", () => {
     expect(defaultPlugins.map((plugin) => plugin.identity.name)).toEqual([
       "marketplace",
       "update",
+      "theme",
       "dialogs",
       "config",
       "executable",

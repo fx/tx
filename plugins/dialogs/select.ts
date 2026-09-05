@@ -867,9 +867,16 @@ export function createSelectView<T>(
     ): readonly FrameSegment[] =>
       count > 0
         ? [
-            { key: `${key}-open`, text: " ", dim: true },
-            { key, text: indicatorText(glyph, count), dim: showPhase },
-            { key: `${key}-close`, text: " ", dim: true },
+            { key: `${key}-open`, text: " ", variable: "chrome" },
+            // Pulsed by naming chrome on the phase and content off it: the
+            // count is chrome that steps forward rather than a second
+            // appearance decision made here.
+            {
+              key,
+              text: indicatorText(glyph, count),
+              variable: showPhase ? "chrome" : "content",
+            },
+            { key: `${key}-close`, text: " ", variable: "chrome" },
           ]
         : [];
     /** The filter, set into the bottom edge rather than drawn as a row of the
@@ -878,9 +885,13 @@ export function createSelectView<T>(
      * reader is looking at the list. */
     const filterEdge: readonly FrameSegment[] = renderFiltering
       ? [
-          { key: "prompt", text: ` ${filterPrompt} `, dim: true },
-          { key: "filter", text: withCaret(filterText, filterCaret) },
-          { key: "prompt-close", text: " ", dim: true },
+          { key: "prompt", text: ` ${filterPrompt} `, variable: "chrome" },
+          {
+            key: "filter",
+            text: withCaret(filterText, filterCaret),
+            variable: "content",
+          },
+          { key: "prompt-close", text: " ", variable: "chrome" },
         ]
       : [];
 
@@ -920,7 +931,7 @@ export function createSelectView<T>(
           segments.push({
             key: `divider-${at}`,
             text: ` ${columnDivider} `,
-            dim: true,
+            variable: "chrome",
           });
         }
         const drawn = column[row];
@@ -931,12 +942,12 @@ export function createSelectView<T>(
             ? {
                 key: `cell-${at}`,
                 text: " ".repeat(drawnWidths[at] as number),
+                variable: "content" as const,
               }
             : {
                 key: `cell-${at}`,
                 text: drawn.text,
-                dim: drawn.dim,
-                inverse: drawn.inverse,
+                variable: drawn.variable,
               },
         );
       }

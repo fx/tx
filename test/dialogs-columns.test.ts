@@ -352,11 +352,7 @@ describe("the cells one column contributes to the band", () => {
     );
 
     expect(cells).toHaveLength(3);
-    expect(cells[0]).toEqual({
-      text: "no match  ",
-      dim: false,
-      inverse: false,
-    });
+    expect(cells[0]).toEqual({ text: "no match  ", variable: "content" });
     expect(cells[1]).toBeUndefined();
     expect(cells[2]).toBeUndefined();
   });
@@ -518,7 +514,11 @@ describe("the cells one column contributes to the band", () => {
       DRIVEN,
     );
 
-    expect(cells.map((cell) => cell?.inverse)).toEqual([false, true, false]);
+    expect(cells.map((cell) => cell?.variable)).toEqual([
+      "content",
+      "cursor",
+      "content",
+    ]);
   });
 
   /**
@@ -540,7 +540,11 @@ describe("the cells one column contributes to the band", () => {
     );
 
     expect(cells.map((cell) => cell?.text)).toEqual(["c  ", "d  ", "e  "]);
-    expect(cells.map((cell) => cell?.inverse)).toEqual([false, true, false]);
+    expect(cells.map((cell) => cell?.variable)).toEqual([
+      "content",
+      "cursor",
+      "content",
+    ]);
   });
 
   /** The rows come from the visible list, which is the filter's output, so the
@@ -567,17 +571,18 @@ describe("the cells one column contributes to the band", () => {
       FROZEN,
     );
 
-    expect(cells.map((cell) => cell?.inverse)).toEqual([false, false]);
+    expect(cells.map((cell) => cell?.variable)).toEqual(["content", "content"]);
     expect(cells.map((cell) => cell?.text)).toEqual(["one   ", "two   "]);
   });
 
   /**
    * The bar is the only thing dressing a cell. A column behind the driven one
-   * is not dimmed: it is showing the choice that led here, and shading it would
+   * is not muted: it is showing the choice that led here, and shading it would
    * say a second time, in a second way, what the trail in the title already
-   * says.
+   * says. Every unbarred cell is plain content, in the driven column and in
+   * the ones behind it alike.
    */
-  test("dims nothing, in the driven column or the ones behind it", () => {
+  test("names no de-emphasized variable, driven or behind", () => {
     const list = options("one", "two!");
     for (const dressing of [DRIVEN, FROZEN]) {
       const cells = columnCells(
@@ -589,7 +594,14 @@ describe("the cells one column contributes to the band", () => {
         2,
         dressing,
       );
-      expect(cells.map((cell) => cell?.dim)).toEqual([false, false]);
+      // Every cell is either the bar or plain content. A column names no
+      // de-emphasized variable at all, so there is nothing for a theme to
+      // shade a frozen column with.
+      expect(
+        cells.every(
+          (cell) => cell?.variable === "content" || cell?.variable === "cursor",
+        ),
+      ).toBe(true);
     }
   });
 });

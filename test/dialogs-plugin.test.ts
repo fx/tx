@@ -11,6 +11,7 @@ import {
   collectingChromeHeight,
   selectChromeHeight,
 } from "../plugins/dialogs/viewport.ts";
+import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type {
   CommandContext,
@@ -551,6 +552,7 @@ async function runSelection<T>(
   const running = main(
     ["choose"],
     [
+      themePlugin,
       dialogsPlugin,
       consumer(async (dialogs) => {
         const mode = filterMode(filter);
@@ -600,6 +602,7 @@ async function runEntry(
   const running = main(
     ["choose"],
     [
+      themePlugin,
       dialogsPlugin,
       consumer(async (dialogs) => {
         try {
@@ -637,6 +640,7 @@ async function runRejected<T>(
   const exitCode = await main(
     ["choose"],
     [
+      themePlugin,
       dialogsPlugin,
       consumer(async (dialogs) => {
         try {
@@ -673,14 +677,20 @@ describe("bundled dialogs provider", () => {
     };
 
     expect(
-      await main(["inspector"], [dialogsPlugin, inspector], commandContext),
+      await main(
+        ["inspector"],
+        [themePlugin, dialogsPlugin, inspector],
+        commandContext,
+      ),
     ).toBe(0);
     expect(registrations).toHaveLength(1);
     expect(Object.keys(registrations[0] ?? {})).toEqual(["input", "select"]);
 
     const helpContext = context(new TerminalInput(), new CapturedOutput());
     const helpText = helpContext.stdoutText;
-    expect(await main(["--help"], [dialogsPlugin], helpContext)).toBe(0);
+    expect(
+      await main(["--help"], [themePlugin, dialogsPlugin], helpContext),
+    ).toBe(0);
     expect(helpText()).not.toContain("dialogs");
   });
 
@@ -762,6 +772,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs, currentContext) => {
           expect(
@@ -857,6 +868,7 @@ describe("bundled dialogs provider", () => {
       const running = main(
         ["choose"],
         [
+          themePlugin,
           dialogsPlugin,
           consumer(async (dialogs) => {
             try {
@@ -901,6 +913,7 @@ describe("bundled dialogs provider", () => {
       const running = main(
         ["choose"],
         [
+          themePlugin,
           dialogsPlugin,
           consumer(async (dialogs) => {
             try {
@@ -944,6 +957,7 @@ describe("bundled dialogs provider", () => {
       const running = main(
         ["choose"],
         [
+          themePlugin,
           dialogsPlugin,
           consumer(async (dialogs) => {
             try {
@@ -996,6 +1010,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           values.push(
@@ -1040,6 +1055,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           value = (
@@ -1080,6 +1096,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           await dialogs.select({
@@ -1132,6 +1149,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           await dialogs.select({
@@ -1173,6 +1191,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           await dialogs.select({
@@ -1233,6 +1252,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           try {
@@ -1296,6 +1316,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           try {
@@ -1358,6 +1379,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           try {
@@ -1420,6 +1442,7 @@ describe("bundled dialogs provider", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           try {
@@ -2819,6 +2842,7 @@ describe("user-provided select options", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3079,6 +3103,7 @@ describe("user-provided select options", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3209,6 +3234,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3254,6 +3280,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           await dialogs.select({
@@ -3300,6 +3327,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3410,6 +3438,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           await dialogs.select({
@@ -3439,6 +3468,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3478,6 +3508,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3637,6 +3668,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3694,6 +3726,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3761,6 +3794,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -3836,6 +3870,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           carried = await dialogs.select({
@@ -3889,6 +3924,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -4000,6 +4036,7 @@ describe("sub-dialog columns", () => {
     const nestedRunning = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           nestedResult = await dialogs.select({
@@ -4067,6 +4104,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({
@@ -4204,6 +4242,7 @@ describe("sub-dialog columns", () => {
     const running = main(
       ["choose"],
       [
+        themePlugin,
         dialogsPlugin,
         consumer(async (dialogs) => {
           result = await dialogs.select({

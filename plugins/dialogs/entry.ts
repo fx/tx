@@ -159,7 +159,11 @@ export function createEntry(
       // Start truncation keeps the tail of a long value and the caret itself
       // in view together.
       rows: [
-        { key: "value", segments: [{ key: "entry", text: entry }], tail: true },
+        {
+          key: "value",
+          segments: [{ key: "entry", text: entry, variable: "content" }],
+          tail: true,
+        },
       ],
     });
   };
