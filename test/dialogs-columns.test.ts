@@ -482,9 +482,11 @@ describe("the cells one column contributes to the band", () => {
    */
   test("drops the marker on a column too narrow to carry it", () => {
     const list = options("leads!");
-    // The marker's own two columns and one of label: below that the cell is
-    // built exactly as an unmarked one is.
-    const markable = 3;
+    // The narrowest column that can carry a marker: the glyph, the space that
+    // separates it from the label, and one column of label. Derived from the
+    // exported glyph and `displayWidth` rather than written as a literal, so
+    // this does not silently drift if the glyph or its spacing changes.
+    const markable = displayWidth(expandGlyph) + 1 + 1;
     for (const width of [1, 2, markable, 4, 12]) {
       const cells = columnCells(
         list,
