@@ -82,6 +82,15 @@ export const themeVariables = Object.freeze(
   Object.keys(defaultAppearances),
 ) as readonly ThemeVariable[];
 
-/** The default appearance of every variable. */
+// Each appearance is frozen as well as the record holding them. `readonly` is
+// a compile-time claim only, and the provider hands these very objects to its
+// consumers rather than copies of them, so a consumer that mutated one would
+// change what every later read in the process resolves to.
+for (const appearance of Object.values(defaultAppearances)) {
+  Object.freeze(appearance);
+}
+
+/** The default appearance of every variable, frozen through: neither the
+ * record nor any appearance in it can be changed by anything holding one. */
 export const defaultTheme: Readonly<Record<ThemeVariable, Appearance>> =
   Object.freeze(defaultAppearances);

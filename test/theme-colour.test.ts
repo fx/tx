@@ -12,8 +12,9 @@ import {
  * the order exists to settle.
  */
 
-/** One row of the table: the three inputs as plain data, so the table reads as
- * a table. The TTY-ness is wrapped in the thunk `coloursEnabled` asks through
+/** One row of the table: the five inputs as plain data, so the table reads as a
+ * table — three of them are environment variables, so they arrive together in
+ * `env`. The TTY-ness is wrapped in the thunk `coloursEnabled` asks through
  * where the row is run. */
 type Case = {
   readonly name: string;
@@ -225,8 +226,9 @@ describe("colour enablement", () => {
     });
   }
 
-  /** The order is total: every one of the thirty-two combinations of the four
-   * decidable inputs has an answer, and the answer is the highest input that
+  /** The order is total: every one of the seventy-two combinations of the five
+   * inputs — three requests, two NO_COLORs, three FORCE_COLORs, two TERMs, and
+   * two streams — has an answer, and the answer is the highest input that
    * decided. Asserted independently of the table above so a row edited into
    * agreement with an implementation still has to agree with the order. */
   test("answers every combination with its highest decider", () => {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
+import type { Hue } from "../plugins/dialogs/theme.ts";
 import themePlugin from "../plugins/theme/index.ts";
 import { defaultTheme, themeVariables } from "../plugins/theme/variables.ts";
 import { main } from "../src/cli.ts";
@@ -10,12 +11,18 @@ import { captureContext } from "./helpers.ts";
 
 /** The local structural contract a consumer of the theme capability declares
  * for itself, exactly as the dialogs plugin does: the capability is internal,
- * so nothing about theming is imported across a plugin boundary. */
+ * so nothing about theming is imported across a plugin boundary.
+ *
+ * The hue is the consumer's own `Hue` union rather than a `string`, so what
+ * these tests drive through the provider is the vocabulary a real consumer can
+ * name. A `string` here would let an override name a hue no consumer accepts
+ * and pass anyway, which is a contract this file claims to mirror drifting
+ * without a test noticing. */
 type Appearance = {
   readonly dim?: boolean;
   readonly bold?: boolean;
   readonly inverse?: boolean;
-  readonly hue?: string;
+  readonly hue?: Hue;
 };
 
 type ThemeVariable = keyof typeof defaultTheme;
@@ -309,6 +316,62 @@ describe("bundled theme provider", () => {
     for (const variable of themeVariables) {
       expect(theme.appearance(variable).hue).toBeUndefined();
     }
+  });
+
+  /**
+   * `readonly` is a compile-time claim and nothing more, while the theme hands
+   * a consumer the very object it holds rather than a copy of it — which is
+   * what makes a read cost no allocation. Freezing is what makes that safe:
+   * without it, one consumer could change what every later reader in the
+   * process resolves, across every plugin composed into it.
+   */
+  test("hands out a theme nothing can mutate", async () => {
+    const { theming } = await obtainTheming([
+      overriding("states", { danger: { hue: "red" } }),
+    ]);
+
+    expect(Object.isFrozen(theming)).toBe(true);
+    expect(Object.isFrozen(defaultTheme)).toBe(true);
+    for (const variable of themeVariables) {
+      expect(Object.isFrozen(defaultTheme[variable])).toBe(true);
+    }
+    // Both sides of the colour decision: the appearance handed back whole, and
+    // the hueless one built in its place.
+    for (const colour of [true, false]) {
+      const theme = theming.theme(terminal, { colour });
+      expect(Object.isFrozen(theme)).toBe(true);
+      for (const variable of themeVariables) {
+        expect(Object.isFrozen(theme.appearance(variable))).toBe(true);
+      }
+    }
+
+    const chrome = theming.theme(terminal).appearance("chrome") as {
+      dim?: boolean;
+    };
+    expect(() => {
+      chrome.dim = false;
+    }).toThrow();
+    expect(theming.theme(terminal).appearance("chrome")).toEqual({ dim: true });
+  });
+
+  /** An override is another plugin's own object, so composing it freezes it:
+   * the plugin that contributed it cannot reach back into a theme already
+   * resolved from it and change what a surface will draw. */
+  test("holds an override against the plugin that contributed it", async () => {
+    const override: ThemeOverride = { danger: { hue: "red" } };
+    const { theming } = await obtainTheming([overriding("states", override)]);
+
+    expect(theming.theme(terminal).appearance("danger")).toEqual({
+      hue: "red",
+    });
+    const contributed = override.danger as { hue?: string };
+    expect(Object.isFrozen(contributed)).toBe(true);
+    expect(() => {
+      contributed.hue = "green";
+    }).toThrow();
+    expect(theming.theme(terminal).appearance("danger")).toEqual({
+      hue: "red",
+    });
   });
 
   test("leaves every unspecified variable alone under a partial override", async () => {

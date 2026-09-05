@@ -55,6 +55,12 @@ const themeOverrideKey = "theme-override";
  * default rather than merging into it, because an absent field means the
  * attribute is not applied rather than inherited, and merging would make an
  * override unable to turn an attribute off.
+ *
+ * A contributed appearance is frozen as it is laid in, and the record itself
+ * when it is done: the defaults arrive frozen, but an override is another
+ * plugin's own object, and a theme composed from one it could still change
+ * afterwards is a theme that answers differently later for reasons no consumer
+ * can see.
  */
 function composeOverrides(
   overrides: readonly ThemeOverride[],
@@ -63,15 +69,23 @@ function composeOverrides(
   for (const override of overrides) {
     for (const variable of themeVariables) {
       const appearance = override[variable];
-      if (appearance !== undefined) composed[variable] = appearance;
+      if (appearance !== undefined) {
+        composed[variable] = Object.freeze(appearance);
+      }
     }
   }
-  return composed;
+  return Object.freeze(composed);
 }
 
 /** The appearance as the surface may have it: the hue drops out where hues are
  * disabled, while dim, bold, and inverse survive, so a surface keeps its
- * structure when it loses its colour. */
+ * structure when it loses its colour.
+ *
+ * The composed appearance is handed back by reference where it survives whole,
+ * which is safe precisely because every appearance the theme holds is frozen —
+ * that is what buys a read with no allocation behind it. The hueless one it
+ * builds instead is frozen for the same reason, so no consumer is ever handed
+ * an appearance it could change. */
 function withColour(appearance: Appearance, colour: boolean): Appearance {
   if (colour || appearance.hue === undefined) return appearance;
   const hueless: {
@@ -82,14 +96,16 @@ function withColour(appearance: Appearance, colour: boolean): Appearance {
   if (appearance.dim !== undefined) hueless.dim = appearance.dim;
   if (appearance.bold !== undefined) hueless.bold = appearance.bold;
   if (appearance.inverse !== undefined) hueless.inverse = appearance.inverse;
-  return hueless;
+  return Object.freeze(hueless);
 }
 
 const definition: PluginDefinition = Object.freeze({
   identity: Object.freeze({ name: "theme" }),
   load(): Plugin {
     return ({ env, register, registrations }) => {
-      const theming: Theming = {
+      // Frozen, like every value this capability hands out: a consumer holds
+      // the same object every other consumer in the process holds.
+      const theming: Theming = Object.freeze({
         theme(stream, options) {
           // Read here rather than during initialization. The registry shows a
           // plugin only what committed before it, and the provider is composed
@@ -109,11 +125,12 @@ const definition: PluginDefinition = Object.freeze({
             isTTY: () => stream.isTTY,
             request: options?.colour,
           });
-          return {
-            appearance: (variable) => withColour(composed[variable], colour),
-          };
+          return Object.freeze({
+            appearance: (variable: ThemeVariable) =>
+              withColour(composed[variable], colour),
+          });
         },
-      };
+      });
 
       register<Theming>(themeKey, theming);
     };
