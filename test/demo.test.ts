@@ -107,11 +107,11 @@ describe("the demo runner", () => {
     );
     expect(stdout).toBe(
       order
-        .map((name, index) => {
-          const call = asked[index] as Asked;
+        .map((name) => {
+          const scenario = scenarios[name];
           return reported(
             name,
-            call.kind === "input" ? "spring" : firstRow(call.request),
+            scenario.kind === "input" ? "spring" : firstRow(scenario.request),
           );
         })
         .join(""),
@@ -125,17 +125,14 @@ describe("the demo runner", () => {
       ["demo", "leaf"],
       [
         stubDialogs(asked, (call) =>
-          firstRow(call.request as SelectRequest<unknown>),
+          call.kind === "select" ? firstRow(call.request) : undefined,
         ),
       ],
     );
 
     expect(exitCode).toBe(0);
     expect(asked).toEqual([
-      {
-        kind: "select",
-        request: scenarios.leaf.request as SelectRequest<unknown>,
-      },
+      { kind: "select", request: scenarios.leaf.request },
     ]);
     expect(stdout).toBe(reported("leaf", { value: "stable", values: {} }));
   });

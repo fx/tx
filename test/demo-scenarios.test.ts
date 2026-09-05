@@ -155,29 +155,28 @@ describe("demo catalogue", () => {
     expect(request.message).not.toBe("");
   });
 
-  test("shows a filtered list beside the same list unfiltered", () => {
-    const shown = scenarios.shownfilter;
-    const typed = scenarios.filter;
-    expect(shown.kind).toBe("select");
-    expect(typed.kind).toBe("select");
-    if (shown.kind !== "select" || typed.kind !== "select") return;
-    expect(shown.request.filter).toBe("always");
-    expect(typed.request.filter).toBeUndefined();
-    expect(shown.request.options.map((option) => option.label)).toEqual(
-      typed.request.options.map((option) => option.label),
+  test("shows one list under both filter settings", () => {
+    const { request: shown } = scenarios.shownfilter;
+    const { request: typed } = scenarios.filter;
+
+    expect(shown.filter).toBe("always");
+    // Filtering is never off, so the unfiltered scenario says nothing at all
+    // rather than saying "typed": the two differ only in when the filter is on
+    // screen, which is what makes them a comparison.
+    expect("filter" in typed).toBe(false);
+    expect(shown.options.map((option) => option.label)).toEqual(
+      typed.options.map((option) => option.label),
     );
   });
 
-  test("shows the same tree under both expand bindings", () => {
-    const nested = scenarios.nested;
-    const tab = scenarios.tab;
-    if (nested.kind !== "select" || tab.kind !== "select") {
-      throw new Error("both browser scenarios are selects");
-    }
-    expect(nested.request.expand).toBeUndefined();
-    expect(tab.request.expand).toBe("tab");
-    expect(nested.request.options.map((option) => option.label)).toEqual(
-      tab.request.options.map((option) => option.label),
+  test("shows one tree under both expand bindings", () => {
+    const { request: nested } = scenarios.nested;
+    const { request: tab } = scenarios.tab;
+
+    expect(nested.expand).toBeUndefined();
+    expect(tab.expand).toBe("tab");
+    expect(nested.options.map((option) => option.label)).toEqual(
+      tab.options.map((option) => option.label),
     );
   });
 

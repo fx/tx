@@ -235,7 +235,7 @@ export function isScenario(value: string): value is ScenarioName {
   return (order as readonly string[]).includes(value);
 }
 
-export const scenarios: Record<ScenarioName, Scenario> = {
+export const scenarios = {
   input: {
     kind: "input",
     description: "standalone input with an initial value",
@@ -335,7 +335,7 @@ export const scenarios: Record<ScenarioName, Scenario> = {
       ],
     },
   },
-};
+} as const satisfies Record<ScenarioName, Scenario>;
 
 /** Presents one scenario and resolves with what the person answered, or
  * `undefined` if they cancelled. The only dispatch in the catalogue: which of
