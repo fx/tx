@@ -49,7 +49,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - A new bundled plugin under `plugins/grid/`, composed in `cli.ts` after the theme plugin it consumes.
 - The grid consumes the `theme` capability and supplies the `grid` capability. It claims no namespace and adds no command.
 - The grid does not import React or Ink. Both arrive through the host's injected dependencies, as [Generic Context and Dependencies](../specs/plugin-system/index.md#generic-context-and-dependencies) requires — a directly imported reconciler would be a second copy in the same process, rendering against different internal state than the host's.
-- The stream printed output goes to arrives on the request rather than being reached for, which is what [Grid: Printing](../specs/grid/index.md#printing) requires and what keeps the plugin off the process's own streams. Printing is verified against an injected stream double, so the "identical bytes through a pipe" guarantee is asserted rather than assumed.
+- The stream that printed output is written to arrives on the request rather than being reached for, which is what [Grid: Printing](../specs/grid/index.md#printing) requires and what keeps the plugin off the process's own streams. Printing is verified against an injected stream double, so the "identical bytes through a pipe" guarantee is asserted rather than assumed.
 - The interactive half of [Grid](../specs/grid/) — [Interactive Grid](../specs/grid/index.md#interactive-grid), [Row Actions](../specs/grid/index.md#row-actions), and [Terminal Handover](../specs/grid/index.md#terminal-handover) — is **not** implemented by this change. [Change 0029](./0029-add-interactive-grid-row-actions.md) implements it.
 
 ## Design

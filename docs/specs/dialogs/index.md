@@ -192,7 +192,7 @@ Every option is visible while the filter text is blank; [Filtering](#filtering) 
 - Printable input and Backspace MUST edit the filter text exactly as they edit a [text input's](#text-input) value.
 - The dialog MUST render the current filter text once there is any, and MUST render it in a place whose appearing and disappearing moves no option row.
 - The filter's terms are the whitespace-separated pieces of its text; an option MUST be visible when every term occurs within its display text under a case-insensitive comparison, or when the option declares fields.
-- A term MUST be matched against an option's cells individually rather than against the cells joined together, so a term never matches by spanning the gap between two cells, and an option MUST be visible when every term occurs within at least one of its cells. Headers MUST NOT participate in matching.
+- What an option's display text is follows the shape it declared, and matching follows that: on an option declaring a label, every term MUST be matched against that label; on an option declaring cells, every term MUST be matched against each cell individually rather than against the cells joined together, and the option MUST be visible when every term occurs within at least one of its cells — so a term never matches by spanning the gap between two cells. Every option of one column declares the same one of those shapes, so no column mixes the two readings. Headers MUST NOT participate in matching.
 - Visible options MUST keep their supplied order; the filter MUST NOT rank, reorder, or deduplicate them.
 - Whenever the filter text changes, the first visible option MUST become active.
 - When no option is visible, the dialog MUST indicate that nothing matches, Enter and navigation MUST do nothing, and cancellation MUST remain available.
@@ -358,7 +358,7 @@ An option MAY declare a sub-dialog holding a nested select request or a single t
 
 - An option declaring a sub-dialog MUST be marked in its list, and opening one MUST add a column to the right of the column it was opened from, inside the same render session and inside the same frame.
 - Enter MUST open the sub-dialog of an option that declares one, and MUST take an option that declares none. The right arrow MUST open a declared sub-dialog whatever the binding below, and MUST do nothing on an option declaring none.
-- The root request MAY rebind opening from Enter to Tab. Under that binding Enter MUST take an option whether or not it declares a sub-dialog, and Tab MUST open a declared one. The binding MUST be read from the root request alone and MUST apply to every column.
+- The root request MAY rebind opening from Enter to Tab, and an omitted `expand` setting MUST mean `"enter"` — the binding the rule above states. Under the Tab binding Enter MUST take an option whether or not it declares a sub-dialog, and Tab MUST open a declared one. The binding MUST be read from the root request alone and MUST apply to every column.
 - Only the rightmost column MUST answer keys; the columns left of it MUST stay rendered and ignore input until it closes.
 - The left arrow MUST close the rightmost column and return to the one that opened it, and MUST do nothing at the leftmost column, where closing the dialog is Escape's alone.
 - Escape or Ctrl-C with more than one column open MUST close only the rightmost and return to its parent with the parent's state unchanged; at the leftmost column it MUST cancel the dialog and resolve with `undefined`.

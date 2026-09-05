@@ -84,6 +84,7 @@ type Theming = {
 The variables are semantic roles, not appearances. A caller names what a piece of text *is*; the theme decides what it looks like.
 
 - The theme MUST define every variable, so no consumer has to handle an unresolved one.
+- An appearance MUST assert only what it carries: an absent `dim`, `bold`, or `inverse` MUST mean that attribute is not applied, and an absent `hue` MUST mean no hue is emitted for that variable. An absent field is never an unresolved or inherited value, which is what lets the default theme resolve every variable while emitting no hue at all.
 - `chrome` MUST name every part a surface draws around its content: frame edges, corners, titles, dividers, key hints, prompts, and overflow counts.
 - `content` MUST name a surface's own text: an option label, a grid cell, and text the user has entered.
 - `cursor` MUST name the bar marking the active row.
@@ -146,11 +147,11 @@ Whether hues reach a surface is one rule, applied by one owner — not a flag ea
 
 - The theme MUST resolve whether hues are emitted, and every appearance it returns MUST already reflect that decision, so a consumer never tests for colour itself.
 - The five inputs MUST be consulted in one fixed order, and the first that decides MUST settle the question with the rest unread. No pair of inputs may be left to interact, because a rule stated as a set of independent conditions leaves every conflicting pair — `TERM=dumb` beside `FORCE_COLOR=1`, an explicit request beside `NO_COLOR` — without an answer. Highest first:
-  1. The caller's own request, where the invoking command made one: `false` MUST disable hues and `true` MUST enable them. It is the most specific statement of intent there is, and a command that offers the flag has already decided the flag wins.
+  1. The caller's own request, where the invoking command made one: `false` MUST disable hues and `true` MUST enable them. It is the most specific statement of intent there is, and a command that offers the flag has already decided the flag wins. A request counts as made only where the options argument is supplied and its `colour` field is exactly `true` or exactly `false`; an omitted options argument, and a `colour` that is absent or `undefined`, MUST mean no request was made and MUST be passed over, leaving the question to the inputs below it.
   2. `NO_COLOR` present in the environment with any value, including an empty one, MUST disable hues.
   3. `FORCE_COLOR` MUST decide in both directions: `0` or `false` MUST disable hues even on a TTY, and any other value MUST enable them even off one. A `FORCE_COLOR` that is absent, empty, or only whitespace decides nothing and MUST be passed over, leaving the question to the inputs below it.
   4. `TERM` being `dumb` MUST disable hues.
-  5. The stream being drawn to not being a TTY MUST disable hues.
+  5. The stream being drawn to not being a TTY MUST disable hues. A stream counts as a TTY only where its `isTTY` is exactly `true`; an `isTTY` that is absent or `undefined` MUST be read as not a TTY rather than as unknown. A stream that says nothing about itself is the redirected case, and the two readings emit different bytes, so the question cannot be left to the implementation.
 - Where no input decides, hues MUST be enabled.
 - Two consequences of that order are worth stating outright, because both are cases an implementation will be asked about: `NO_COLOR` beats `FORCE_COLOR`, and `FORCE_COLOR=1` beats `TERM=dumb` and beats a redirected stream, which is what makes it a way of forcing colour rather than a hint.
 - With hues disabled, a theme MUST still resolve dim, bold, and inverse, so a surface keeps its structure when it loses its colour.
@@ -172,6 +173,12 @@ Whether hues reach a surface is one rule, applied by one owner — not a flag ea
 - **GIVEN** output is redirected and no colour variable is set
 - **WHEN** a surface renders
 - **THEN** no hue is emitted and the visible text is the text a terminal would show
+
+#### Scenario: A stream declaring no TTY-ness
+
+- **GIVEN** a stream whose `isTTY` is absent and no colour variable is set
+- **WHEN** a surface renders
+- **THEN** no hue is emitted, because an absent `isTTY` is not a TTY
 
 #### Scenario: Forced colour beats a dumb terminal
 

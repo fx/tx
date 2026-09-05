@@ -242,7 +242,7 @@ bun run check
 
 CI uses non-writing commands and installs with the frozen Bun lockfile.
 
-The demonstration is a script alongside these rather than one of them: it is run by a developer looking at the bundled dialogs, never by `check` and never by CI, because it waits for a person at a terminal. What CI does enforce about it is that it is ordinary checked source — the same lint, type-check, and coverage rules as everything else — which is what the [Development Conventions](#development-conventions) requirement above says.
+The demonstration is a script alongside these rather than one of them, and the distinction that settles it is executed against checked. The script is never *executed* by `check` or by CI: it is run by a developer looking at the bundled dialogs, because it waits for a person at a terminal. Its source is *checked* by both, exactly like any other source in the repository — the same lint, type-check, and coverage rules — which is what the [Development Conventions](#development-conventions) requirement above says.
 
 ### Command Resolution
 
