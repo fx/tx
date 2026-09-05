@@ -70,6 +70,17 @@ import type { Plugin } from "@fx/tx/plugin";
 
 Marketplace plugins, dependencies, and install scripts are not sandboxed and run with the same permissions as `tx`. Install only code you trust. See the [plugin guide](docs/manual/plugins.md) for repository setup and plugin authoring.
 
+## Demo
+
+`bun run demo` walks through every dialog the bundled dialogs plugin renders, one scenario after another; `bun run demo <scenario>` runs a single one, and `bun run demo --help` lists them.
+
+```sh
+bun run demo
+bun run demo nested
+```
+
+The demo runs from a source checkout with dependencies installed. It is not part of the published package's `files` allowlist, because it imports `plugins/dialogs/index.ts` and `src/cli.ts` by relative path and neither is published. It renders on standard error and prints results on standard output, so redirecting the results still shows the dialogs.
+
 ## Releases
 
 [Release Please](https://github.com/googleapis/release-please-action) maintains the release PR, `package.json` version, tag, GitHub Release, and CHANGELOG from conventional commits. Release PRs are never auto-merged; a maintainer must review required CI and merge each one manually.

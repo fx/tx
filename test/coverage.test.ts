@@ -4,6 +4,7 @@ import { readdir } from "node:fs/promises";
 const productionRoots = [
   new URL("../src/", import.meta.url),
   new URL("../plugins/", import.meta.url),
+  new URL("../demo/", import.meta.url),
 ];
 const sourceModuleExtensions = [".ts", ".tsx", ".mts", ".cts"];
 const declarationModulePattern = /\.d\.(?:ts|mts|cts)$/;

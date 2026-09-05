@@ -217,7 +217,7 @@ changes:
     path: changes/0024-relocate-and-cover-the-demo.md
     description: Move the repository-root demo into checked source, run it through a bun package script, document it in the README, and hold it to the lint, type-check, and coverage gates.
     spec: architecture
-    status: draft
+    status: complete
     depends_on: []
   - id: "0025"
     name: guarantee-cell-width-by-construction
