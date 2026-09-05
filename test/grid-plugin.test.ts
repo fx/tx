@@ -43,6 +43,13 @@ const escapeCharacter = String.fromCharCode(0x1b);
 const anySequence = new RegExp(escapeCharacter, "gu");
 const stylingSequence = new RegExp(`${escapeCharacter}\\[[0-9;]*m`, "gu");
 
+/** Whitespace `trimEnd` removes and a pattern over ASCII spaces would not, so
+ * a cell ending in one is what separates holding back exactly what the
+ * renderer takes from guessing at it. Written as escapes because neither is
+ * distinguishable from a space in source. */
+const nonBreakingSpace = "\u00a0";
+const ideographicSpace = "\u3000";
+
 /** Every SGR sequence removed, which is what "with hues removed" means when
  * two printed grids are compared. */
 function unstyled(output: string): string {
@@ -293,12 +300,36 @@ describe("printing a grid", () => {
     expect(lines(output)).toEqual(["alpha  b  ", "c      dd"]);
   });
 
-  test("prints those spaces the same whether or not the cell is hued", async () => {
-    // The renderer ends a line by removing what trails it, and it cannot see a
-    // styled run to remove — so a cell ending in spaces would survive with a
-    // hue and be rewritten without one, which would make the printed
-    // characters depend on the colour decision.
-    const request = { rows: [["b  "]] } as const;
+  test("prints trailing whitespace a space pattern would have missed", async () => {
+    // The renderer ends a line with `trimEnd`, which removes the whole Unicode
+    // whitespace set rather than the ASCII space alone. A cell ending in a
+    // non-breaking or an ideographic space is therefore one the grid has to
+    // hold back too, which is why what it holds back is computed with
+    // `trimEnd` rather than with a pattern that would have covered only the
+    // last of these three.
+    const output = await print({
+      rows: [
+        ["a", `x${nonBreakingSpace}`],
+        ["b", `y${ideographicSpace}`],
+        ["c", "z  "],
+      ],
+    });
+
+    expect(lines(output)).toEqual([
+      `a  x${nonBreakingSpace}`,
+      `b  y${ideographicSpace}`,
+      "c  z  ",
+    ]);
+  });
+
+  test("prints that whitespace the same whether or not the cell is hued", async () => {
+    // The renderer removes what trails a line, and it cannot see a styled run
+    // to remove — so a cell ending in whitespace would survive with a hue and
+    // be rewritten without one, which would make the printed characters depend
+    // on the colour decision.
+    const request = {
+      rows: [[`x${nonBreakingSpace}`], [`y${ideographicSpace}`], ["z  "]],
+    } as const;
     const hue = [hueing("red")];
 
     const coloured = await print(request, recorder({ isTTY: true }), hue, {});
@@ -306,7 +337,7 @@ describe("printing a grid", () => {
       NO_COLOR: "1",
     });
 
-    expect(plain).toBe("b  \n");
+    expect(plain).toBe(`x${nonBreakingSpace}\ny${ideographicSpace}\nz  \n`);
     expect(unstyled(coloured)).toBe(plain);
   });
 

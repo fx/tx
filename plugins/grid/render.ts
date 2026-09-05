@@ -53,27 +53,29 @@ function styling(theme: Theme, variable: ThemeVariable) {
  * height, and the blank line above a summary is spacing the layout decided on
  * rather than an accident of what happened to be in the grid. This space is
  * the grid's own rather than anything a consumer supplied, so letting the
- * renderer take it back off the end is exactly what is wanted here. */
+ * renderer take it back off the end is exactly what is wanted here — the one
+ * place the printed bytes still turn on the renderer trimming, and one the
+ * suite pins, so it would fail rather than quietly print a space. */
 const blankLine = " ";
 
 /**
- * A line split into the part the renderer draws and the spaces held back from
- * it, which are appended to the line it produced.
+ * A line split into the part the renderer draws and the whitespace held back
+ * from it, which is appended to the line it produced.
  *
  * The renderer ends every line it draws with `trimEnd`, and it is not
- * consistent about it: an unstyled run of spaces at the end of a line is
+ * consistent about it: an unstyled run of whitespace at the end of a line is
  * removed while a styled one survives. A cell whose text genuinely ends in
- * spaces would therefore have them rewritten away — which [Grid: Cell Values]
- * forbids, a supplied string never being rewritten beyond having its control
- * characters removed — and would be rewritten only where it carried no hue,
- * which would make the printed bytes depend on the colour decision that
+ * whitespace would therefore have it rewritten away — which [Grid: Cell
+ * Values] forbids, a supplied string never being rewritten beyond having its
+ * control characters removed — and would be rewritten only where it carried no
+ * hue, which would make the printed bytes depend on the colour decision that
  * [Grid: Printing] says they may not.
  *
- * So the renderer is handed no line ending in a space and has nothing to take
- * back. Nothing is rewritten: the characters held back before the render are
- * exactly the characters restored after it. The layout has already declined to
- * pad past the last cell with anything in it, so what is held back here is
- * only ever the consumer's own text.
+ * So the renderer is handed no line ending in whitespace and has nothing to
+ * take back. Nothing is rewritten: the characters held back before the render
+ * are exactly the characters restored after it. The layout has already
+ * declined to pad past the last cell with anything in it, so what is held back
+ * here is only ever the consumer's own text.
  */
 type SplitLine = { readonly head: Line; readonly trailing: string };
 
@@ -82,10 +84,17 @@ function splitTrailing(line: Line): SplitLine {
   let trailing = "";
   while (head.length > 0) {
     const last = head[head.length - 1] as LineSegment;
-    const core = last.text.replace(/ +$/u, "");
+    // `trimEnd` rather than a pattern over spaces. What has to be held back is
+    // exactly what the renderer would remove, and the only way to know that
+    // exactly is to compute it with the very function the renderer removes it
+    // with. A character class would be this module's guess at another one's
+    // idea of whitespace: it would already miss a non-breaking or an
+    // ideographic space, and it would drift again the moment either side's
+    // whitespace set changed.
+    const core = last.text.trimEnd();
     trailing = last.text.slice(core.length) + trailing;
-    // A segment that was nothing but spaces leaves no text behind, so the one
-    // before it is what the drawn line now ends on.
+    // A segment that was nothing but whitespace leaves no text behind, so the
+    // one before it is what the drawn line now ends on.
     if (core === "") {
       head.pop();
       continue;
