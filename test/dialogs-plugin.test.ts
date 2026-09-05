@@ -28,7 +28,8 @@ type TextField = {
 };
 
 type SelectOption<T> = {
-  readonly label: string;
+  readonly label?: string;
+  readonly cells?: readonly string[];
   readonly value: T;
   readonly fields?: readonly TextField[];
   readonly dialog?: SelectRequest<T> | TextField;
@@ -37,6 +38,7 @@ type SelectOption<T> = {
 type SelectRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
+  readonly headers?: readonly string[];
   readonly filter?: "typed" | "always";
   readonly expand?: "enter" | "tab";
 };
@@ -626,8 +628,8 @@ async function runEntry(
   return { value, failure, stdin, stderr, stdout: stdoutText(), exitCode };
 }
 
-async function runRejected<T>(
-  options: readonly SelectOption<T>[],
+async function runRejectedRequest<T>(
+  request: SelectRequest<T>,
   stdin = new TerminalInput(),
   stderr = new CapturedOutput(),
 ): Promise<{
@@ -644,7 +646,7 @@ async function runRejected<T>(
       dialogsPlugin,
       consumer(async (dialogs) => {
         try {
-          await dialogs.select({ message: "Failure", options });
+          await dialogs.select(request);
         } catch (error) {
           failure = error;
         }
@@ -653,6 +655,50 @@ async function runRejected<T>(
     context(stdin, stderr),
   );
   return { exitCode, failure, stdin, stderr };
+}
+
+async function runRejected<T>(
+  options: readonly SelectOption<T>[],
+  stdin = new TerminalInput(),
+  stderr = new CapturedOutput(),
+): ReturnType<typeof runRejectedRequest<T>> {
+  return runRejectedRequest({ message: "Failure", options }, stdin, stderr);
+}
+
+/** A whole request driven on a terminal, for the dialogs whose behavior is
+ * declared on the request rather than on its options — headers, so far. The
+ * options-taking `runSelection` covers everything else and stays the way in. */
+async function runSelectionRequest<T>(
+  request: SelectRequest<T>,
+  input: readonly DialogStep[],
+  stderr: CapturedOutput = new CapturedOutput(),
+): Promise<{
+  readonly value: T | undefined;
+  readonly stderr: CapturedOutput;
+  readonly exitCode: number;
+}> {
+  const stdin = new TerminalInput();
+  const commandContext = context(stdin, stderr);
+  let result: SelectResult<T> | undefined;
+  const running = main(
+    ["choose"],
+    [
+      themePlugin,
+      dialogsPlugin,
+      consumer(async (dialogs) => {
+        result = await dialogs.select(request);
+      }),
+    ],
+    commandContext,
+  );
+  await until(() => stdin.rawModes.includes(true));
+  for (const step of input) {
+    if (typeof step === "string") stdin.write(step);
+    else await step(stderr, stdin);
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+  }
+  const exitCode = await running;
+  return { value: result?.value, stderr, exitCode };
 }
 
 describe("bundled dialogs provider", () => {
@@ -5130,5 +5176,366 @@ describe("dialog animations", () => {
     } finally {
       probe.restore();
     }
+  });
+});
+
+describe("aligned cells and headers", () => {
+  /** A column of cells: rows of the same shape, which is what makes them a
+   * table rather than three lists that happen to be beside each other. */
+  const releases: readonly SelectOption<string>[] = [
+    { cells: ["1.6.1", "2026-09-05", "1.2 MB"], value: "1.6.1" },
+    { cells: ["1.6.0", "2026-08-30", "1.2 MB"], value: "1.6.0" },
+    { cells: ["1.5.9", "2026-08-12", "980 kB"], value: "1.5.9" },
+  ];
+  const HEADERS = ["Version", "Published", "Size"];
+
+  /** What a column shows when its filter has left nothing visible, which is
+   * what a test waiting for the filter to empty a list waits for. */
+  const noMatchRow = "no match";
+
+  /** A column of cells long enough to scroll, and wide enough that its second
+   * field has somewhere to start. */
+  function rows(count: number): readonly SelectOption<number>[] {
+    return Array.from({ length: count }, (_, index) => {
+      const number = String(index + 1).padStart(2, "0");
+      return { cells: [`Row ${number}`, `note ${number}`], value: index + 1 };
+    });
+  }
+
+  test("rejects a cell declaration before rendering or terminal changes", async () => {
+    for (const [request, message] of [
+      [
+        {
+          message: "Both",
+          options: [{ label: "One", cells: ["One"], value: 1 }],
+        },
+        "A select option requires either a label or cells, and not both",
+      ],
+      [
+        { message: "Neither", options: [{ value: 1 }] },
+        "A select option requires either a label or cells, and not both",
+      ],
+      [
+        // An empty cell list is not a list of cells, so the option has
+        // declared neither shape and the same rule rejects it. There is no
+        // separate validation of an empty list, and none is needed.
+        { message: "Empty", options: [{ cells: [], value: 1 }] },
+        "A select option requires either a label or cells, and not both",
+      ],
+      [
+        {
+          message: "Mixed",
+          options: [
+            { cells: ["1.6.1", "ok"], value: 1 },
+            { label: "Something else", value: 2 },
+          ],
+        },
+        "A select column cannot mix label options with cell options",
+      ],
+      [
+        {
+          message: "Uneven",
+          options: [
+            { cells: ["1.6.1", "ok"], value: 1 },
+            { cells: ["1.6.0"], value: 2 },
+          ],
+        },
+        "A select column requires the same number of cells on every option",
+      ],
+      [
+        {
+          message: "Headed labels",
+          options: [{ label: "One", value: 1 }],
+          headers: ["Version"],
+        },
+        "Select headers require a column of cell options",
+      ],
+      [
+        {
+          message: "Miscounted",
+          options: [{ cells: ["1.6.1", "ok"], value: 1 }],
+          headers: ["Version"],
+        },
+        "Select headers require one header for every cell of their column",
+      ],
+    ] as const) {
+      const result = await runRejectedRequest(request as SelectRequest<number>);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).toBe(message);
+      expect(result.stderr.text()).toBe("");
+      expect(result.stdin.rawModes).toEqual([]);
+    }
+  });
+
+  /** Every column is its own request and decides its own shape and its own
+   * headers, so a column no reader has walked to yet is validated exactly as
+   * the one on screen is — before anything renders. */
+  test("rejects an invalid column at every reachable depth", async () => {
+    const nested = (
+      options: readonly SelectOption<number>[],
+      headers?: readonly string[],
+    ): SelectRequest<number> => ({
+      message: "Root",
+      options: [
+        {
+          label: "Category",
+          value: 1,
+          dialog: {
+            message: "Deep",
+            options: [
+              {
+                label: "Deeper",
+                value: 2,
+                dialog: {
+                  message: "Deepest",
+                  options,
+                  ...(headers === undefined ? {} : { headers }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    for (const [request, message] of [
+      [
+        nested([
+          { cells: ["a", "b"], value: 3 },
+          { label: "Lone", value: 4 },
+        ]),
+        "A select column cannot mix label options with cell options",
+      ],
+      [
+        nested([{ cells: ["a", "b"], value: 3 }], ["Only"]),
+        "Select headers require one header for every cell of their column",
+      ],
+      [
+        nested([{ label: "Deepest", value: 3 }], ["Name"]),
+        "Select headers require a column of cell options",
+      ],
+    ] as const) {
+      const result = await runRejectedRequest(request);
+
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).toBe(message);
+      expect(result.stderr.text()).toBe("");
+      expect(result.stdin.rawModes).toEqual([]);
+    }
+  });
+
+  /** Nothing about a column of cells claims it has headers, so declaring none
+   * contradicts nothing: an empty list means exactly what omitting it means,
+   * and is not rejected. */
+  test("takes an empty header list as a column that declares none", async () => {
+    const result = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: releases, headers: [] },
+      [CARRIAGE_RETURN],
+    );
+
+    expect(result.value).toBe("1.6.1");
+    const rendered = frameRows(result.stderr);
+    expect(rendered[1]).toContain("1.6.1");
+    expect(stripped(lastFrame(result.stderr))).not.toContain("Version");
+  });
+
+  test("draws the headers over fields every row shares", async () => {
+    const result = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: releases, headers: HEADERS },
+      [CARRIAGE_RETURN],
+    );
+
+    expect(result.value).toBe("1.6.1");
+    const rendered = frameRows(result.stderr);
+    // The header is the first row of the band, and the options follow it.
+    // `Version` is wider than any version under it, so the field is as wide as
+    // its header and the dates begin two columns past it.
+    expect(rendered[1]).toContain("Version  Published   Size");
+    expect(rendered[2]).toContain("1.6.1    2026-09-05  1.2 MB");
+    expect(rendered[3]).toContain("1.6.0    2026-08-30  1.2 MB");
+    expect(rendered[4]).toContain("1.5.9    2026-08-12  980 kB");
+    // Every field begins at the same terminal column on every row, the header
+    // included, which is what the reader reads as a table.
+    for (const [row, cell] of [
+      [1, "Published"],
+      [2, "2026-09-05"],
+      [3, "2026-08-30"],
+      [4, "2026-08-12"],
+    ] as const) {
+      expect((rendered[row] as string).indexOf(cell)).toBe(11);
+    }
+  });
+
+  /** The header is chrome: it names the list rather than belonging to it, and
+   * the default theme dims chrome relative to content. */
+  test("draws the header as chrome and the cells as content", async () => {
+    const result = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: releases, headers: HEADERS },
+      [CARRIAGE_RETURN],
+    );
+    const frame = lastFrame(result.stderr);
+
+    expect(dimmedAt(frame, "Version")).toBe(true);
+    expect(dimmedAt(frame, "2026-08-30")).toBe(false);
+  });
+
+  /** The spec's own filtering scenario: a term matches inside one cell, so one
+   * that would only match across the gap between two matches nothing. */
+  test("matches a term within one cell and never across the gap", async () => {
+    const pairs: readonly SelectOption<string>[] = [
+      { cells: ["alpha", "beta"], value: "ab" },
+      { cells: ["gamma", "delta"], value: "gd" },
+    ];
+    let spanning: readonly string[] = [];
+    const result = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: pairs },
+      [
+        "alphab",
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes(noMatchRow));
+          spanning = frameRows(stderr);
+        },
+        ...Array.from({ length: 6 }, () => BACKSPACE),
+        "delt",
+        CARRIAGE_RETURN,
+      ],
+    );
+
+    expect(spanning.some((row) => row.includes("no match"))).toBe(true);
+    // A term in a trailing cell finds its row, so it is the gap that is not
+    // matched across rather than the later cells that are not matched at all.
+    expect(result.value).toBe("gd");
+  });
+
+  /** The header does not scroll with the rows beneath it, and the filter never
+   * sees it: it stays at the top of the band in both. */
+  test("keeps the header while the list scrolls and while it filters", async () => {
+    let scrolled: readonly string[] = [];
+    let filtered: readonly string[] = [];
+    const result = await runSelectionRequest(
+      {
+        message: SELECT_MESSAGE,
+        options: rows(30),
+        headers: ["Row", "Note"],
+      },
+      [
+        ...Array.from({ length: 12 }, () => DOWN),
+        async (stderr) => {
+          await until(() => showsActiveRow(stderr, "Row 13  note 13"));
+          scrolled = frameRows(stderr);
+        },
+        "zzz",
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes(noMatchRow));
+          filtered = frameRows(stderr);
+        },
+        ESCAPE,
+      ],
+      terminalOfRows(40),
+    );
+
+    expect(result.value).toBeUndefined();
+    expect(scrolled[1]).toContain("Row     Note");
+    expect(scrolled.join("\n")).not.toContain("Row 01");
+    // A column whose filter matched nothing has no cells left to measure, so
+    // its fields fall back to the headers naming them — exactly as a column of
+    // labels narrows to the width of `no match` when it empties.
+    expect(filtered[1]).toContain("Row  Note");
+    expect(filtered[2]).toContain(noMatchRow);
+  });
+
+  /** The header costs the viewport one of the rows it had rather than being
+   * drawn over one: the frame is the same height either way, and one fewer
+   * option is in it. */
+  test("costs the window one option row", async () => {
+    const bare = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: rows(30) },
+      [CARRIAGE_RETURN],
+      terminalOfRows(40),
+    );
+    const headed = await runSelectionRequest(
+      { message: SELECT_MESSAGE, options: rows(30), headers: ["Row", "Note"] },
+      [CARRIAGE_RETURN],
+      terminalOfRows(40),
+    );
+
+    const without = frameRows(bare.stderr);
+    const with_ = frameRows(headed.stderr);
+    expect(without.length).toBe(with_.length);
+    expect(without.join("\n")).toContain("Row 10");
+    expect(with_.join("\n")).not.toContain("Row 10");
+    expect(with_.join("\n")).toContain("Row 09");
+    // The count of what is hidden below follows the window it was left with.
+    expect(without.join("\n")).toContain("▼ 20");
+    expect(with_.join("\n")).toContain("▼ 21");
+  });
+
+  /** A cell option leading somewhere is marked exactly as a label option is:
+   * on the column's right edge, past the last field. */
+  test("marks a cell row that opens a sub-dialog", async () => {
+    let open: readonly string[] = [];
+    const result = await runSelectionRequest(
+      {
+        message: SELECT_MESSAGE,
+        options: [
+          { cells: ["1.6.1", "ok"], value: "1.6.1" },
+          {
+            cells: ["1.6.0", "stale"],
+            value: "1.6.0",
+            dialog: {
+              message: "Deep",
+              options: [{ label: "Only", value: "only" }],
+            },
+          },
+        ],
+        headers: ["Version", "Status"],
+      },
+      [
+        async (stderr) => {
+          await until(() => stripped(stderr.text()).includes("Version"));
+          open = frameRows(stderr);
+        },
+        CARRIAGE_RETURN,
+      ],
+    );
+
+    expect(result.value).toBe("1.6.1");
+    expect(open[3]).toContain(`1.6.0    stale  ${EXPAND_MARKER}`);
+    // The header spends the marker's columns on padding rather than carrying
+    // one, and the unmarked row does the same.
+    expect(open[1]).toContain("Version  Status");
+    expect(open[2]).not.toContain(EXPAND_MARKER);
+  });
+
+  /** Each column decides its own shape and its own headers, so a column of
+   * labels may open a column of cells and the reverse. */
+  test("lets a column of labels open a column of cells", async () => {
+    const result = await runSelectionRequest(
+      {
+        message: SELECT_MESSAGE,
+        options: [
+          {
+            label: "Releases",
+            value: "releases",
+            dialog: {
+              message: "Which release?",
+              options: releases,
+              headers: HEADERS,
+            },
+          },
+        ],
+      },
+      [CARRIAGE_RETURN, CARRIAGE_RETURN],
+    );
+
+    expect(result.value).toBe("1.6.1");
+    const rendered = frameRows(result.stderr, PANEL);
+    expect(rendered[0]).toContain("Pick one › Which release?");
+    // The parent column keeps its label and the child draws its header beside
+    // it, in the one band the two columns share.
+    expect(rendered[1]).toContain("Releases");
+    expect(rendered[1]).toContain("Version  Published   Size");
   });
 });

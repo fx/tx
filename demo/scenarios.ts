@@ -21,11 +21,15 @@ export type TextField = {
 export type SelectRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
+  readonly headers?: readonly string[];
   readonly filter?: "typed" | "always";
   readonly expand?: "enter" | "tab";
 };
 export type SelectOption<T> = {
-  readonly label: string;
+  /** Exactly one of these two, on every option of a column: a single label, or
+   * the cells a column aligns into fields. */
+  readonly label?: string;
+  readonly cells?: readonly string[];
   readonly value: T;
   readonly fields?: readonly TextField[];
   readonly dialog?: SelectRequest<T> | TextField;
@@ -216,6 +220,37 @@ function targets(expand?: "enter" | "tab"): SelectRequest<string> {
   };
 }
 
+/**
+ * A release table: a column of cell options under the headers naming its
+ * fields.
+ *
+ * Deliberately uneven — a one-character version beside a long one, a date
+ * beside a dash, and a row whose glyphs take two terminal columns each — so
+ * the fields are visibly measured rather than guessed, and typing shows that a
+ * term matches inside one cell rather than across the gap between two: `1.6`
+ * finds the releases, `alpha` finds only the row whose channel says so, and
+ * `1.6.1stable` finds nothing at all.
+ */
+const releases: SelectRequest<string> = {
+  message: "Pick a release",
+  headers: ["Version", "Published", "Channel", "Size"],
+  options: [
+    { cells: ["1.6.1", "2026-09-05", "stable", "1.2 MB"], value: "1.6.1" },
+    { cells: ["1.6.0", "2026-08-30", "stable", "1.2 MB"], value: "1.6.0" },
+    { cells: ["1.5.9", "2026-08-12", "stable", "980 kB"], value: "1.5.9" },
+    { cells: ["2.0.0-rc.1", "2026-09-01", "alpha", "1.4 MB"], value: "2.0-rc" },
+    { cells: ["9", "—", "nightly", "1.4 MB"], value: "nightly" },
+    { cells: ["1.4.0", "2026-06-30", "国际化 😀", "1.1 MB"], value: "1.4.0" },
+    {
+      // A cell row leads somewhere exactly as a label row does: the marker is
+      // on the column's right edge, past the last field.
+      cells: ["custom…", "—", "—", "—"],
+      value: "custom",
+      dialog: { type: "text", name: "release", message: "Which release?" },
+    },
+  ],
+};
+
 /** The order the scenarios run in when the demo is given no argument, and so
  * the order the help text lists them in. */
 export const order = [
@@ -223,6 +258,7 @@ export const order = [
   "select",
   "filter",
   "shownfilter",
+  "cells",
   "fields",
   "nested",
   "tab",
@@ -273,6 +309,12 @@ export const scenarios = {
       options: branchOptions(),
       filter: "always",
     },
+  },
+
+  cells: {
+    kind: "select",
+    description: "a table: aligned cells under the headers naming them",
+    request: releases,
   },
 
   fields: {

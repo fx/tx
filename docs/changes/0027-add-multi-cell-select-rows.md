@@ -5,7 +5,7 @@
 Let a select option declare aligned cells instead of a single label, and let a column declare headers over them. This is what turns a select into a driveable table, and it is the mechanism [Change 0029](./0029-add-interactive-grid-row-actions.md) builds the interactive grid on.
 
 **Spec:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0025, 0026
 
 ## Motivation
@@ -94,23 +94,23 @@ The `chrome` variable is also the second dependency. [Change 0026](./0026-add-th
 
 ## Tasks
 
-- [ ] Add cells to the option model
-  - [ ] Make `label` optional and add `cells` in `plugins/dialogs/types.ts`, with `headers` on the request
-  - [ ] Validate label-or-cells, one shape per column, uniform cell counts within a column, and header count and placement, before rendering — alongside the existing option and field validations, at every reachable sub-dialog depth, and following the empty-collection principle [Dialogs: Select Request](../specs/dialogs/index.md#select-request) states, which decides an empty cell list and an empty header list without a validation of its own for either
-  - [ ] Tests asserting each rejection happens before any terminal state changes
-- [ ] Measure and draw aligned fields
-  - [ ] Add vector field-width measurement and cell layout to `plugins/dialogs/columns.ts`, leaving the scalar label path untouched
-  - [ ] Fix the inter-field gap at two spaces and add it to the glyph and wording contract
-  - [ ] Pure-function tests in `test/dialogs-columns.test.ts` for field widths, gaps, per-field truncation, and the exact-column-width invariant over cell options
-- [ ] Match per cell
-  - [ ] Extend `MatchableOption` and `visibleOptionIndices` in `plugins/dialogs/filter.ts` to match each term within one cell
-  - [ ] Tests for a term that would match only across a field boundary, and for a term matching in a trailing field
-- [ ] Draw the header row
-  - [ ] Render a declared header as the first row of its column's band, through the `chrome` variable, never selectable and never filtered
-  - [ ] Account for the header in `optionRowCount` so a column with one shows one fewer option row
-  - [ ] Tests for a scrolled list keeping its header, a filtered list keeping its header, and the viewport arithmetic
-- [ ] Show it in the demo
-  - [ ] Add a scenario to `demo/` presenting a column of cell options with headers, covered by the demo tests [Change 0024](./0024-relocate-and-cover-the-demo.md) adds
+- [x] Add cells to the option model
+  - [x] Make `label` optional and add `cells` in `plugins/dialogs/types.ts`, with `headers` on the request
+  - [x] Validate label-or-cells, one shape per column, uniform cell counts within a column, and header count and placement, before rendering — alongside the existing option and field validations, at every reachable sub-dialog depth, and following the empty-collection principle [Dialogs: Select Request](../specs/dialogs/index.md#select-request) states, which decides an empty cell list and an empty header list without a validation of its own for either
+  - [x] Tests asserting each rejection happens before any terminal state changes
+- [x] Measure and draw aligned fields
+  - [x] Add vector field-width measurement and cell layout to `plugins/dialogs/columns.ts`, leaving the scalar label path untouched
+  - [x] Fix the inter-field gap at two spaces and add it to the glyph and wording contract
+  - [x] Pure-function tests in `test/dialogs-columns.test.ts` for field widths, gaps, per-field truncation, and the exact-column-width invariant over cell options
+- [x] Match per cell
+  - [x] Extend `MatchableOption` and `visibleOptionIndices` in `plugins/dialogs/filter.ts` to match each term within one cell
+  - [x] Tests for a term that would match only across a field boundary, and for a term matching in a trailing field
+- [x] Draw the header row
+  - [x] Render a declared header as the first row of its column's band, through the `chrome` variable, never selectable and never filtered
+  - [x] Account for the header in `optionRowCount` so a column with one shows one fewer option row
+  - [x] Tests for a scrolled list keeping its header, a filtered list keeping its header, and the viewport arithmetic
+- [x] Show it in the demo
+  - [x] Add a scenario to `demo/` presenting a column of cell options with headers, covered by the demo tests [Change 0024](./0024-relocate-and-cover-the-demo.md) adds
 
 ## Open Questions
 

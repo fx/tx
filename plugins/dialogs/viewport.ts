@@ -57,11 +57,21 @@ export function optionRowCount(
   visibleCount: number,
   terminalRows: number,
   collecting: boolean,
+  /** Whether this column draws a header, which is a row of the band that is
+   * not an option row. It costs the window one of the rows it had, and it
+   * costs it against both bounds: against the terminal, because the row is
+   * drawn inside the same frame, and against the ceiling, because a band
+   * eleven rows tall is exactly the height the ceiling is there to hold. */
+  header = false,
 ): number {
   if (visibleCount < 1) return 0;
-  const affordable = terminalRows - chromeHeight(collecting) - 1;
+  const headerRows = header ? 1 : 0;
+  const affordable = terminalRows - chromeHeight(collecting) - 1 - headerRows;
   if (affordable < 1) return 0;
-  return Math.max(1, Math.min(maximumOptionRows, affordable, visibleCount));
+  return Math.max(
+    1,
+    Math.min(maximumOptionRows - headerRows, affordable, visibleCount),
+  );
 }
 
 /**
@@ -119,8 +129,11 @@ export function optionWindow(
   previousStart: number,
   terminalRows: number,
   collecting: boolean,
+  /** Whether this column draws a header over its options, which costs it one
+   * of the rows it had. */
+  header = false,
 ): OptionWindow {
-  const count = optionRowCount(visibleCount, terminalRows, collecting);
+  const count = optionRowCount(visibleCount, terminalRows, collecting, header);
   const furthestStart = Math.max(0, visibleCount - count);
   // Clamped against the list as it stands, so a start left over from a longer
   // list is pulled back rather than remembered past the end of this one.

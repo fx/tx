@@ -377,3 +377,42 @@ describe("column browser budget", () => {
     expect(optionWindow(30, 0, 0, terminal, true).count).toBe(1);
   });
 });
+
+describe("a column that draws a header", () => {
+  /** The header is a row of the band that is not an option row, so it costs
+   * the window one of the rows it had rather than being drawn over one. */
+  test("shows one fewer option row than the same column without one", () => {
+    for (const [, collecting] of STATES) {
+      expect(optionRowCount(30, ROOMY, collecting, true)).toBe(
+        optionRowCount(30, ROOMY, collecting, false) - 1,
+      );
+    }
+    expect(optionRowCount(30, ROOMY, false, true)).toBe(maximumOptionRows - 1);
+  });
+
+  /** It costs a row against the terminal too, because it is drawn inside the
+   * same frame: a header budgeted only against the ceiling would take the
+   * frame one row past the height every other rule holds it under. */
+  test("gives up a row of a terminal that has few to give", () => {
+    expect(optionRowCount(30, 9, false, true)).toBe(4);
+    expect(optionRowCount(30, 9, false, false)).toBe(5);
+    expect(optionRowCount(30, 12, true, true)).toBe(4);
+  });
+
+  /** A terminal that can afford one row and a header can afford neither: a
+   * header over a list with nothing in it is a list the reader cannot use, and
+   * drawing both is the row that would clear the screen. */
+  test("draws nothing where the terminal affords the header alone", () => {
+    expect(optionRowCount(30, 5, false, false)).toBe(1);
+    expect(optionRowCount(30, 5, false, true)).toBe(0);
+  });
+
+  /** The window is derived through the same count, so a header shortens what a
+   * column scrolls over rather than only what it draws. */
+  test("windows the list against the rows the header left", () => {
+    const withHeader = optionWindow(30, 0, 0, ROOMY, false, true);
+    expect(withHeader.count).toBe(maximumOptionRows - 1);
+    expect(withHeader.hiddenBelow).toBe(30 - (maximumOptionRows - 1));
+    expect(optionWindow(30, 0, 0, ROOMY, false).count).toBe(maximumOptionRows);
+  });
+});
