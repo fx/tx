@@ -1,56 +1,61 @@
-#!/usr/bin/env bun
 /**
- * Shippable demo showcasing every dialogs-plugin feature.
+ * The demo's catalogue: what each scenario shows and the exact dialog it
+ * presents.
  *
- *   ./demo              # every scenario, one after another
- *   bun demo            # same via bun
- *   ./demo input        # standalone input: blinking caret
- *   ./demo select       # short list, no sub-dialogs: confirmation flash
- *   ./demo filter       # long list: start typing and it narrows
- *   ./demo shownfilter  # long list whose filter is shown before you type
- *   ./demo fields       # select whose option collects input fields
- *   ./demo nested       # three-level column browser (Enter/→ in, ←/Esc out)
- *   ./demo tab          # the same tree with opening bound to Tab
- *   ./demo leaf         # select whose option opens a text input leaf (Enter/→)
+ * Everything here is a pure value or a pure builder, so the whole catalogue can
+ * be asserted without a terminal. Rendering it — and waiting for the person
+ * in front of it — is `./index.ts`, which is as thin as it can be made.
  *
- * Dialogs render on stderr, results are printed on stdout, so
- * `./demo select > /dev/null` still shows the dialog.
+ * The dialog vocabulary is restated here rather than imported: the capability
+ * is internal to the dialogs plugin, so its types are not a public export and a
+ * consumer describes structurally what it asks for, exactly as the plugin's own
+ * tests do.
  */
 
-import dialogsPlugin from "./plugins/dialogs/index.ts";
-import { main } from "./src/cli.ts";
-import type { CommandContext, PluginDefinition } from "./src/plugin.ts";
-
-type TextField = {
+export type TextField = {
   readonly type: "text";
   readonly name: string;
   readonly message: string;
   readonly initialValue?: string;
 };
-type SelectRequest<T> = {
+export type SelectRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
   readonly filter?: "typed" | "always";
   readonly expand?: "enter" | "tab";
 };
-type SelectOption<T> = {
+export type SelectOption<T> = {
   readonly label: string;
   readonly value: T;
   readonly fields?: readonly TextField[];
   readonly dialog?: SelectRequest<T> | TextField;
 };
-type InputRequest = {
+export type InputRequest = {
   readonly message: string;
   readonly initialValue?: string;
 };
-type SelectResult<T> = {
+export type SelectResult<T> = {
   readonly value: T;
   readonly values: Readonly<Record<string, string>>;
 };
-type Dialogs = {
+export type Dialogs = {
   input(request: InputRequest): Promise<string | undefined>;
   select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
 };
+
+/** One scenario: the line the help text gives it, and the request it presents.
+ * The two kinds are the two dialogs there are to show. */
+export type Scenario =
+  | {
+      readonly kind: "input";
+      readonly description: string;
+      readonly request: InputRequest;
+    }
+  | {
+      readonly kind: "select";
+      readonly description: string;
+      readonly request: SelectRequest<string>;
+    };
 
 const branches = [
   "main",
@@ -70,6 +75,12 @@ const branches = [
   "docs/dialogs-spec",
   "spike/wide-glyphs-😀-and-CJK-漢字",
 ];
+
+/** The branches as a column of plain choices: the same list under either
+ * filter setting, which is what makes the two a comparison. */
+function branchOptions(): readonly SelectOption<string>[] {
+  return branches.map((label) => ({ label, value: label }));
+}
 
 /** The scripts a package or app exposes: a column of plain options, which is
  * where a walk through the tree ends. */
@@ -205,7 +216,9 @@ function targets(expand?: "enter" | "tab"): SelectRequest<string> {
   };
 }
 
-const order = [
+/** The order the scenarios run in when the demo is given no argument, and so
+ * the order the help text lists them in. */
+export const order = [
   "input",
   "select",
   "filter",
@@ -216,25 +229,26 @@ const order = [
   "leaf",
 ] as const;
 
-type ScenarioName = (typeof order)[number];
+export type ScenarioName = (typeof order)[number];
 
-function isScenario(value: string): value is ScenarioName {
+export function isScenario(value: string): value is ScenarioName {
   return (order as readonly string[]).includes(value);
 }
 
-const scenarios: Record<
-  ScenarioName,
-  (dialogs: Dialogs) => Promise<unknown | undefined>
-> = {
-  async input(dialogs) {
-    return await dialogs.input({
+export const scenarios: Record<ScenarioName, Scenario> = {
+  input: {
+    kind: "input",
+    description: "standalone input with an initial value",
+    request: {
       message: "What should the release be called?",
       initialValue: "spring",
-    });
+    },
   },
 
-  async select(dialogs) {
-    return await dialogs.select({
+  select: {
+    kind: "select",
+    description: "short list, no sub-dialogs",
+    request: {
       message: "Pick a bump",
       options: [
         { label: "patch", value: "patch" },
@@ -242,32 +256,38 @@ const scenarios: Record<
         { label: "major", value: "major" },
         { label: "prerelease", value: "prerelease" },
       ],
-    });
+    },
   },
 
-  async filter(dialogs) {
-    return await dialogs.select({
-      message: "Pick a branch",
-      options: branches.map((label) => ({ label, value: label })),
-    });
+  filter: {
+    kind: "select",
+    description: "long list: start typing and it narrows",
+    request: { message: "Pick a branch", options: branchOptions() },
   },
 
-  async shownfilter(dialogs) {
-    return await dialogs.select({
+  shownfilter: {
+    kind: "select",
+    description: "long list whose filter is shown before you type",
+    request: {
       message: "Pick a branch (filter shown)",
-      options: branches.map((label) => ({ label, value: label })),
+      options: branchOptions(),
       filter: "always",
-    });
+    },
   },
 
-  async fields(dialogs) {
-    return await dialogs.select({
+  fields: {
+    kind: "select",
+    description: "select whose option collects input fields",
+    request: {
       message: "Where should this go?",
       options: [
         { label: "origin", value: "origin" },
         { label: "upstream", value: "upstream" },
         { label: "fork", value: "fork" },
         {
+          // Typing filters whatever the list's length, and this escape hatch
+          // stays visible however hard you filter — it declares fields, and a
+          // filter never hides the caller's "none of these" answer.
           label: "Somewhere else…",
           value: "custom",
           fields: [
@@ -281,25 +301,29 @@ const scenarios: Record<
           ],
         },
       ],
-      // Typing filters whatever the list's length, and the "Somewhere else…"
-      // escape hatch stays visible however hard you filter — it declares
-      // fields, and a filter never hides the caller's "none of these" answer.
-    });
+    },
   },
 
-  async nested(dialogs) {
-    return await dialogs.select(targets());
+  nested: {
+    kind: "select",
+    description:
+      "three-level column browser: lists, a scrolling column, two leaves",
+    request: targets(),
   },
 
-  async tab(dialogs) {
+  tab: {
+    kind: "select",
     // The same tree under the other binding: Enter takes the row it is on
     // whether or not it leads anywhere, and Tab is what opens it. Selecting
     // `apps` here resolves with "apps" instead of drilling into it.
-    return await dialogs.select(targets("tab"));
+    description: "the same tree with opening bound to Tab instead of Enter",
+    request: targets("tab"),
   },
 
-  async leaf(dialogs) {
-    return await dialogs.select({
+  leaf: {
+    kind: "select",
+    description: "select whose option opens a text input leaf",
+    request: {
       message: "Pick a tag",
       options: [
         { label: "stable", value: "stable" },
@@ -309,79 +333,34 @@ const scenarios: Record<
           dialog: { type: "text", name: "tag", message: "Tag name" },
         },
       ],
-    });
+    },
   },
 };
 
-function report(context: CommandContext, name: string, result: unknown): void {
-  context.stdout.write(`${name}: ${JSON.stringify(result) ?? "cancelled"}\n`);
+/** Presents one scenario and resolves with what the person answered, or
+ * `undefined` if they cancelled. The only dispatch in the catalogue: which of
+ * the two dialogs a scenario is. */
+export async function present(
+  dialogs: Dialogs,
+  name: ScenarioName,
+): Promise<unknown> {
+  const scenario = scenarios[name];
+  if (scenario.kind === "input") return await dialogs.input(scenario.request);
+  return await dialogs.select(scenario.request);
 }
 
-const usage = `Usage: demo [scenario]
+const nameWidth = Math.max(...order.map((name) => name.length));
 
-Showcase every dialog: input, select, filter, shownfilter, fields, nested,
-tab, leaf.
+/** The help text, written from the catalogue so a scenario cannot be listed
+ * with a description the catalogue does not carry, or listed at all without
+ * being in it. */
+export const usage = `Usage: demo [scenario]
 
-  input       standalone input with an initial value
-  select      short list, no sub-dialogs
-  filter      long list: start typing and it narrows
-  shownfilter long list whose filter is shown before you type
-  fields      select whose option collects input fields
-  nested      three-level column browser: lists, a scrolling column, two leaves
-  tab         the same tree with opening bound to Tab instead of Enter
-  leaf        select whose option opens a text input leaf
+Showcase every dialog: ${order.join(", ")}.
+
+${order
+  .map((name) => `  ${name.padEnd(nameWidth)}  ${scenarios[name].description}`)
+  .join("\n")}
 
 A ▸ marks an option that opens a sub-dialog: Enter or → opens it as the next
 column, ← or Esc backs out. Typing always filters the column you are in.`;
-
-type CommandLike = {
-  error(message: string, options?: { exitCode?: number; code?: string }): never;
-};
-
-const demoPlugin: PluginDefinition = {
-  identity: { name: "demo" },
-  load:
-    () =>
-    ({ command, context, registrations }) => {
-      const run = async (names: readonly ScenarioName[]) => {
-        const [dialogs] = registrations<Dialogs>("dialogs");
-        if (!dialogs) throw new Error("dialogs capability missing");
-        for (const name of names) {
-          report(context, name, await scenarios[name](dialogs));
-        }
-      };
-      command((namespace) => {
-        namespace
-          .description("Showcase every dialogs-plugin feature")
-          .argument("[scenario]", `one of: ${order.join(", ")}`)
-          .addHelpText("after", `\n${usage}\n`)
-          .action(
-            async (
-              scenario: string | undefined,
-              _flags: Record<string, unknown>,
-              cmd: CommandLike,
-            ) => {
-              if (scenario === undefined) {
-                await run(order);
-                return;
-              }
-              if (!isScenario(scenario)) {
-                cmd.error(
-                  `unknown scenario: "${scenario}"\n\n${usage}\n\none of: ${order.join(", ")}`,
-                  {
-                    exitCode: 1,
-                    code: "commander.invalidArgument",
-                  },
-                );
-              }
-              await run([scenario]);
-            },
-          );
-      });
-    },
-};
-
-process.exitCode = await main(
-  ["demo", ...Bun.argv.slice(2)],
-  [dialogsPlugin, demoPlugin],
-);

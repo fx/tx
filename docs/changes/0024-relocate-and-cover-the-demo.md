@@ -5,7 +5,7 @@
 Move the repository-root `demo` script out of the root and into a checked, tested source directory, run it through a `bun run demo` package script, and document it in `README.md`. The demo is first-party executable source today that no gate inspects; this change makes it ordinary source.
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** draft
+**Status:** complete
 **Depends On:** —
 
 ## Motivation
@@ -104,19 +104,19 @@ The split is what makes 100% coverage reachable honestly. The catalogue is asser
 
 ## Tasks
 
-- [ ] Relocate and split the demo
-  - [ ] Move the root `demo` to `demo/index.ts` and extract the scenario catalogue into `demo/scenarios.ts`
-  - [ ] Update the header comment so it documents `bun run demo <scenario>` and no longer advertises `./demo`
-  - [ ] Delete the root `demo` file and its executable bit
-  - [ ] Add `demo` to `tsconfig.json`'s `include` and to `test/coverage.test.ts`'s production roots
-  - [ ] Add the `demo` script to `package.json`
-  - [ ] Exclude `.claude` from `biome.json` so `bun run lint` works with an agent worktree present
-- [ ] Cover the demo
-  - [ ] Add `test/demo-scenarios.test.ts` asserting every scenario name resolves and every built request is well-formed
-  - [ ] Add `test/demo.test.ts` driving the runner over injected streams: the default path, one named scenario, and the unknown-scenario error
-  - [ ] Confirm `bun run check` passes with the demo counted for coverage
-- [ ] Document the demo
-  - [ ] Add a `## Demo` section to `README.md` between `## Plugins` and `## Releases`, stating the script and that it needs a source checkout
+- [x] Relocate and split the demo
+  - [x] Move the root `demo` to `demo/index.ts` and extract the scenario catalogue into `demo/scenarios.ts`
+  - [x] Update the header comment so it documents `bun run demo <scenario>` and no longer advertises `./demo`
+  - [x] Delete the root `demo` file and its executable bit
+  - [x] Add `demo` to `tsconfig.json`'s `include` and to `test/coverage.test.ts`'s production roots
+  - [x] Add the `demo` script to `package.json`
+  - [x] Exclude `.claude` from `biome.json` so `bun run lint` works with an agent worktree present
+- [x] Cover the demo
+  - [x] Add `test/demo-scenarios.test.ts` asserting every scenario name resolves and every built request is well-formed
+  - [x] Add `test/demo.test.ts` driving the runner over injected streams: the default path, one named scenario, and the unknown-scenario error
+  - [x] Confirm `bun run check` passes with the demo counted for coverage
+- [x] Document the demo
+  - [x] Add a `## Demo` section to `README.md` between `## Plugins` and `## Releases`, stating the script and that it needs a source checkout
 
 ## Open Questions
 
