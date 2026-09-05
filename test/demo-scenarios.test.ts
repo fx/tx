@@ -181,7 +181,7 @@ describe("demo catalogue", () => {
   });
 
   test("documents every scenario in its help text", () => {
-    expect(usage).toContain("Usage: demo [scenario]");
+    expect(usage).toContain("Usage: bun run demo [scenario]");
     for (const name of order) {
       expect(usage).toContain(`  ${name}`);
       expect(usage).toContain(scenarios[name].description);

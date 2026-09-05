@@ -354,7 +354,7 @@ const nameWidth = Math.max(...order.map((name) => name.length));
 /** The help text, written from the catalogue so a scenario cannot be listed
  * with a description the catalogue does not carry, or listed at all without
  * being in it. */
-export const usage = `Usage: demo [scenario]
+export const usage = `Usage: bun run demo [scenario]
 
 Showcase every dialog: ${order.join(", ")}.
 
