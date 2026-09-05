@@ -119,6 +119,21 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - Coverage exclusions MUST be limited to generated or non-executable files and MUST be documented in configuration.
 - Committed tests MUST NOT contain focused or skipped cases without a documented reason.
 - TypeScript MUST pass with no type errors.
+- Every first-party executable file committed to the repository MUST be reachable by the linter, the type checker, and the test suite. A file MUST NOT escape those gates by carrying no extension, by sitting outside the checked paths, or by being imported from nowhere.
+- The repository MUST ship a runnable demonstration of the bundled plugins' interactive behavior, it MUST be invocable through a package script like every other documented entry point, and the README MUST document how to run it and that it runs from a source checkout rather than from the published package.
+- The demonstration MUST be held to the same lint, type-check, and coverage rules as every other production source file; it MUST NOT be added to the coverage exclusions.
+
+#### Scenario: No unchecked first-party file
+
+- **GIVEN** a first-party executable file is committed
+- **WHEN** the documented validation command runs
+- **THEN** the file is linted, type checked, and counted against the coverage thresholds
+
+#### Scenario: Demonstration runs from a script
+
+- **GIVEN** a developer has a source checkout and installed dependencies
+- **WHEN** they run the documented demonstration script
+- **THEN** the bundled dialogs render and the README describes that invocation
 
 #### Scenario: Local quality checks
 
@@ -227,6 +242,8 @@ bun run check
 
 CI uses non-writing commands and installs with the frozen Bun lockfile.
 
+The demonstration is a script alongside these rather than one of them: it is run by a developer looking at the bundled dialogs, never by `check` and never by CI, because it waits for a person at a terminal. What CI does enforce about it is that it is ordinary checked source — the same lint, type-check, and coverage rules as everything else — which is what the [Development Conventions](#development-conventions) requirement above says.
+
 ### Command Resolution
 
 Resolution is one level deep. The first argument names a plugin namespace; everything after it is the owning plugin's input, parsed by the plugin's own command definitions. Core never inspects that remainder, which is why an option means whatever the plugin says it means — including options core itself defines at the root.
@@ -271,3 +288,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-06 | Allowed plugin-owned storage to reference a user-supplied directory outside it, and required removal to drop only the reference | [0008-link-local-marketplace-sources](../../changes/0008-link-local-marketplace-sources.md) |
 | 2026-08-06 | Exempted documentation-only runs from the CI quality commands while still reporting the required check | [0009-skip-quality-commands-for-documentation](../../changes/0009-skip-quality-commands-for-documentation.md) |
 | 2026-08-07 | Made composition order observable through update-participant ordering, and made the published release assets the executable's own update source | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |
+| 2026-09-05 | Every first-party executable file must be linted, type checked and covered; the demonstration became a documented script | [0024-relocate-and-cover-the-demo](../../changes/0024-relocate-and-cover-the-demo.md) |
