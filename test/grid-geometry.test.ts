@@ -8,6 +8,7 @@ import {
 } from "../plugins/grid/cells.ts";
 import {
   canvasWidth,
+  cellLine,
   columnGap,
   columnWidths,
   decorate,
@@ -19,7 +20,6 @@ import {
   lineWidth,
   padTo,
   tableLines,
-  trimLine,
 } from "../plugins/grid/geometry.ts";
 import type { Row } from "../plugins/grid/types.ts";
 
@@ -93,27 +93,38 @@ describe("measuring lines", () => {
   });
 });
 
-describe("trimming a line", () => {
-  test("removes the padding that would have trailed it", () => {
-    expect(
-      printed([trimLine([{ text: "alpha   ", variable: "content" }])]),
-    ).toEqual(["alpha"]);
+describe("where a line stops", () => {
+  test("adds no padding after the last cell with anything to draw", () => {
+    const line = cellLine([cell("alpha"), cell("b")], [8, 8]);
+
+    expect(text(line)).toBe("alpha     b");
+    expect(line).toHaveLength(3);
   });
 
-  test("drops a trailing run that is nothing but padding", () => {
-    const trimmed = trimLine([
-      { text: "alpha", variable: "content" },
-      { text: "  ", variable: "content" },
-      { text: "", variable: "strong" },
-    ]);
+  test("drops the columns after it, and the gaps that led to them", () => {
+    const line = cellLine([cell("alpha"), cell(""), cell("")], [8, 8, 8]);
 
-    expect(trimmed).toHaveLength(1);
-    expect(text(trimmed)).toBe("alpha");
+    expect(line).toEqual([{ text: "alpha", variable: "content" }]);
   });
 
-  test("leaves a line with nothing on it empty", () => {
-    expect(trimLine([{ text: "   ", variable: "content" }])).toEqual([]);
-    expect(trimLine([])).toEqual([]);
+  test("leaves a line with nothing to draw on it empty", () => {
+    expect(cellLine([cell(""), cell("")], [4, 4])).toEqual([]);
+    expect(cellLine([], [])).toEqual([]);
+  });
+
+  test("keeps a consumer's own trailing spaces rather than rewriting them", () => {
+    // The layout takes back only the padding it added. A supplied string is
+    // never rewritten beyond having its control characters removed, so a cell
+    // that genuinely ends in spaces still does after it is laid out.
+    const line = cellLine([cell("alpha"), cell("b  ")], [8, 8]);
+
+    expect(text(line)).toBe("alpha     b  ");
+  });
+
+  test("still pads a last cell declaring end, because that padding leads", () => {
+    const line = cellLine([cell("alpha"), cell("12", "end")], [8, 5]);
+
+    expect(text(line)).toBe("alpha        12");
   });
 });
 

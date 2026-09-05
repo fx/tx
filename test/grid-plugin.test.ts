@@ -252,6 +252,45 @@ describe("printing a grid", () => {
     expect(stylingOnly(output)).toBe(true);
   });
 
+  test("prints the same table however wide the stream says it is", async () => {
+    // A table needs no width at all, so a narrow terminal does not re-flow it
+    // and a wide one does not pad it out: the canvas is the measured grid.
+    const request = {
+      headers: ["NAME", "COUNT"],
+      rows: [
+        ["charlie-delta", "220"],
+        ["b", "1"],
+      ],
+      summary: "2 rows",
+    } as const satisfies Omit<GridRequest, "stream">;
+
+    const narrow = await print(request, recorder({ columns: 5 }));
+    const wide = await print(request, recorder({ columns: 200 }));
+
+    expect(narrow).toBe(wide);
+    expect(lines(narrow)).toEqual([
+      "NAME           COUNT",
+      "charlie-delta  220",
+      "b              1",
+      "",
+      "2 rows",
+    ]);
+  });
+
+  test("keeps a cell's own trailing spaces out of the printed line", async () => {
+    // The layout rewrites nothing the consumer supplied — it only declines to
+    // add padding it does not need — and the printed line still ends on a
+    // character rather than on a space.
+    const output = await print({
+      rows: [
+        ["alpha", "b  "],
+        ["c", "dd"],
+      ],
+    });
+
+    expect(lines(output)).toEqual(["alpha  b", "c      dd"]);
+  });
+
   test("draws a cell left empty as the placeholder", async () => {
     expect(lines(await print({ rows: [["alpha", ""], ["b"]] }))).toEqual([
       "alpha  —",

@@ -69,23 +69,24 @@ export function canvasWidth(lines: readonly Line[]): number {
   return width;
 }
 
-/** A line with the padding that would have trailed it removed, so no printed
- * line ends in a space. Only spaces are removed and only from the end: a run
- * of them there is padding no column needs, and every other character of the
- * consumer's text survives untouched. */
-export function trimLine(segments: readonly LineSegment[]): Line {
-  const kept = [...segments];
-  while (kept.length > 0) {
-    const last = kept[kept.length - 1] as LineSegment;
-    const text = last.text.replace(/ +$/u, "");
-    if (text === "") {
-      kept.pop();
-      continue;
-    }
-    if (text !== last.text) kept[kept.length - 1] = { ...last, text };
-    break;
+/**
+ * The last cell of a line that has any text to draw, or `-1` where none of
+ * them has.
+ *
+ * Every column after it contributes nothing but padding and a gap, so the line
+ * stops here. That is how "no line carries trailing whitespace" is satisfied:
+ * by never adding padding with nothing after it, rather than by removing
+ * characters afterwards. The distinction matters because a consumer's own text
+ * may legitimately end in spaces, and [Grid: Cell Values] forbids the grid
+ * rewriting a supplied string beyond removing its control characters — so
+ * padding is the only whitespace the layout is entitled to take back, and it
+ * takes it back by not writing it.
+ */
+function lastDrawnCell(cells: readonly PlacedCell[]): number {
+  for (let column = cells.length - 1; column >= 0; column -= 1) {
+    if ((cells[column] as PlacedCell).text !== "") return column;
   }
-  return kept;
+  return -1;
 }
 
 /**
@@ -121,21 +122,33 @@ export function padTo(
   return align === "end" ? padding + text : text + padding;
 }
 
-/** One row of a table: every cell padded to its column and separated by the
- * gap, with whatever would have trailed the last of them removed. */
+/**
+ * One row of a table: every cell padded to its column and separated by the
+ * gap, up to the last cell with anything to draw.
+ *
+ * That last cell is padded only where its alignment puts the padding before
+ * it — a cell declaring `end` still lines up on its digits — so the line ends
+ * on the cell's own final character and no line carries trailing whitespace.
+ */
 export function cellLine(
   cells: readonly PlacedCell[],
   widths: readonly number[],
 ): Line {
+  const last = lastDrawnCell(cells);
   const segments: LineSegment[] = [];
-  cells.forEach((cell, column) => {
+  for (let column = 0; column <= last; column += 1) {
+    const cell = cells[column] as PlacedCell;
     if (column > 0) segments.push(gapSegment());
+    const width = widths[column] ?? 0;
     segments.push({
-      text: padTo(cell.text, widths[column] ?? 0, cell.align),
+      text:
+        column === last && cell.align === "start"
+          ? cell.text
+          : padTo(cell.text, width, cell.align),
       variable: cell.variable,
     });
-  });
-  return trimLine(segments);
+  }
+  return segments;
 }
 
 /** A table: the header row, when there is one, above one line per row. */
@@ -196,17 +209,21 @@ export function flowLines(
   const columns = Math.ceil(items.length / rows);
   const lines: Line[] = [];
   for (let row = 0; row < rows; row += 1) {
-    const segments: LineSegment[] = [];
+    const placed: PlacedCell[] = [];
     for (let column = 0; column < columns; column += 1) {
       const item = items[column * rows + row];
-      if (item === undefined) continue;
-      if (segments.length > 0) segments.push(gapSegment());
-      segments.push({
-        text: padTo(item.text, itemWidth, "start"),
-        variable: item.variable,
-      });
+      if (item !== undefined) placed.push(item);
     }
-    lines.push(trimLine(segments));
+    // Every item is padded to the one shared width except the last on its
+    // line, which is exactly what a table's last column does — so a flow's
+    // line ends on a character of its own text too, and `cellLine` is what
+    // both of them go through.
+    lines.push(
+      cellLine(
+        placed.map((item) => ({ ...item, align: "start" as const })),
+        placed.map(() => itemWidth),
+      ),
+    );
   }
   return lines;
 }
@@ -227,12 +244,15 @@ export function decorate(
   summary: string | undefined,
 ): readonly Line[] {
   const lines: Line[] = [...body];
+  // Neither line is padded, so neither needs anything taken back off it: each
+  // is the consumer's own string with its control characters removed and
+  // nothing else changed.
   if (lines.length === 0 && empty !== undefined) {
-    lines.push(trimLine([{ text: sanitize(empty), variable: "content" }]));
+    lines.push([{ text: sanitize(empty), variable: "content" }]);
   }
   if (summary !== undefined) {
     if (lines.length > 0) lines.push([]);
-    lines.push(trimLine([{ text: sanitize(summary), variable: "muted" }]));
+    lines.push([{ text: sanitize(summary), variable: "muted" }]);
   }
   return lines;
 }
