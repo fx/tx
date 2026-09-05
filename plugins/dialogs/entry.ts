@@ -20,9 +20,23 @@ export function withCaret(text: string, shown: boolean): string {
   return `${text}${shown ? caretGlyph : hiddenCaret}`;
 }
 
-/** The key hint line under a standalone input and under a field: the two keys
- * an entry answers to. */
-const entryHint = "Enter submit · Esc cancel";
+/** The key hint lines under a standalone input and under a field: the two keys
+ * an entry answers to. Enter always submits; what the Escape an entry answers
+ * does depends on what was open when it was mounted, which the entry itself
+ * cannot see — so the caller says which line applies. The phrasing follows the
+ * select's own hint, where Escape backing out reads `←/Esc back`; an entry has
+ * no left arrow to offer, so it names Escape alone. */
+const entryHints = {
+  cancel: "Enter submit · Esc cancel",
+  back: "Enter submit · Esc back",
+} as const;
+
+/**
+ * What the Escape an entry answers actually does, and so what its hint line
+ * names: `cancel` settles the dialog as cancelled, `back` returns to whatever
+ * opened the entry without settling anything.
+ */
+type EntryEscape = keyof typeof entryHints;
 
 /** A control sequence Ink did not resolve to a key, as it reaches a handler:
  * Ink strips the leading escape, leaving the introducer, any parameter and
@@ -87,10 +101,11 @@ type EntryProps = {
   readonly onEdit: () => void;
   readonly onSubmit: (value: string) => void;
   readonly onCancel: () => void;
-  /** The columns the entry may measure against. A stacked entry sits right of
-   * its parent, so it measures against what is right of its offset rather
-   * than the whole terminal; a standalone entry uses the whole terminal. */
-  readonly availableColumns?: number | undefined;
+  /** What `onCancel` does at this call site, which is all the hint line needs
+   * to name it truthfully. Defaults to `cancel`, which is what a standalone
+   * input's Escape does and the only thing it can do: there is nothing under
+   * it to back out into. */
+  readonly escapeAction?: EntryEscape;
 };
 
 /**
@@ -111,15 +126,9 @@ export function createEntry(
     onEdit,
     onSubmit,
     onCancel,
-    availableColumns,
-    onMeasure,
-  }: EntryProps & {
-    /** Receives the frame width the entry drew, so a stacked shadow behind
-     * it is cut to its panel rather than to the remaining columns. */
-    readonly onMeasure?: (width: number) => void;
-  }) {
+    escapeAction = "cancel",
+  }: EntryProps) {
     const { columns } = ink.useWindowSize();
-    const measured = availableColumns ?? columns;
     const entered = react.useRef(initialValue ?? "");
     const [value, setValue] = react.useState(entered.current);
     ink.useInput((entry, key) => {
@@ -140,29 +149,19 @@ export function createEntry(
     // The caret rides with the value in one text, so start truncation keeps
     // the tail of a long value and the caret itself in view together.
     const entry = withCaret(value, caret);
-    const width = Math.min(
-      panelWidth(message, displayWidth(entry), measured),
-      Math.max(1, measured),
-    );
-    react.useEffect(() => {
-      onMeasure?.(width);
-    }, [width, onMeasure]);
-    return react.createElement(
-      Frame,
-      {
-        title: message,
-        double: false,
-        width,
-        columns,
-        hint: entryHint,
-        hintWidth: Math.max(1, measured),
-      },
-      react.createElement(
-        ink.Text,
-        { key: "value", wrap: "truncate-start" },
-        entry,
-      ),
-    );
+    const width = panelWidth(message, displayWidth(entry), columns);
+    return react.createElement(Frame, {
+      title: message,
+      double: false,
+      width,
+      columns,
+      hint: entryHints[escapeAction],
+      // Start truncation keeps the tail of a long value and the caret itself
+      // in view together.
+      rows: [
+        { key: "value", segments: [{ key: "entry", text: entry }], tail: true },
+      ],
+    });
   };
 }
 

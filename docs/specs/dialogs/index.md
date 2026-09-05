@@ -6,7 +6,7 @@
 
 [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) implements the generic registry that carries the internal capability and the namespace-free bundled provider that supplies `select`. [Change 0017](../../changes/0017-add-dialog-text-input-and-composition.md) implements the text `input` dialog and the user-provided option that composes the two. Those requirements are implemented.
 
-[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented. [Change 0023](../../changes/0023-cascading-sub-dialogs.md) implements the [Cascading Sub-Dialogs](#cascading-sub-dialogs) section and the stacked-panels rules in [Presentation](#presentation). Those requirements are implemented.
+[Change 0020](../../changes/0020-add-select-filter-and-viewport.md) implements the [Filter Request](#filter-request), [Filtering](#filtering), and [Viewport](#viewport) sections, together with the Home, End, and Page rules added to [Selection](#selection). Those requirements are implemented. [Change 0021](../../changes/0021-restyle-dialogs-as-norton-commander.md) implements [Presentation](#presentation) together with the confirmation wording added to [Selection](#selection). Those requirements are implemented. [Change 0023](../../changes/0023-render-sub-dialogs-as-columns.md) implements the [Sub-Dialog Columns](#sub-dialog-columns) section together with its column rules in [Presentation](#presentation), the always-live [Filter Request](#filter-request), and the chrome the [Viewport](#viewport) sets into the frame's edges. Those requirements are implemented.
 
 ## Background
 
@@ -44,7 +44,8 @@ type SelectOption<T> = {
 type SelectRequest<T> = {
   readonly message: string
   readonly options: readonly SelectOption<T>[]
-  readonly filter?: boolean | "auto"
+  readonly filter?: "typed" | "always"
+  readonly expand?: "enter" | "tab"
 }
 
 type SelectResult<T> = {
@@ -110,12 +111,12 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - Up and Down input MUST move the active option by one position among the visible options and MUST keep it at the first or last visible option when movement would pass that boundary.
 - Home and End input MUST make the first and the last visible option active.
 - Page Up and Page Down input MUST move the active option by the number of option rows the [viewport](#viewport) shows, clamped at the first and last visible option.
-- Enter on a plain option MUST confirm the selection and resolve with a result carrying the exact value belonging to that option and no collected values.
+- Enter on a plain option declaring no sub-dialog MUST confirm the selection and resolve with a result carrying the exact value belonging to that option and no collected values; [Sub-Dialog Columns](#sub-dialog-columns) governs Enter on an option that declares one.
 - Escape or Ctrl-C before a selection is confirmed MUST cancel the dialog and resolve with `undefined` without terminating the process; after confirmation the outcome is fixed, and [Presentation](#presentation) bounds how long settlement may take.
-- While the filter is disabled, printable input MUST leave the dialog unchanged.
+- Printable input MUST always reach the [filter](#filtering); there is no state of an open list in which typing leaves the dialog unchanged.
 - The dialog MUST NOT print the selected value or assign cancellation an exit code; those decisions belong to the consuming command.
 
-Every option is visible while the filter is disabled or its text is blank; [Filtering](#filtering) defines visibility otherwise.
+Every option is visible while the filter text is blank; [Filtering](#filtering) defines visibility otherwise.
 
 #### Scenario: Select a value
 
@@ -143,27 +144,28 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 
 ### Filter Request
 
-- A select request MAY carry a `filter` setting of `true`, `false`, or `"auto"`, and an omitted setting MUST mean `"auto"`.
-- `true` MUST enable the filter and `false` MUST disable it, whatever the option count.
-- `"auto"` MUST enable the filter exactly when the request carries more than eight options.
+- Filtering MUST always be live: typed text MUST narrow the list in every column and whatever the list's length. There MUST be no setting that makes typing do nothing.
+- A select request MAY carry a `filter` setting of `"typed"` or `"always"`, and an omitted setting MUST mean `"typed"`. It MUST decide only whether the filter is on screen before anything has been typed into it.
+- `"typed"` MUST keep the filter off screen until something is typed into it, and `"always"` MUST show it from the moment the dialog opens.
+- The setting belongs to the request it is written on: a nested sub-dialog request MUST decide its own column's filter, and an omitted setting MUST mean `"typed"` there too. Unlike the `expand` binding, it MUST NOT be read from the root request for every column.
 
-#### Scenario: Filter enabled automatically
+#### Scenario: Typing brings the filter up
 
-- **GIVEN** a request with nine options and no `filter` setting
+- **GIVEN** a request with no `filter` setting
+- **WHEN** the dialog opens and the user types `a`
+- **THEN** the filter was not on screen before the keystroke, is after it, and the options are narrowed to those matching `a`
+
+#### Scenario: Filter shown before a keystroke
+
+- **GIVEN** a request with `filter: "always"`
 - **WHEN** the dialog opens
-- **THEN** the filter is present and typed text narrows the options
-
-#### Scenario: Filter kept off for a long list
-
-- **GIVEN** a request with nine options and `filter: false`
-- **WHEN** the user types `a`
-- **THEN** every option stays visible and nothing else changes
+- **THEN** the filter is on screen with no text in it
 
 ### Filtering
 
-- While the filter is enabled, it MUST be the element that receives typed text from the moment the dialog opens, with no key moving focus to or from it.
+- The filter MUST be the element that receives typed text from the moment the dialog opens, with no key moving focus to or from it.
 - Printable input and Backspace MUST edit the filter text exactly as they edit a [text input's](#text-input) value.
-- The dialog MUST render the current filter text.
+- The dialog MUST render the current filter text once there is any, and MUST render it in a place whose appearing and disappearing moves no option row.
 - The filter's terms are the whitespace-separated pieces of its text; an option MUST be visible when every term occurs within its label under a case-insensitive comparison, or when the option declares fields.
 - Visible options MUST keep their supplied order; the filter MUST NOT rank, reorder, or deduplicate them.
 - Whenever the filter text changes, the first visible option MUST become active.
@@ -174,13 +176,13 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 
 #### Scenario: Type to narrow, then select
 
-- **GIVEN** a filter-enabled dialog listing `Alpha`, `Beta`, `Gamma`, and `Alphabet`
+- **GIVEN** a dialog listing `Alpha`, `Beta`, `Gamma`, and `Alphabet`
 - **WHEN** the user types `alp` and presses Enter
 - **THEN** only `Alpha` and `Alphabet` were visible, in that order, and `select` resolves with `Alpha`'s value
 
 #### Scenario: Several terms in any order
 
-- **GIVEN** a filter-enabled dialog listing `release branch`, `branch archive`, and `main`
+- **GIVEN** a dialog listing `release branch`, `branch archive`, and `main`
 - **WHEN** the user types `branch rel`
 - **THEN** only `release branch` is visible
 
@@ -192,13 +194,13 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 
 #### Scenario: A user-provided option stays reachable
 
-- **GIVEN** a filter-enabled dialog whose last option is `Other…` with a text field
+- **GIVEN** a dialog whose last option is `Other…` with a text field
 - **WHEN** the user types `zzz`
 - **THEN** `Other…` is the only visible option, and it is active
 
 #### Scenario: Nothing matches
 
-- **GIVEN** a filter-enabled dialog with plain options only
+- **GIVEN** a dialog with plain options only
 - **WHEN** the user types text no label contains and presses Enter
 - **THEN** the dialog shows that nothing matches, stays open, and Escape still resolves `undefined`
 
@@ -210,12 +212,13 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 
 ### Viewport
 
-- The dialog MUST render at most ten option rows at once, fewer so that the dialog as a whole — indicators and hints included — stays shorter than the terminal, and never fewer than one.
+- The dialog MUST render at most ten option rows at once, and fewer so that the dialog as a whole — its edges and hints included — stays shorter than the terminal. One row is the floor wherever the terminal can afford one and something is visible to fill it; where the terminal cannot afford that row, or the filter has left nothing visible, the dialog MUST render no option rows at all, because the row a terminal cannot afford is exactly the row that would take the frame to the terminal's own height and clear the screen when it is replaced.
 - Whenever the terminal is tall enough for the dialog's other rows plus one option row, the dialog MUST NOT clear the terminal or scroll away what was on screen before it opened, on any frame or when it settles.
-- The active option MUST always be among the rendered options, and the rendered window MUST move only as far as needed to keep it there.
-- When visible options exist above or below the rendered window, the dialog MUST indicate that on that side together with how many are hidden there.
+- Wherever the dialog renders any option rows, the active option MUST be among them, and the rendered window MUST move only as far as needed to keep it there. A window collapsed to no rows MUST keep the place it held, so the terminal growing back reopens it there rather than at the top of the list.
+- When visible options exist above or below the rendered window, the dialog MUST indicate that on that side together with how many are hidden there. The counts describe the rightmost column, which is the one taking keys and the only one scrolling.
 - After the terminal is resized, the rendered window MUST reflect the new row count.
-- With levels stacked, the option rows of every visible level and the rows their shadows add MUST count toward that same budget, so the union of the stacked frames stays shorter than the terminal. A stack deeper than the budget allows MUST still render the top level with at least one option row; the levels beneath it MAY be covered by the top level and its shadow.
+- Opening a sub-dialog MUST NOT cost the dialog any rows: the columns sit beside each other rather than over each other, so every column is windowed against the same terminal height whatever the depth.
+- The columns share one band of option rows, and the band is as tall as its tallest column. An entry panel appearing beneath the browser — a field under collection, or a text-field sub-dialog — MUST therefore shrink that band for every column rather than only for the one taking keys, because a column keeping a taller window would take the dialog past the terminal's height. Each column MUST return to the window it was left on once the band grows back, so the shrink costs no column its place in its own list.
 
 #### Scenario: Long list opens at the top
 
@@ -234,6 +237,12 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 - **GIVEN** a dialog with thirty options in a terminal of eight rows
 - **WHEN** the dialog opens
 - **THEN** fewer than ten options are rendered and the active option is among them
+
+#### Scenario: A terminal too short for a row keeps the screen
+
+- **GIVEN** a dialog whose chrome plus one option row would fill the terminal exactly
+- **WHEN** the dialog opens
+- **THEN** no option rows are rendered, the dialog still draws its edges, still navigates, and still resolves with the choice it can no longer draw, and the terminal is neither cleared nor scrolled
 
 ### Field Model
 
@@ -311,41 +320,50 @@ Every option is visible while the filter is disabled or its text is blank; [Filt
 - **WHEN** the user presses Escape or Ctrl-C
 - **THEN** `select` resolves with `undefined`, the already collected value is discarded, and the option list is not presented again
 
-### Cascading Sub-Dialogs
+### Sub-Dialog Columns
 
 An option MAY declare a sub-dialog holding a nested select request or a single text field:
 
-- Tab on an option declaring a sub-dialog MUST open that sub-dialog as a new level stacked over its parent inside the same render session, and MUST do nothing on an option declaring none.
-- Only the top level MUST answer keys; the levels beneath it MUST stay rendered and ignore input until the top level closes.
-- Escape or Ctrl-C with more than one level open MUST close only the top level and return to its parent with the parent's state unchanged; at the root level it MUST cancel the dialog and resolve with `undefined`.
-- Completing a nested select level MUST resolve the whole `select` with a result carrying the completing option's exact value and every input value collected along the path, keyed by field name with the deeper submission winning a repeated name.
+- An option declaring a sub-dialog MUST be marked in its list, and opening one MUST add a column to the right of the column it was opened from, inside the same render session and inside the same frame.
+- Enter MUST open the sub-dialog of an option that declares one, and MUST take an option that declares none. The right arrow MUST open a declared sub-dialog whatever the binding below, and MUST do nothing on an option declaring none.
+- The root request MAY rebind opening from Enter to Tab. Under that binding Enter MUST take an option whether or not it declares a sub-dialog, and Tab MUST open a declared one. The binding MUST be read from the root request alone and MUST apply to every column.
+- Only the rightmost column MUST answer keys; the columns left of it MUST stay rendered and ignore input until it closes.
+- The left arrow MUST close the rightmost column and return to the one that opened it, and MUST do nothing at the leftmost column, where closing the dialog is Escape's alone.
+- Escape or Ctrl-C with more than one column open MUST close only the rightmost and return to its parent with the parent's state unchanged; at the leftmost column it MUST cancel the dialog and resolve with `undefined`.
+- Completing a nested select column MUST resolve the whole `select` with a result carrying the completing option's exact value and every input value collected along the path, keyed by field name with the deeper submission winning a repeated name.
 - Submitting a text-field sub-dialog MUST resolve the whole `select` with a result carrying the opening option's exact value and every input value collected along the path including the submitted text under its field's name, keyed by field name with the deeper submission winning a repeated name.
-- Entering a sub-dialog MUST NOT change its parent's filter text or active option, and leaving it MUST restore exactly what the parent showed before it opened.
-- The trigger MUST be answered from the Tab key report rather than from typed or pasted text; Shift+Tab reports the same key and MUST open a sub-dialog too rather than reaching the filter as text.
+- Opening a sub-dialog MUST NOT change its parent's filter text or active option, and closing it MUST restore exactly what the parent showed before it opened.
+- The Tab binding MUST be answered from the Tab key report rather than from typed or pasted text; Shift+Tab reports the same key and MUST open a sub-dialog too rather than reaching the filter as text.
 - `select` MUST reject before rendering when any reachable sub-dialog declares an empty options list, or when any reachable option declares an empty field list or repeats a field name within itself.
 
 #### Scenario: Drill into a nested select
 
 - **GIVEN** the active option declares a nested select whose second option is plain
-- **WHEN** the user presses Tab, then Down, then Enter
-- **THEN** the nested select opens over its parent and `select` resolves with the second nested option's value
+- **WHEN** the user presses Enter, then Down, then Enter
+- **THEN** the nested select opens as the column to its right and `select` resolves with the second nested option's value
 
 #### Scenario: Submit a text leaf
 
 - **GIVEN** the active option declares a text-field sub-dialog named `tag`
-- **WHEN** the user presses Tab, types `nightly`, and presses Enter
+- **WHEN** the user presses the right arrow, types `nightly`, and presses Enter
 - **THEN** `select` resolves with the opening option's value and the collected value `nightly` under `tag`
 
-#### Scenario: Pop back to the parent
+#### Scenario: Back out to the parent
 
-- **GIVEN** a sub-dialog is open over its parent
-- **WHEN** the user presses Escape
-- **THEN** the sub-dialog closes, the parent shows the same filter text and active option as before, and `select` stays open
+- **GIVEN** a sub-dialog is open as the column right of its parent
+- **WHEN** the user presses the left arrow or Escape
+- **THEN** that column closes, the parent shows the same filter text and active option as before, and `select` stays open
 
-#### Scenario: Trigger without a declaration does nothing
+#### Scenario: An entry opened over a column names backing out
+
+- **GIVEN** a text leaf, or a field of an option chosen in an opened column, is taking input
+- **WHEN** the user reads the hint line under its panel and presses Escape
+- **THEN** the line reads `Enter submit · Esc back`, and Escape closes that entry and returns to the column that opened it rather than cancelling the dialog
+
+#### Scenario: Opening without a declaration does nothing
 
 - **GIVEN** the active option declares no sub-dialog
-- **WHEN** the user presses Tab
+- **WHEN** the user presses the right arrow
 - **THEN** nothing opens and the dialog stays on the same option
 
 ### Presentation
@@ -354,15 +372,23 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 
 - Every dialog MUST be drawn inside a frame whose top edge carries its message as a title: the request message for a select or a standalone input, and the field's message for a field under collection.
 - A select MUST use a double-line frame; a standalone input and a field under collection MUST use a single-line frame.
-- Frame edges, the title, the key hints, the overflow indicators, and the filter prompt MUST be rendered dimmed relative to option labels and entered text.
-- The active option MUST be rendered as an inverted bar spanning the frame's full inner width.
+- Frame edges, the title, the key hints, the overflow counts, and the filter prompt MUST be rendered dimmed relative to option labels and entered text.
+- The active option MUST be rendered as an inverted bar spanning its column's full width. The rightmost column MUST take whatever width the title or the edges left the panel spare, so a select showing one column has its bar spanning the frame's whole inner width.
 - A dialog MUST use only the terminal's default foreground and background, their dimmed form, and their inversion; it MUST NOT emit any hue.
-- A dimmed key hint line MUST appear beneath the frame: a select's names the navigation, selection, and cancel keys and, when the filter is enabled, typing to filter; an input's or a field's names the submit and cancel keys. A select level whose visible options include one declaring a sub-dialog MUST append `· Tab expand` to that line.
-- Each stacked sub-dialog MUST use the frame its kind calls for: a nested select in a double-line frame, a text-field sub-dialog in a single-line frame.
-- Stacked levels MUST overlap: each level above the root MUST render offset down and right from its parent, with a dimmed block-fill shadow box behind it, clamped so the union of the stacked frames stays within the terminal width and stays strictly shorter than the terminal height.
+- The filter and the overflow counts MUST be set into the frame's own edges rather than drawn as rows of the panel: the filter into the bottom edge, the counts into the top and bottom edges on their right. Neither MUST cost the panel a row, and neither appearing nor disappearing MUST move an option row. The room the counts take MUST be held whether a count is showing or not, so the title does not resize as the reader scrolls. Both describe the rightmost column: it is the one taking keys, and it is the only one that scrolls.
+- A dimmed key hint line MUST appear beneath the frame, naming exactly the keys the dialog answers where the reader is: a select's names moving, opening when the row under the cursor leads somewhere, taking when that row can be taken, backing out once a column has been opened, typing to filter, and cancelling; an entry's names submitting and then whichever of backing out or cancelling its own cancel key performs. A dialog MUST draw exactly one such line however many columns it is showing.
+- Backing out and cancelling MUST NOT both be named. Above the leftmost column the cancel key backs out exactly as the left arrow does, so the line MUST name the two keys as the one thing they do there and MUST NOT promise a cancellation the dialog will not perform; cancelling MUST be named only at the leftmost column, where it is what the cancel key does. The same rule binds an entry: a standalone `input` and a field collected at the leftmost column MUST name cancelling, while a text leaf and a field collected in an opened column MUST name backing out, because their cancel key closes only that column.
+- The line names the keys the dialog answers in the mode it is in — leftmost column or a column opened over it, list or entry — and MUST NOT track momentary availability. Typing to filter MUST be named whether or not the filter is on screen, because typing always filters. Moving and taking MUST stay named when a filter has left nothing to move over or take, though both are no-ops in that state. A phrase that came and went as the reader typed would be one more thing moving under them, which is the churn the filter and the overflow counts were set into the frame's edges to stop; a mode changes only when the reader opens or closes a column, which they do deliberately.
+- Every column of a select MUST render inside one frame — the one the first level drew, and the only one however deep the reader goes — and a sub-dialog MUST NOT draw a border, an offset, or a shadow of its own. A text-field sub-dialog is not a column: it MUST render as its own single-line panel beneath the frame, as a collected field does.
+- The columns MUST be laid out left to right in the order they were opened, separated by a dimmed divider, and MUST share one band of rows so lists of different lengths start on the same row.
+- An option declaring a sub-dialog MUST be marked on the right edge of its column, on the same edge for every marked row of that column.
+- A column a sub-dialog has been opened from MUST keep rendering what it was showing — the window its own filter text left it on, and its cursor bar on the choice it was left on — so the choices made on the way in stay readable beside the one being made now. The one thing that MUST move that window is the shared band shrinking under an entry panel, which shrinks it for every column at once, and the column MUST return to the window it was left on once the band grows back. It MUST be dressed at rest, with nothing on it animating. Its filter text and its hidden counts MUST NOT be drawn, because the edges that carry those belong to the column taking keys.
+- Every column MUST draw its cursor bar identically: the bar is the inversion alone, and a column behind the driven one MUST NOT shade its bar or its label differently. Which column is being driven is said by where it sits — rightmost — and saying it a second time in a second way is what the reader has to unlearn.
+- The frame's title MUST name the trail of the columns on screen.
+- When the columns exceed the width available, the leftmost MUST be dropped first and the title MUST say that something was dropped. Dropping MUST stop at one column, which MUST be truncated to the width left rather than dropped.
 - A frame MUST fit its content and MUST NOT exceed the terminal width; a title or label wider than the inner width MUST be truncated at its end with an ellipsis rather than wrapped, and filter text or a value under entry wider than the inner width MUST keep its end visible, so the caret is never cut off.
 - Twenty columns is the narrowest supported terminal: below it, a dialog MUST lay itself out as if the terminal were twenty columns wide, and how the terminal wraps the result is unspecified.
-- Text entry and the filter MUST show a caret after the current text, and the caret SHOULD alternate between visible and hidden at an interval between 400 and 600 milliseconds while the dialog waits for input.
+- Text entry and the filter MUST show a caret after the current text, and the caret SHOULD alternate between visible and hidden at an interval between 400 and 600 milliseconds while the dialog waits for input. Only a line still answering keystrokes MUST carry one: a filter that has stopped accepting edits because a field is being collected MUST keep its text and its prompt and give up its caret.
 - Confirming a plain option SHOULD flash the active bar before the dialog settles; once confirmed, the dialog MUST settle within 250 milliseconds and MUST ignore every key, cancellation included, because the choice is already made.
 - An overflow indicator SHOULD pulse between its dimmed and normal rendering at the caret's interval.
 - The caret blink and the indicator pulse MUST NOT delay input: a keystroke MUST be reflected in the very next render regardless of their phase.
@@ -370,18 +396,19 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Every animation timer MUST be stopped before the dialog settles.
 - A request rejected before rendering MUST still render nothing, frame included.
 
-The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow indicators are `▲ N more` above and `▼ N more` below with `N` the hidden count, the no-match row reads `no match`, and the select hint line reads `↑↓ move · Enter select · type to filter · Esc cancel`, without the filter phrase when the filter is disabled and with ` · Tab expand` appended exactly when a visible option declares a sub-dialog; the input hint line reads `Enter submit · Esc cancel`.
+The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow counts are `▲ N` on the top edge and `▼ N` on the bottom with `N` the hidden count, the no-match row reads `no match`, the marker on an option that opens a sub-dialog is `▸`, the divider between columns is `│`, and the trail in the title joins its columns with `›` and opens with `…` when columns have been dropped. The select hint line is assembled from `↑↓ move`, then `→/Enter open` on a row that leads somewhere (`→/Tab open` under the Tab binding), then `Enter select` unless Enter opens that row, then `←/Esc back` once a column has been opened, then `type to filter`, then `Esc cancel` at the leftmost column only, joined with ` · `; the entry hint line reads `Enter submit · Esc cancel` where Escape cancels the dialog — a standalone `input`, and a field collected at the leftmost column — and `Enter submit · Esc back` where it backs out instead — a text leaf, and a field collected in a column opened over the leftmost one. An entry offers no left arrow of its own, so it names Escape alone where the select's line reads `←/Esc back`.
 
-Reference rendering of a filter-enabled select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves three option rows because the dialog's other six rows — the two frame edges, the filter prompt, both overflow indicators, and the hint line — must fit alongside them and still stay strictly under the terminal height. Only one indicator has anything to count here, so the frame drawn is eight rows of the ten:
+Reference rendering of a select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves six option rows because the dialog's other three rows — the two frame edges and the hint line — must fit alongside them and still stay strictly under the terminal height. The filter and the counts are set into the edges the panel is already drawing, so neither takes a row:
 
 ```text
-╔═ Which branch? ═══════════════════════╗
-║ › rel█                                ║
-║ release/1.4                           ║  ← inverted bar
-║ release/1.5                           ║
-║ release/1.6                           ║
-║ ▼ 2 more                              ║
-╚═══════════════════════════════════════╝
+╔═ Which branch? ═════════════════ ▲ 1 ╗
+║ release/1.4                          ║  ← inverted bar
+║ release/1.5                          ║
+║ release/1.6                          ║
+║ release/2.0-rc                       ║
+║ release/2.1                          ║
+║ release/2.2                          ║
+╚═ › rel█ ════════════════════════ ▼ 2 ╝
  ↑↓ move · Enter select · type to filter · Esc cancel
 ```
 
@@ -411,7 +438,7 @@ Reference rendering of a filter-enabled select in a terminal of 80 columns and 1
 
 #### Scenario: Static dialog stays quiet
 
-- **GIVEN** a select with three options, the filter disabled, and no overflow
+- **GIVEN** a select with three options, no filter on screen, and no overflow
 - **WHEN** no input arrives for one second
 - **THEN** nothing further is written to standard error
 
@@ -421,7 +448,7 @@ Reference rendering of a filter-enabled select in a terminal of 80 columns and 1
 - A dialog MUST render its prompts, options, and entered values only to the dialogs provider's injected standard-error stream, leaving standard output untouched for the consumer's data.
 - A dialog MUST reject before rendering when its injected standard-input or standard-error stream is not an interactive terminal; it MUST NOT provide a non-interactive fallback.
 - A dialog MUST restore the injected terminal's prior state and finish unmounting before its promise settles after completion, cancellation, or rendering failure.
-- A `select` that collects fields MUST be one dialog: it MUST NOT restore terminal state, unmount, or settle between its selection and field stages. A `select` that opens sub-dialogs MUST be one dialog on the same terms: it MUST NOT restore terminal state, unmount, or settle between its levels.
+- A `select` that collects fields MUST be one dialog: it MUST NOT restore terminal state, unmount, or settle between its selection and field stages. A `select` that opens sub-dialogs MUST be one dialog on the same terms: it MUST NOT restore terminal state, unmount, or settle between its columns.
 - If an injected `setRawMode(false)`, `unref()`, or renderer `unmount()` method persistently throws, restoration or teardown through that API is impossible: a dialog MUST retry finitely, reject with the first applicable cleanup failure, and permit incomplete restoration or renderer teardown only on that exceptional path rather than hanging indefinitely.
 - A rendering or interaction failure MUST reject the dialog and MUST NOT terminate the process directly.
 
@@ -467,7 +494,7 @@ The provider registers during initialization. Consumers read committed values in
 
 The filter has one job: let a user type a few characters and press Enter. That is why there is no focus model — the filter is always the thing typed text reaches, and arrows, Enter, and Escape keep the meanings they have in an unfiltered select. Substring matching on whitespace-separated terms is deliberately plain: it is predictable, needs no ranking, and every visible option keeps the position the caller gave it, so a list a caller ordered by relevance stays ordered by relevance under a filter. Options that declare fields are the caller's escape hatch, and a filter that could hide the escape hatch would defeat it, so they are always visible.
 
-`"auto"` exists so callers need not think about the filter at all: a short list stays a short list, and a long one gets a filter. The threshold is a fixed count rather than the terminal size so a caller can predict what the user sees.
+Filtering is always live because there is no second thing a printable character could sensibly mean at a list, and a reader who starts typing at one is asking for exactly one thing. What a caller can decide is only whether the filter takes up room before it has been used, which is a presentation question rather than a behavioral one — hence a setting about showing rather than about enabling.
 
 ### Why a Viewport
 
@@ -485,9 +512,9 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - Field validation, required-field policy, defaults beyond an initial value, error messages, and re-prompting after a rejected value are out of scope; a caller validates what it receives.
 - Caret movement, word or line deletion, clipboard integration, paste-specific handling, entry history, completion, and character masking are out of scope for text entry and for the filter; a terminal paste arrives as ordinary input and is appended as such.
 - Fuzzy or prefix matching, match ranking, match highlighting, matching against option values, a caller-supplied matcher, an initial filter text, and a filter on `input` are out of scope.
-- Returning to an earlier stage, partial results, and any back-navigation key are out of scope, except that Escape MUST close the top stacked level of a cascading sub-dialog and return to its parent.
+- Returning to an earlier stage, partial results, and any back-navigation key are out of scope, except that Escape and the left arrow MUST close the rightmost sub-dialog column and return to the one that opened it.
 - Multi-select, disabled or grouped options, custom option rendering, mouse input, configurable themes or palettes, color hues, and layout APIs are out of scope.
-- Non-interactive fallback, concurrent dialogs, independently nested dialogs in separate render sessions, global serialization, persistence, and terminal accessibility policy are out of scope. Stacked cascading sub-dialog levels are not nested dialogs in this sense: they are one dialog in one render session.
+- Non-interactive fallback, concurrent dialogs, independently nested dialogs in separate render sessions, global serialization, persistence, and terminal accessibility policy are out of scope. Sub-dialog columns are not nested dialogs in this sense: they are one dialog in one render session.
 - Registry collision policy, provider priority, deduplication, ownership metadata, and version negotiation are owned by neither this spec nor the initial implementation.
 
 ## Open Questions
@@ -496,7 +523,8 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - A confirm dialog MAY be specified when a concrete bundled consumer needs one.
 - Further field types and a multi-choice dialog MAY reuse the field and option model when a concrete bundled consumer needs them; neither is specified here.
 - Whether a reduced-motion preference, such as an environment variable, SHOULD disable the caret blink, the indicator pulse, and the confirmation flash is undecided; all three are SHOULD-level, so adding one changes no MUST.
-- The `"auto"` threshold of eight MAY be revisited once a bundled consumer presents real lists.
+- Whether a filter that has been cleared back to empty should stay on screen for the column it was used in MAY be revisited once a bundled consumer presents real lists.
+- Whether a column left of the rightmost one SHOULD report its own hidden counts is undecided. Only the rightmost reports today, so a column behind it whose list runs past the band shows a list that stops without saying it was cut; the two edges have room for one column's pair, and a rule for the rest needs somewhere to put the numbers first.
 - Highlighting the matched characters within a visible label MAY be specified later; it is presentation only and changes no result.
 
 ## References
@@ -507,6 +535,7 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - [Change 0017: Add Dialog Text Input and Composition](../../changes/0017-add-dialog-text-input-and-composition.md)
 - [Change 0020: Add Select Filter and Viewport](../../changes/0020-add-select-filter-and-viewport.md)
 - [Change 0021: Restyle Dialogs as Norton Commander](../../changes/0021-restyle-dialogs-as-norton-commander.md)
+- [Change 0023: Render Sub-Dialogs as Columns](../../changes/0023-render-sub-dialogs-as-columns.md)
 - [Ink](https://github.com/vadimdemedes/ink)
 
 ## Changelog
@@ -522,6 +551,6 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-01 | Desired Norton Commander presentation: framed dialogs with titles, greyscale palette, inverted cursor bar, key hints, truncation, and bounded animations | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |
 | 2026-09-02 | Implemented the select filter with its `filter` request setting, term matching, and pinned user-provided options, and the bounded viewport with its overflow indicators and Home, End, and Page navigation | [0020-add-select-filter-and-viewport](../../changes/0020-add-select-filter-and-viewport.md) |
 | 2026-09-02 | Implemented the Norton Commander presentation: greyscale framed panels with their message set into the top edge, the inverted cursor bar, dimmed chrome and key hints, width-aware truncation, and the bounded caret blink, indicator pulse, and confirmation flash | [0021-restyle-dialogs-as-norton-commander](../../changes/0021-restyle-dialogs-as-norton-commander.md) |
-| 2026-09-04 | Desired cascading sub-dialogs with the Ctrl+Enter trigger, one-session stacking, Escape popping, whole-stack resolution, and overlapping shadowed panels | [0023-cascading-sub-dialogs](../../changes/0023-cascading-sub-dialogs.md) |
-| 2026-09-04 | Implemented cascading sub-dialogs with the Ctrl+Enter trigger, one-session stacking, Escape popping, whole-stack resolution, and overlapping shadowed panels | [0023-cascading-sub-dialogs](../../changes/0023-cascading-sub-dialogs.md) |
-| 2026-09-04 | Retargeted the sub-dialog trigger from Ctrl+Enter to Tab so it works on terminals without the kitty keyboard protocol | [0024-sub-dialog-trigger-tab](../../changes/0024-sub-dialog-trigger-tab.md) |
+| 2026-09-05 | Desired sub-dialogs as columns of one frame, the Enter-opens binding with its `expand` escape hatch, the always-live filter with its `filter` showing setting, and the filter and overflow counts set into the frame's edges | [0023-render-sub-dialogs-as-columns](../../changes/0023-render-sub-dialogs-as-columns.md) |
+| 2026-09-05 | Implemented the column browser inside one frame with its divider, shared band, expand marker, trail title, and collapsing from the left; the Enter and arrow opening keys with the root-only `expand` binding; the always-live filter; and the filter and overflow counts set into the frame's edges with their room held | [0023-render-sub-dialogs-as-columns](../../changes/0023-render-sub-dialogs-as-columns.md) |
+| 2026-09-05 | Stated the viewport's one-row floor and its active-option rule with the conditions they hold under, so both match the collapse a too-short terminal forces, closing the open question 0020 recorded | [0023-render-sub-dialogs-as-columns](../../changes/0023-render-sub-dialogs-as-columns.md) |

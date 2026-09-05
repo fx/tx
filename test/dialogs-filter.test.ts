@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  automaticFilterThreshold,
-  filterIsEnabled,
+  filterIsShown,
   visibleOptionIndices,
 } from "../plugins/dialogs/filter.ts";
 
@@ -11,21 +10,19 @@ function options(...names: readonly string[]) {
   return names.map((label) => ({ label }));
 }
 
-describe("select filter enablement", () => {
-  test("lets an explicit setting decide whatever the option count", () => {
-    expect(filterIsEnabled(true, 1)).toBe(true);
-    expect(filterIsEnabled(true, 100)).toBe(true);
-    expect(filterIsEnabled(false, 1)).toBe(false);
-    expect(filterIsEnabled(false, 100)).toBe(false);
+describe("select filter visibility", () => {
+  test("shows itself once anything has been typed into it", () => {
+    // Filtering is never off, so there is nothing here about whether typing
+    // narrows the list — only about whether the filter is on screen before
+    // anything has been typed.
+    expect(filterIsShown("typed", "")).toBe(false);
+    expect(filterIsShown("typed", "a")).toBe(true);
+    expect(filterIsShown("typed", " ")).toBe(true);
   });
 
-  test("turns itself on above the threshold and off at or below it", () => {
-    expect(automaticFilterThreshold).toBe(8);
-    for (const setting of ["auto", undefined] as const) {
-      expect(filterIsEnabled(setting, 0)).toBe(false);
-      expect(filterIsEnabled(setting, automaticFilterThreshold)).toBe(false);
-      expect(filterIsEnabled(setting, automaticFilterThreshold + 1)).toBe(true);
-    }
+  test("shows itself from the start when the caller asks", () => {
+    expect(filterIsShown("always", "")).toBe(true);
+    expect(filterIsShown("always", "a")).toBe(true);
   });
 });
 

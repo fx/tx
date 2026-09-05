@@ -9,7 +9,6 @@ import type {
 } from "@fx/tx/plugin";
 import { animationInterval, onPhase } from "./animation.ts";
 import { createEntry } from "./entry.ts";
-import { filterIsEnabled } from "./filter.ts";
 import { createFrame } from "./frame.ts";
 import { createSelectView } from "./select.ts";
 import type {
@@ -404,18 +403,27 @@ const definition: PluginDefinition = Object.freeze({
           });
         },
 
-        async select<T>({ message, options, filter }: SelectRequest<T>) {
+        async select<T>({
+          message,
+          options,
+          filter,
+          expand,
+        }: SelectRequest<T>) {
           requireNonEmptyOptions(options);
           requireCollectableFields(options);
           requireInteractiveStreams(context, "A select dialog");
 
-          const filtering = filterIsEnabled(filter, options.length);
           return runDialog<SelectResult<T>>(session, "Select", (settle) =>
             createSelectView(
               react,
               ink,
               { Entry, Frame },
-              { message, options, filtering },
+              {
+                message,
+                options,
+                filter: filter ?? "typed",
+                expandKey: expand ?? "enter",
+              },
               settle,
             ),
           );

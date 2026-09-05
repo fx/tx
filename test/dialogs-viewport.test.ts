@@ -5,9 +5,6 @@ import {
   optionRowCount,
   optionWindow,
   selectChromeHeight,
-  stackedExtraRows,
-  stackedOffsetColumns,
-  stackedShadowRows,
 } from "../plugins/dialogs/viewport.ts";
 
 /** A terminal with room to spare, so a test about one bound is not answered by
@@ -46,13 +43,16 @@ describe("select viewport height", () => {
    * exactly how a constant three rows too large once passed every test here
    * while starving a ten-row terminal of every option row it could afford.
    */
-  test("reserves six rows while choosing and nine while collecting", () => {
-    expect(selectChromeHeight).toBe(6);
-    expect(collectingChromeHeight).toBe(9);
-    expect(optionRowCount(30, 8, false)).toBe(1);
-    expect(optionRowCount(30, 12, false)).toBe(5);
-    expect(optionRowCount(30, 11, true)).toBe(1);
-    expect(optionRowCount(30, 15, true)).toBe(5);
+  test("reserves three rows while choosing and six while collecting", () => {
+    // Two edges and a hint line, and nothing else: the filter and the overflow
+    // counts are set into the edges the panel already draws, so neither costs
+    // it a row.
+    expect(selectChromeHeight).toBe(3);
+    expect(collectingChromeHeight).toBe(6);
+    expect(optionRowCount(30, 5, false)).toBe(1);
+    expect(optionRowCount(30, 9, false)).toBe(5);
+    expect(optionRowCount(30, 8, true)).toBe(1);
+    expect(optionRowCount(30, 12, true)).toBe(5);
   });
 
   /** The spec's own short-terminal scenario, in the terminal it names: thirty
@@ -158,8 +158,8 @@ describe("select viewport height", () => {
         optionRowCount(30, rows, false),
       );
     }
-    expect(optionRowCount(30, 11, false)).toBe(4);
-    expect(optionRowCount(30, 11, true)).toBe(1);
+    expect(optionRowCount(30, 8, false)).toBe(4);
+    expect(optionRowCount(30, 8, true)).toBe(1);
   });
 });
 
@@ -229,9 +229,9 @@ describe("select option window", () => {
    * no rows to spare. */
   test("renders no rows and counts the whole list as hidden below", () => {
     // A literal, for the same reason, and the more carefully because no
-    // absolute row count above it pins this one down: seven rows is one short
-    // of the eight a choosing select needs for its first option row.
-    const boundary = 7;
+    // absolute row count above it pins this one down: four rows is one short
+    // of the five a choosing select needs for its first option row.
+    const boundary = 4;
     expect(optionWindow(30, 0, 0, boundary, false)).toEqual({
       renderedStart: 0,
       count: 0,
@@ -264,10 +264,10 @@ describe("select option window", () => {
    * of the list.
    */
   test("remembers the start it had while it has no rows to draw it at", () => {
-    // Seven rows while choosing and ten while collecting are the heights at
+    // Four rows while choosing and seven while collecting are the heights at
     // which the window gives up its last row. Written as literals, so a chrome
     // constant that grows fails here rather than moving the case with it.
-    const collapsed = optionWindow(30, 25, 20, 7, false);
+    const collapsed = optionWindow(30, 25, 20, 4, false);
     expect(collapsed.count).toBe(0);
     expect(collapsed.renderedStart).toBe(0);
     expect(collapsed.rememberedStart).toBe(20);
@@ -285,7 +285,7 @@ describe("select option window", () => {
       hiddenBelow: 0,
     });
     // Collection collapses the window the same way a short terminal does.
-    const collecting = optionWindow(30, 25, 20, 10, true);
+    const collecting = optionWindow(30, 25, 20, 7, true);
     expect(collecting.count).toBe(0);
     expect(collecting.renderedStart).toBe(0);
     expect(collecting.rememberedStart).toBe(20);
@@ -295,7 +295,7 @@ describe("select option window", () => {
    * over, so a filter that shortens the list under a collapsed window pulls the
    * remembered start back with it rather than storing a start past the end. */
   test("clamps what a collapsed window remembers to the list it has", () => {
-    expect(optionWindow(12, 0, 20, 7, false)).toEqual({
+    expect(optionWindow(12, 0, 20, 4, false)).toEqual({
       renderedStart: 0,
       count: 0,
       rememberedStart: 12,
@@ -323,7 +323,7 @@ describe("select option window", () => {
   });
 
   test("re-derives itself against the terminal's current height", () => {
-    expect(optionWindow(30, 12, 3, 12, false)).toEqual({
+    expect(optionWindow(30, 12, 3, 9, false)).toEqual({
       renderedStart: 8,
       count: 5,
       rememberedStart: 8,
@@ -340,41 +340,40 @@ describe("select option window", () => {
   });
 });
 
-describe("stacked dialog budget", () => {
-  test("costs nothing flat and one shadow row per level above the root", () => {
-    expect(stackedExtraRows(1)).toBe(0);
-    expect(stackedExtraRows(2)).toBe(stackedShadowRows);
-    expect(stackedExtraRows(3)).toBe(2 * stackedShadowRows);
-    expect(stackedOffsetColumns).toBe(2);
-  });
-
-  test("shrinks the top window by the shadow rows the stack adds", () => {
-    expect(optionRowCount(30, ROOMY, false)).toBe(maximumOptionRows);
+describe("column browser budget", () => {
+  test("costs a column nothing: the columns share the terminal's rows", () => {
+    // Columns sit side by side rather than stacked, so opening one takes no
+    // row from the one that opened it: every column is windowed against the
+    // same terminal, whatever the depth.
     const rows = selectChromeHeight + maximumOptionRows + 1;
+    expect(optionRowCount(30, ROOMY, false)).toBe(maximumOptionRows);
     expect(optionRowCount(30, rows, false)).toBe(maximumOptionRows);
-    expect(optionRowCount(30, rows, false, stackedExtraRows(2))).toBe(
-      maximumOptionRows - stackedShadowRows,
-    );
-    expect(optionWindow(30, 0, 0, rows, false, stackedExtraRows(2)).count).toBe(
-      maximumOptionRows - stackedShadowRows,
-    );
-  });
-  test("keeps a top option row with a stack open in a short terminal", () => {
-    const rows = selectChromeHeight + stackedShadowRows + 2;
-    expect(optionRowCount(30, rows, false, stackedExtraRows(2))).toBe(1);
-    expect(optionWindow(30, 0, 0, rows, false, stackedExtraRows(2)).count).toBe(
-      1,
-    );
+    expect(optionWindow(30, 0, 0, rows, false).count).toBe(maximumOptionRows);
   });
 
-  test("keeps one top row however deep the stack on however short a terminal", () => {
-    // A stack deeper than the budget still renders the top level: the floor
-    // is the top's own row, not the room the shadows leave.
-    expect(optionRowCount(30, 10, false, stackedExtraRows(4))).toBe(1);
-    expect(optionWindow(30, 5, 0, 10, false, stackedExtraRows(4)).count).toBe(
-      1,
-    );
-    // Flat dialogs keep the old floor: no room means no row.
-    expect(optionRowCount(30, 7, false)).toBe(0);
+  test("draws no option row in a terminal that cannot afford one", () => {
+    expect(optionRowCount(30, selectChromeHeight + 1, false)).toBe(0);
+    expect(optionWindow(30, 0, 0, selectChromeHeight + 1, false).count).toBe(0);
+  });
+
+  /**
+   * A text leaf renders the same entry panel a collected field does, under the
+   * same browser, so it spends the collecting chrome and has to be budgeted
+   * against it. The eight-row terminal is where the two budgets part company by
+   * exactly the amount that matters: the choosing budget's four option rows,
+   * the panel's two edges, and the entry's four rows come to ten in a terminal
+   * with eight, which is over the height at which Ink reads the output as
+   * full-screen and clears the terminal on the way out.
+   *
+   * Written in absolute rows rather than against the constants, so a budget
+   * that grows fails here instead of moving the case with it.
+   */
+  test("budgets the entry panel a text leaf puts under the browser", () => {
+    const terminal = 8;
+    expect(optionRowCount(30, terminal, false)).toBe(4);
+    expect(4 + collectingChromeHeight).toBeGreaterThan(terminal);
+    expect(optionRowCount(30, terminal, true)).toBe(1);
+    expect(1 + collectingChromeHeight).toBeLessThan(terminal);
+    expect(optionWindow(30, 0, 0, terminal, true).count).toBe(1);
   });
 });

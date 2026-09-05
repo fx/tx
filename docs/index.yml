@@ -197,18 +197,10 @@ changes:
     depends_on:
       - "0015"
   - id: "0023"
-    name: cascading-sub-dialogs
-    path: changes/0023-cascading-sub-dialogs.md
-    description: Let a select option declare a nested select or text input that Ctrl+Enter opens as an overlapping shadowed panel, with Escape popping and whole-stack resolution.
+    name: render-sub-dialogs-as-columns
+    path: changes/0023-render-sub-dialogs-as-columns.md
+    description: Lay the select out as a column browser inside one frame, open a sub-dialog with Enter or the right arrow under a root-only expand binding, filter live at every column, and set the filter and overflow counts into the frame's edges.
     spec: dialogs
     status: complete
     depends_on:
       - "0021"
-  - id: "0024"
-    name: sub-dialog-trigger-tab
-    path: changes/0024-sub-dialog-trigger-tab.md
-    description: Retarget the select sub-dialog trigger from Ctrl+Enter to Tab so it works on terminals without the kitty keyboard protocol.
-    spec: dialogs
-    status: complete
-    depends_on:
-      - "0023"
