@@ -2,9 +2,11 @@
 
 ## Overview
 
-The grid capability lays text out in aligned cells and either prints it once or lets the user drive it. It is supplied by a bundled plugin as an internal capability, and it exists so that a plugin with rows to show does not have to own column measurement, display-width arithmetic, colour resolution, terminal-canvas sizing, or a renderer lifecycle — the parts every such plugin gets subtly wrong and none of them should have to solve twice.
+The grid capability lays text out in aligned cells and either prints it once or lets the user drive it. It is supplied by a bundled plugin, and it exists so that a plugin with rows to show does not have to own column measurement, display-width arithmetic, colour resolution, terminal-canvas sizing, or a renderer lifecycle — the parts every such plugin gets subtly wrong and none of them should have to solve twice.
 
 A grid is not only a table. A table — a header row over columns of equal meaning — is one layout; a flow, where a list of short items fills as many columns as the terminal affords, is another. Both are the same cells measured the same way, so both belong to one capability.
+
+[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/grid` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is not yet implemented, so exactly two things below are ahead of the code: the contract is not published today, and the key in use is still the bare `grid`. Every other requirement describes current behavior.
 
 ## Background
 
@@ -18,10 +20,10 @@ The interactive grid then costs almost nothing extra: a driveable grid is a sele
 
 ### Grid Capability
 
-- The grid capability MUST be supplied by a bundled plugin registered under the opaque registry key `grid`, and its provider MUST NOT claim a command namespace.
+- The grid capability MUST be supplied by a bundled plugin registered under the opaque registry key `@fx/tx/grid`, which is also the specifier its contract is published at under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), and its provider MUST NOT claim a command namespace.
 - The capability MUST expose printing a grid and selecting a row of one, and MUST NOT expose a renderer, a component, or a layout primitive.
 - A consumer MUST read the capability while its command runs rather than during its own initialization.
-- The contract MUST remain a local structural type shared by bundled plugins; nothing about grids MUST enter `src/` or the public `@fx/tx/plugin` contract.
+- The contract MUST be published from the package as a types-only import under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), so a consumer types the capability by importing the contract rather than by restating it. Nothing about grids MUST enter `src/` or the public `@fx/tx/plugin` contract: the contract is published beside that contract rather than inside it.
 - The grid MUST resolve every appearance through [Theming](../theming/) and MUST NOT decide a hue, a dim, or an inversion itself, under the one-provider rule [Theming: Theme Capability](../theming/index.md#theme-capability) states; the grid MUST NOT carry a theme of its own to fall back to.
 - A printing request declaring no layout MUST be laid out as a table. It is the shape a caller who said nothing meant, and the only one that needs no width.
 
@@ -95,7 +97,7 @@ A selecting request carries no stream: a dialog reads and draws through the stre
 #### Scenario: Capability used by a command
 
 - **GIVEN** a bundled grid provider has initialized successfully
-- **WHEN** a consumer reads the `grid` key while its command runs
+- **WHEN** a consumer reads the `@fx/tx/grid` key while its command runs
 - **THEN** it receives exactly one grid and can print rows without naming an appearance
 
 ### Cell Values
@@ -316,7 +318,7 @@ They share every measurement decision and differ only in what drives them. Split
 - Mouse input, column reordering, resizable columns, multi-row selection, and in-place editing of a cell are out of scope.
 - Match highlighting within a cell is out of scope, as it is for [Dialogs](../dialogs/).
 - Running, spawning, or supervising a process is out of scope; the grid reports a chosen action and nothing more.
-- A public grid type export is out of scope while the only consumers are bundled plugins.
+- The grid contract is published as types alone. A runtime grid export, a grid package versioned separately from `tx`, and any way of obtaining the capability other than reading the `@fx/tx/grid` registry key are out of scope.
 
 ## Open Questions
 
@@ -343,3 +345,4 @@ They share every measurement decision and differ only in what drives them. Split
 | 2026-09-05 | Initial grid capability, cell model, table and flow layouts, and printing | [0028-add-the-grid-plugin](../../changes/0028-add-the-grid-plugin.md) |
 | 2026-09-05 | Interactive grid, row actions, and the terminal-handover guarantee | [0029-add-interactive-grid-row-actions](../../changes/0029-add-interactive-grid-row-actions.md) |
 | 2026-09-05 | Implemented the interactive grid as a select composed over Dialogs: rows carrying their own value and their own actions, a row's actions as the sub-dialog it opens, a value carried through that column identifying both the row and the action so a selection reports each without the other being reconstructed, and the terminal-handover guarantee pinned by tests over completion, cancellation, and failure alike | [0029-add-interactive-grid-row-actions](../../changes/0029-add-interactive-grid-row-actions.md) |
+| 2026-09-06 | Required the grid contract to be published at `@fx/tx/grid` as a types-only import, replacing the local structural copy every consumer maintained | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
