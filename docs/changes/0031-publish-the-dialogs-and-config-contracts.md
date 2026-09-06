@@ -93,13 +93,13 @@ The cleanup is the larger half. The sites are found by searching for the declara
 
 ## Tasks
 
-- [ ] Publish the config contract
-  - [ ] Rename the `config` key to `@fx/tx/config` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
-  - [ ] `plugins/config/contract.ts` declaring `Config` and `ConfigValidator` as types alone
-  - [ ] Have `plugins/config/index.ts` import it type-only and register a value checked against `Config`
-  - [ ] Reduce `plugins/marketplace/configured.ts` to importing the published contract, keeping `requireConfigCapability` and the marketplace's own key and value types
-  - [ ] `exports` entry `./config`, its `files` entries, the packed-file assertion, and the consumer-fixture import
-  - [ ] `test/config-plugin.test.ts` and `test/marketplace-plugin.test.ts` import the published contract; the latter declares its own `ConfigValidator` today
+- [x] Publish the config contract
+  - [x] Rename the `config` key to `@fx/tx/config` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
+  - [x] `plugins/config/contract.ts` declaring `Config` and `ConfigValidator` as types alone
+  - [x] Have `plugins/config/index.ts` import it type-only and register a value checked against `Config`
+  - [x] Reduce `plugins/marketplace/configured.ts` to importing the published contract, keeping `requireConfigCapability` and the marketplace's own key and value types
+  - [x] `exports` entry `./config`, its `files` entries, the packed-file assertion, and the consumer-fixture import
+  - [x] `test/config-plugin.test.ts` and `test/marketplace-plugin.test.ts` import the published contract; the latter declares its own `ConfigValidator` today
 - [ ] Publish the dialogs contract
   - [ ] Rename the `dialogs` key to `@fx/tx/dialogs` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
   - [ ] `plugins/dialogs/contract.ts` declaring the request, option, field, filter, expand, and result types and `Dialogs`, as types alone

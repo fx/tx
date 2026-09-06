@@ -320,19 +320,15 @@ This is not a dependency-injection or lifecycle container. There are no schemas,
 
 ## Use the bundled config capability
 
-The namespace-free bundled config provider registers one internal capability under the exact opaque key `config`. It persists small JSON values across invocations in one per-user document. Its local structural shape is:
+The namespace-free bundled config provider registers one capability under the exact opaque key `@fx/tx/config`. It persists small JSON values across invocations in one per-user document. Import the contract from that same key rather than restating it — the string you read the capability from and the string you import its shape from are one string, so a contract that moves fails your build rather than your command:
 
 ```ts
-type ConfigValidator<T> = (value: unknown) => value is T
-
-type Config = {
-  define<T>(key: string, isValid: ConfigValidator<T>): void
-  read<T>(key: string): Promise<T | undefined>
-  write<T>(key: string, value: T): Promise<void>
-}
+import type { Config, ConfigValidator } from "@fx/tx/config";
 ```
 
-A bundled consumer declares that compatible type locally and reads `registrations<Config>("config")` inside its command action, after initialization has committed every provider. The shape stays an implementation detail for bundled plugins; it is not a public export from `@fx/tx/plugin`.
+`Config` is what the key carries: `define(key, isValid)`, `read(key)` resolving the persisted value or `undefined`, and `write(key, value)`. A `ConfigValidator<T>` is your own `(value: unknown) => value is T`, which is the whole of what makes a read safe — the capability never infers one, because only the consumer knows what its key means. Every member is documented where it is declared, and the contract is types only: it publishes no way to obtain a store, which stays the registry's job, and nothing behind the import is a file, a path, or a document format.
+
+A consumer reads `registrations<Config>("@fx/tx/config")` inside its command action, after initialization has committed every provider. It must find **exactly one**, by the same rule `requireConfigCapability` applies for the marketplace plugin: none and several are both errors naming the count, and there is deliberately no fallback. The config plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
 
 Call `define` once for each key before reading or writing it in the current process. Keys are opaque and compared exactly: tx does not trim, normalize, parse, namespace, or reserve them. A second definition of the same key is rejected and leaves the first guard in force. An absent property reads as `undefined`; a present value and every value being written must pass that key's guard. A rejected read affects no other key, and a rejected write changes nothing on disk. Values use JSON encoding, so a guard should accept only values that survive a JSON round trip in the form the consumer expects.
 
@@ -616,7 +612,7 @@ Commands, child definitions, generic registry entries, and update participants c
 
 Bundled feature plugins live under `plugins/<name>/`, conventionally at `plugins/<name>/index.ts`. Only the root `cli.ts` composition root selects and orders defaults. Modules under `src/` must remain feature-neutral and must not import or name bundled plugins; a bundled plugin's complete module graph must not import private core implementation under `src/`.
 
-Use type-only imports from `@fx/tx/plugin` and from every capability contract the package publishes — `@fx/tx/theme`, `@fx/tx/theme-override`, and `@fx/tx/grid` today — standard Node.js or Bun APIs, and plugin-owned modules. A published specifier is the one way a bundled plugin may name another bundled plugin's vocabulary: it carries types alone and is erased, so it shares no runtime module graph, while a relative path into another plugin's directory is rejected. None of them may be loaded at run time or imported from under `src/`. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
+Use type-only imports from `@fx/tx/plugin` and from every capability contract the package publishes — `@fx/tx/config`, `@fx/tx/theme`, `@fx/tx/theme-override`, and `@fx/tx/grid` today — standard Node.js or Bun APIs, and plugin-owned modules. A published specifier is the one way a bundled plugin may name another bundled plugin's vocabulary: it carries types alone and is erased, so it shares no runtime module graph, while a relative path into another plugin's directory is rejected. None of them may be loaded at run time or imported from under `src/`. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
 
 ## Validate changes
 
