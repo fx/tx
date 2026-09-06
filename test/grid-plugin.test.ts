@@ -75,7 +75,7 @@ function hueing(hue: string): PluginDefinition {
     load:
       () =>
       ({ register }) => {
-        register("theme-override", { content: { hue } });
+        register("@fx/tx/theme-override", { content: { hue } });
       },
   };
 }

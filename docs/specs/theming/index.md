@@ -6,7 +6,7 @@ Theming is the one place `tx` decides what its terminal output looks like. A the
 
 A theme is supplied by a bundled plugin, exactly as [Dialogs](../dialogs/) and [Config](../config/) are. Core carries no theme vocabulary.
 
-[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/theme` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is not yet implemented, so exactly two things below are ahead of the code: the contract is not published today, and the key in use is still the bare `theme`, as is the override key still registered as the bare `theme-override`. Every other requirement describes current behavior.
+[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/theme` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). Publication and both key renames have landed, so every requirement below describes current behavior. One thing is still ahead of the code: the bundled consumers and [the plugin guide](../../manual/plugins.md) still carry local copies of the shape rather than importing the published one, which the remainder of that change moves over.
 
 ## Background
 

@@ -333,7 +333,7 @@ There is no `tx config` command, key listing or deletion API, schema language, m
 
 ## Use the bundled theme capability
 
-The namespace-free bundled theme provider registers one internal capability under the exact opaque key `theme`. It is the one place `tx` decides what its terminal output looks like: a surface names what a piece of text *is* and the theme answers with an appearance. Its local structural shape is:
+The namespace-free bundled theme provider registers one internal capability under the exact opaque key `@fx/tx/theme`. It is the one place `tx` decides what its terminal output looks like: a surface names what a piece of text *is* and the theme answers with an appearance. Its local structural shape is:
 
 ```ts
 type Hue =
@@ -357,7 +357,7 @@ type Theme = {
   appearance(variable: ThemeVariable): Appearance
 }
 
-// A partial override, registered under `theme-override` by any plugin.
+// A partial override, registered under `@fx/tx/theme-override` by any plugin.
 type ThemeOverride = Partial<Record<ThemeVariable, Appearance>>
 
 type Theming = {
@@ -368,13 +368,13 @@ type Theming = {
 }
 ```
 
-A bundled consumer declares that compatible type locally and reads `registrations<Theming>("theme")` inside its command action, after initialization has committed every provider. It must find **exactly one** — as a config consumer already must, through the same rule `requireConfigCapability` applies, and unlike the dialogs capability, where the consumer owns what an absent capability means: none and several are both errors naming the count, and there is deliberately no fallback, because a consumer that fell back would have to carry its own copy of the default theme. The theme plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
+A bundled consumer declares that compatible type locally and reads `registrations<Theming>("@fx/tx/theme")` inside its command action, after initialization has committed every provider. It must find **exactly one** — as a config consumer already must, through the same rule `requireConfigCapability` applies, and unlike the dialogs capability, where the consumer owns what an absent capability means: none and several are both errors naming the count, and there is deliberately no fallback, because a consumer that fell back would have to carry its own copy of the default theme. The theme plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
 
 A theme is resolved for the stream a surface draws to rather than handed out ready-made, because whether hues are emitted depends on that stream. Only the stream's TTY-ness is read; the capability never writes to it, retains it, or exposes a terminal or renderer. A resolved theme answers with an appearance alone and never says whether hues were enabled — that decision is already inside every appearance it returns.
 
 An appearance asserts only what it carries: an absent `dim`, `bold`, or `inverse` means the attribute is not applied, and an absent `hue` means no hue is emitted. The default theme is the greyscale Norton Commander look the dialogs already had — `chrome`, `muted`, and `marker` dimmed, `content`, `positive`, `caution`, and `danger` in the terminal's default foreground, `strong` bold, and `cursor` inverted — and it names no hue anywhere, so a `tx` that overrides nothing emits only the terminal's own foreground and background, their dimmed and bold forms, and their inversion.
 
-Any plugin may contribute a partial override by registering a `ThemeOverride` under the separate opaque key `theme-override`. Overrides are composed over the defaults when a surface resolves a theme, which is while a command runs, so an override contributed by a plugin composed after the theme plugin still applies; a plugin that fails initialization contributes none. A variable is the unit: an unspecified one keeps its default, a contributed appearance replaces the default rather than merging into it, and a later override of the same variable wins in the registry's commit order. Overriding is supported because a surface will occasionally need it, not because varying the look is encouraged.
+Any plugin may contribute a partial override by registering a `ThemeOverride` under the separate opaque key `@fx/tx/theme-override`. Overrides are composed over the defaults when a surface resolves a theme, which is while a command runs, so an override contributed by a plugin composed after the theme plugin still applies; a plugin that fails initialization contributes none. A variable is the unit: an unspecified one keeps its default, a contributed appearance replaces the default rather than merging into it, and a later override of the same variable wins in the registry's commit order. Overriding is supported because a surface will occasionally need it, not because varying the look is encouraged.
 
 Whether hues are emitted is decided by five inputs in one fixed order, the first that decides settling it with the rest unread:
 

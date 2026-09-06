@@ -18,7 +18,7 @@ function run(
   return { stdout, stderr };
 }
 
-test("the packed package installs a standalone CLI and public plugin types", async () => {
+test("the packed package installs a standalone CLI and every published contract", async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "tx-package-"));
 
   try {
@@ -42,11 +42,19 @@ test("the packed package installs a standalone CLI and public plugin types", asy
     expect(packed[0]?.filename).toBe(
       `${packageMetadata.name.slice(1).replace("/", "-")}-${packageMetadata.version}.tgz`,
     );
+    // Exact rather than a containment check: a published subpath whose types
+    // reach a file outside `files` resolves against the repository and fails
+    // against the installed package, which is the one failure mode the
+    // repository's own type check cannot see. The consumer below imports every
+    // subpath from the tarball, so this list and that import together stand
+    // for the closure the package has to be over its published contracts.
     expect(packed[0]?.files.map(({ path }) => path).sort()).toEqual([
       "LICENSE",
       "README.md",
       "dist/tx",
       "package.json",
+      "plugins/theme/contract.ts",
+      "plugins/theme/override-contract.ts",
       "src/context.ts",
       "src/plugin.ts",
     ]);
@@ -79,6 +87,8 @@ test("the packed package installs a standalone CLI and public plugin types", asy
       writeFile(
         join(consumerRoot, "plugin.ts"),
         `import type { Command, Plugin } from "@fx/tx/plugin";
+import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
+import type { ThemeOverride } from "@fx/tx/theme-override";
 
 interface Greeter {
   greet(name?: string): string;
@@ -88,8 +98,16 @@ const greeter: Greeter = {
   greet: (name) => \`hello \${name ?? "world"}\`,
 };
 
+// The capability's own vocabulary, imported rather than restated: a member
+// this package stopped publishing fails the consumer's build here.
+const loud: Hue = "magenta";
+const emphasis: ThemeVariable = "strong";
+const override: ThemeOverride = { [emphasis]: { bold: true, hue: loud } };
+
 const plugin: Plugin = ({ command, context, register, registrations }) => {
   register<Greeter>("greeter", greeter);
+  // The key and the specifier its contract is imported from are one string.
+  register<ThemeOverride>("@fx/tx/theme-override", override);
   command((namespace: Command) => {
     namespace.description("Greet from an external plugin");
     namespace
@@ -100,7 +118,13 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
       .action((name: string | undefined, options: { loud?: boolean }) => {
         const available: readonly Greeter[] = registrations<Greeter>("greeter");
         const greeting = available[0]?.greet(name) ?? greeter.greet(name);
-        context.stdout.write(\`\${options.loud ? greeting.toUpperCase() : greeting}\\n\`);
+        // Read while the command runs, exactly as a bundled consumer does, and
+        // typed by the published contract rather than by a local copy.
+        const theming: readonly Theming[] = registrations<Theming>("@fx/tx/theme");
+        const theme: Theme | undefined = theming[0]?.theme(context.stderr);
+        const appearance: Appearance = theme?.appearance(emphasis) ?? {};
+        const shown = appearance.bold ? greeting.toUpperCase() : greeting;
+        context.stdout.write(\`\${options.loud ? shown.toUpperCase() : shown}\\n\`);
       });
   });
 };

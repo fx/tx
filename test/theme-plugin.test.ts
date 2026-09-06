@@ -55,7 +55,7 @@ function overriding(
     load:
       () =>
       ({ register }) => {
-        register<ThemeOverride>("theme-override", override);
+        register<ThemeOverride>("@fx/tx/theme-override", override);
         if (fail) throw new Error(`${name} failed`);
       },
   };
@@ -82,7 +82,7 @@ async function obtainTheming(
       ({ command, registrations }) => {
         command((namespace) =>
           namespace.action(() => {
-            const registered = registrations<Theming>("theme");
+            const registered = registrations<Theming>("@fx/tx/theme");
             count = registered.length;
             theming = registered[0];
           }),

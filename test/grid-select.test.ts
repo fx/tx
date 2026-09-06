@@ -174,7 +174,7 @@ function hueing(variable: string, hue: string): PluginDefinition {
     load:
       () =>
       ({ register }) => {
-        register("theme-override", { [variable]: { hue } });
+        register("@fx/tx/theme-override", { [variable]: { hue } });
       },
   };
 }
