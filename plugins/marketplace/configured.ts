@@ -1,12 +1,16 @@
+import type { Config } from "@fx/tx/config";
 import type { MarketplaceOperations, ResolvedMarketplace } from "./manager.ts";
 
-export type ConfigValidator<T> = (value: unknown) => value is T;
-
-export interface Config {
-  define<T>(key: string, isValid: ConfigValidator<T>): void;
-  read<T>(key: string): Promise<T | undefined>;
-  write<T>(key: string, value: T): Promise<void>;
-}
+/**
+ * The config capability's shape arrives from the key it is read at rather than
+ * being restated here. This file used to hold the only exported copy of it,
+ * which meant anything wanting to name a `Config` took the marketplace manager
+ * — and `node:child_process`, `node:fs`, and the marketplace's source and
+ * storage modules behind it — along with the type.
+ *
+ * What stays is the marketplace's own: its config key, the value it keeps
+ * under it, and the lookup policy it applies when it reads the capability.
+ */
 
 export interface ConfiguredMarketplace {
   readonly source: string;
@@ -60,7 +64,7 @@ export function isConfiguredMarketplaceList(
 export function requireConfigCapability(
   registrations: <T>(key: string) => readonly T[],
 ): Config {
-  const configs = registrations<Config>("config");
+  const configs = registrations<Config>("@fx/tx/config");
   if (configs.length !== 1) {
     throw new Error(
       `Expected exactly one config capability, but found ${configs.length}`,

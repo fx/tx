@@ -19,6 +19,9 @@
     "./plugin": {
       "types": "./src/plugin.ts"
     },
+    "./config": {
+      "types": "./plugins/config/contract.ts"
+    },
     "./grid": {
       "types": "./plugins/grid/contract.ts"
     },
@@ -33,6 +36,7 @@
     "dist/tx",
     "src/plugin.ts",
     "src/context.ts",
+    "plugins/config/contract.ts",
     "plugins/grid/contract.ts",
     "plugins/theme/contract.ts",
     "plugins/theme/override-contract.ts",

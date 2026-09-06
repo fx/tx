@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Config, ConfigValidator } from "@fx/tx/config";
 import type { PluginDefinition } from "@fx/tx/plugin";
 import {
   createMarketplacePlugin,
@@ -105,9 +106,11 @@ class RecordingManager implements MarketplaceOperations {
   }
 }
 
-type ConfigValidator<T> = (value: unknown) => value is T;
-
-class RecordingConfig {
+/** The config capability the marketplace reads, typed by the contract
+ * published at the key it is registered under rather than by a restatement of
+ * it: a double this suite drives is only worth as much as its agreement with
+ * the shape a real provider has to satisfy. */
+class RecordingConfig implements Config {
   readonly calls: unknown[][] = [];
   value: unknown = undefined;
   guard: ConfigValidator<unknown> | undefined;
@@ -143,7 +146,7 @@ function configProvider(config: RecordingConfig): PluginDefinition {
     load:
       () =>
       ({ register }) =>
-        register("config", config),
+        register<Config>("@fx/tx/config", config),
   };
 }
 

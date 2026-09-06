@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { Config } from "@fx/tx/config";
 import {
-  type Config,
   type ConfiguredMarketplace,
   ConfiguredMarketplaceNameCollisionError,
   forgetConfiguredMarketplace,

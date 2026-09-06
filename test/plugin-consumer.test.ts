@@ -53,6 +53,7 @@ test("the packed package installs a standalone CLI and every published contract"
       "README.md",
       "dist/tx",
       "package.json",
+      "plugins/config/contract.ts",
       "plugins/grid/contract.ts",
       "plugins/theme/contract.ts",
       "plugins/theme/override-contract.ts",
@@ -88,6 +89,7 @@ test("the packed package installs a standalone CLI and every published contract"
       writeFile(
         join(consumerRoot, "plugin.ts"),
         `import type { Command, Plugin } from "@fx/tx/plugin";
+import type { Config, ConfigValidator } from "@fx/tx/config";
 import type { Grid, GridSelectRow, Row } from "@fx/tx/grid";
 import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
 import type { ThemeOverride } from "@fx/tx/theme-override";
@@ -111,6 +113,12 @@ const override: ThemeOverride = { [emphasis]: { bold: true, hue: loud } };
 // closure the packed file list above stands for: a cell naming a theme
 // variable type checks here only if the tarball carries both contracts.
 const cells: Row = ["greeter", { text: "ready", variable: emphasis }];
+
+// A guard typed by the published contract rather than by a restated function
+// type. The consumer owns what its own key means; the capability only ever
+// asks it this.
+const isGreeting: ConfigValidator<string> = (value): value is string =>
+  typeof value === "string";
 const row: GridSelectRow<string, string> = {
   cells,
   value: "greeter",
@@ -144,6 +152,14 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
         const grid: Grid | undefined = registrations<Grid>("@fx/tx/grid")[0];
         grid?.print({ stream: context.stdout, rows: [cells] });
         await grid?.select({ message: greeting, rows: [row] });
+        // The config capability, read and typed the same way. Its contract is
+        // reachable on its own: nothing behind this import is a store, a path,
+        // or the marketplace plugin that used to be the only place the shape
+        // was exported from.
+        const config: Config | undefined =
+          registrations<Config>("@fx/tx/config")[0];
+        config?.define("greeting", isGreeting);
+        await config?.write("greeting", greeting);
       });
   });
 };
@@ -172,7 +188,7 @@ export default plugin;
       ),
       // Exactly the settings [the plugin guide](../docs/manual/plugins.md)
       // tells a consumer of the published subpaths it needs, over the module
-      // that imports all four of them and nothing else: a `moduleResolution`
+      // that imports every one of them and nothing else: a `moduleResolution`
       // that reads an `exports` map, with no `allowImportingTsExtensions`
       // beside it. Requiring that option would force `noEmit` or
       // `emitDeclarationOnly` on every consumer, so a raw-TypeScript `types`
