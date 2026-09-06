@@ -234,17 +234,20 @@ const plugin: Plugin = ({ command, context }) => {
 export default plugin;
 ```
 
-Every specifier tx publishes — `@fx/tx/plugin` and each capability contract below — is published as TypeScript source under a `types` condition rather than as emitted declarations, which asks two things of your own `tsconfig.json`. `moduleResolution` must be a mode that reads an `exports` map — `bundler`, `node16`, or `nodenext`, never the legacy `node` — or none of the subpaths resolve at all. And `allowImportingTsExtensions` must be on, because the contracts name one another by their `.ts` paths; TypeScript in turn requires `noEmit` or `emitDeclarationOnly` alongside it, which a plugin type-checked by `tsc` and run by Bun already sets:
+Every specifier tx publishes — `@fx/tx/plugin` and each capability contract below — is published as TypeScript source under a `types` condition rather than as emitted declarations. That asks one thing of your own `tsconfig.json`: `moduleResolution` must be a mode that reads a package's `exports` map, since that map is the only place these subpaths are described. `bundler` needs nothing beside it:
 
 ```json
 {
   "compilerOptions": {
-    "moduleResolution": "Bundler",
-    "allowImportingTsExtensions": true,
-    "noEmit": true
+    "module": "Preserve",
+    "moduleResolution": "Bundler"
   }
 }
 ```
+
+`node16` and `nodenext` work as well, under two conditions TypeScript imposes on those modes rather than on this package. `module` must be set to the matching `Node16` or `NodeNext` — a mismatch is rejected before anything is type-checked — and the importing file must itself be an ES module, because a type-only import of an ES module from a CommonJS file otherwise wants a `resolution-mode` attribute; `"type": "module"` in your own `package.json`, or an `.mts` file, settles that. The legacy `node` resolution ignores `exports` entirely, so no subpath resolves under it.
+
+Nothing else is required. The contracts name one another by `.ts` path internally, and TypeScript follows those without `allowImportingTsExtensions` — you import `@fx/tx/grid`, not a path into it. Set that option only if your *own* sources import each other by `.ts` path, and know what it costs: TypeScript accepts it only alongside `noEmit` or `emitDeclarationOnly`, so a plugin emitting its own JavaScript or declarations cannot have it, and nothing about these contracts asks it to.
 
 The initialization API provides an immutable `identity`, read-only `env`, the generic command `context`, shared `dependencies`, `command(build)`, `plugin(childDefinition)`, `register(key, value)`, `registrations(key)`, `update(participant)`, and `updaters()`. The `context` carries process streams, environment, working directory, and the owning plugin identity, so your actions keep whatever signature you give them. Loading, initialization, and command actions may be asynchronous.
 

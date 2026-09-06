@@ -151,6 +151,11 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
 export default plugin;
 `,
       ),
+      // The whole consumer, its own plugin sources included. Those name one
+      // another by `.ts` path, which is what `allowImportingTsExtensions` is
+      // for here — a property of how this consumer writes its own imports, not
+      // something importing the published subpaths asks for. The two projects
+      // below are what pin that distinction.
       writeFile(
         join(consumerRoot, "tsconfig.json"),
         JSON.stringify({
@@ -163,6 +168,44 @@ export default plugin;
             allowImportingTsExtensions: true,
           },
           include: ["plugin.ts", "plugins/**/*.ts"],
+        }),
+      ),
+      // Exactly the settings [the plugin guide](../docs/manual/plugins.md)
+      // tells a consumer of the published subpaths it needs, over the module
+      // that imports all four of them and nothing else: a `moduleResolution`
+      // that reads an `exports` map, with no `allowImportingTsExtensions`
+      // beside it. Requiring that option would force `noEmit` or
+      // `emitDeclarationOnly` on every consumer, so a raw-TypeScript `types`
+      // target growing a need for it is a change to what the guide promises,
+      // and it fails here rather than in a reader's project.
+      writeFile(
+        join(consumerRoot, "tsconfig.published.json"),
+        JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            noEmit: true,
+            target: "ESNext",
+            module: "Preserve",
+            moduleResolution: "Bundler",
+          },
+          include: ["plugin.ts"],
+        }),
+      ),
+      // The other resolution mode the guide names, under the two conditions it
+      // states TypeScript imposes: `module` matching the resolution, and an
+      // importer that is an ES module — which the consumer's own `type`:
+      // `module` above supplies.
+      writeFile(
+        join(consumerRoot, "tsconfig.node16.json"),
+        JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            noEmit: true,
+            target: "ESNext",
+            module: "Node16",
+            moduleResolution: "node16",
+          },
+          include: ["plugin.ts"],
         }),
       ),
     ]);
@@ -192,14 +235,20 @@ export default plugin;
       }),
     ).toEqual({ stdout: `${packageMetadata.version}\n`, stderr: "" });
 
-    run(
-      [
-        join(repositoryRoot, "node_modules", ".bin", "tsc"),
-        "--project",
-        consumerRoot,
-      ],
+    for (const project of [
       consumerRoot,
-    );
+      "tsconfig.published.json",
+      "tsconfig.node16.json",
+    ]) {
+      run(
+        [
+          join(repositoryRoot, "node_modules", ".bin", "tsc"),
+          "--project",
+          project,
+        ],
+        consumerRoot,
+      );
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
