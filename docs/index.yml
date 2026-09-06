@@ -264,7 +264,7 @@ changes:
     path: changes/0030-publish-bundled-capability-contracts.md
     description: Make every bundled registry key the specifier its contract is published at, establish types-only subpath publication, extend boundary enforcement to cover it, and publish the theming and grid contracts.
     spec: plugin-system
-    status: draft
+    status: complete
     depends_on:
       - "0026"
       - "0028"

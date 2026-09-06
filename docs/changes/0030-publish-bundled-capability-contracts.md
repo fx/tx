@@ -5,7 +5,7 @@
 Establish how `tx` publishes a bundled capability's structural contract, make a capability's registry key the specifier that contract is published at, and publish the first two: theming and the grid. A consumer stops restating the shape it reads from the registry and imports it instead, so a contract that moves breaks the consumer's build rather than its command.
 
 **Spec:** [Plugin System](../specs/plugin-system/), [Theming](../specs/theming/), [Grid](../specs/grid/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0026, 0028
 
 ## Motivation
@@ -107,21 +107,21 @@ Theming lands first because the grid contract depends on its vocabulary; the gri
   - [x] Extend `test/plugin-boundary.test.ts` so every published subpath is type-only, never loaded at runtime, and never imported from `src/`, with fixture cases for each new violation
   - [x] Update the exact packed-file assertion in `test/plugin-consumer.test.ts` and extend its consumer fixture to import and type check `@fx/tx/theme` and `@fx/tx/theme-override`
   - [x] Assert the published contract modules contain no runtime code
-- [ ] Publish the grid contract over the theming contract
-  - [ ] `plugins/grid/contract.ts` taking `ThemeVariable` from `@fx/tx/theme` and declaring the grid vocabulary as types alone
-  - [ ] Delete the theme vocabulary copied into `plugins/grid/theme.ts`, leaving it the capability lookup alone
-  - [ ] Rename the `grid` key to `@fx/tx/grid` at every site naming it, in the same commit that publishes the contract
-  - [ ] `exports` entry `./grid`, its `files` entries, and the consumer fixture import
-- [ ] Move consumers and documentation off the restated copies
-  - [ ] `demo/scenarios.ts` imports the published grid and theme contracts instead of restating them
-  - [ ] `test/grid-plugin.test.ts`, `test/grid-select.test.ts`, and `test/theme-plugin.test.ts` import the published contracts
-  - [ ] Rewrite the theming and grid sections of [the plugin guide](../manual/plugins.md) to instruct importing rather than declaring locally, and drop the "not a public export" sentences
-  - [ ] Document the consumer-side TypeScript settings a raw-`.ts` `types` target requires, which the fixture proves but no document currently states
-  - [ ] Widen the plugin guide's bundled-plugin import rule, `AGENTS.md`, and `REVIEW.md`, each of which today names `@fx/tx/plugin` as the only contract a plugin imports type-only
+- [x] Publish the grid contract over the theming contract
+  - [x] `plugins/grid/contract.ts` taking `ThemeVariable` from `@fx/tx/theme` and declaring the grid vocabulary as types alone
+  - [x] Delete the theme vocabulary copied into `plugins/grid/theme.ts`, leaving it the capability lookup alone
+  - [x] Rename the `grid` key to `@fx/tx/grid` at every site naming it, in the same commit that publishes the contract
+  - [x] `exports` entry `./grid`, its `files` entries, and the consumer fixture import
+- [x] Move consumers and documentation off the restated copies
+  - [x] `demo/scenarios.ts` imports the published grid and theme contracts instead of restating them
+  - [x] `test/grid-plugin.test.ts`, `test/grid-select.test.ts`, and `test/theme-plugin.test.ts` import the published contracts
+  - [x] Rewrite the theming and grid sections of [the plugin guide](../manual/plugins.md) to instruct importing rather than declaring locally, and drop the "not a public export" sentences
+  - [x] Document the consumer-side TypeScript settings a raw-`.ts` `types` target requires, which the fixture proves but no document currently states
+  - [x] Widen the plugin guide's bundled-plugin import rule, `AGENTS.md`, and `REVIEW.md`, each of which today names `@fx/tx/plugin` as the only contract a plugin imports type-only
 
 ## Open Questions
 
-- [ ] Whether the published contracts should eventually be emitted `.d.ts` files rather than raw TypeScript. Raw source is what `./plugin` already publishes and what the consumer fixture proves, so this change follows it; the cost is that every consumer needs `moduleResolution` set to a mode that reads an `exports` map and needs `allowImportingTsExtensions`, which is a requirement no document states today. This change adds that documentation; whether to remove the requirement altogether is separate and affects `./plugin` equally.
+- [ ] Whether the published contracts should eventually be emitted `.d.ts` files rather than raw TypeScript. Raw source is what `./plugin` already publishes and what the consumer fixture proves, so this change follows it; the cost is that every consumer needs `moduleResolution` set to a mode that reads an `exports` map and needs `allowImportingTsExtensions`, which was a requirement no document stated. [The plugin guide](../manual/plugins.md) now states it; whether to remove the requirement altogether is separate and affects `./plugin` equally.
 - [ ] Whether a consumer should be able to import a capability's contract without the package's `react`, `ink`, and `commander` dependencies being resolvable. The theming and grid contracts need none of them, but `@fx/tx/plugin` does, so a consumer importing only `@fx/tx/grid` still installs them today. It is not a problem this change creates and not one it fixes.
 - [ ] Whether the boundary test should also forbid a bundled plugin importing another capability's *published* contract when it does not consume that capability, rather than only forbidding relative escapes. The grid legitimately imports `@fx/tx/theme`; nothing would currently stop it importing `@fx/tx/config` for no reason.
 
