@@ -6,7 +6,7 @@ The grid capability lays text out in aligned cells and either prints it once or 
 
 A grid is not only a table. A table — a header row over columns of equal meaning — is one layout; a flow, where a list of short items fills as many columns as the terminal affords, is another. Both are the same cells measured the same way, so both belong to one capability.
 
-[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/grid`, so a consumer imports it rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented; every other requirement below describes current behavior.
+[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/grid` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented, so exactly two things below are ahead of the code: the contract is not published today, and the key in use is still the bare `grid`. Every other requirement describes current behavior.
 
 ## Background
 

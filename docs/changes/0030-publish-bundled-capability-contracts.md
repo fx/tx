@@ -6,7 +6,7 @@ Establish how `tx` publishes a bundled capability's structural contract, make a 
 
 **Spec:** [Plugin System](../specs/plugin-system/), [Theming](../specs/theming/), [Grid](../specs/grid/)
 **Status:** draft
-**Depends On:** —
+**Depends On:** 0026, 0028
 
 ## Motivation
 

@@ -12,7 +12,7 @@
 
 [Change 0027](../../changes/0027-add-multi-cell-select-rows.md) implements the aligned cells and headers in [Select Request](#select-request), [Filtering](#filtering), and [Presentation](#presentation), together with the `marker` variable on the glyph that marks an option leading to a sub-dialog: the marker was drawn with the row carrying it until a cell became a field of its own, so it landed with the cell rules rather than with theming. Those requirements are implemented.
 
-[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/dialogs`, so a consumer imports it rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented; every other requirement below describes current behavior.
+[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/dialogs` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented, so exactly two things below are ahead of the code: the contract is not published today, and the key in use is still the bare `dialogs`. Every other requirement describes current behavior.
 
 ## Background
 
