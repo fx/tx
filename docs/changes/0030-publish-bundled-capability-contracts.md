@@ -117,6 +117,7 @@ Theming lands first because the grid contract depends on its vocabulary; the gri
   - [ ] `test/grid-plugin.test.ts`, `test/grid-select.test.ts`, and `test/theme-plugin.test.ts` import the published contracts
   - [ ] Rewrite the theming and grid sections of [the plugin guide](../manual/plugins.md) to instruct importing rather than declaring locally, and drop the "not a public export" sentences
   - [ ] Document the consumer-side TypeScript settings a raw-`.ts` `types` target requires, which the fixture proves but no document currently states
+  - [ ] Widen the plugin guide's bundled-plugin import rule, `AGENTS.md`, and `REVIEW.md`, each of which today names `@fx/tx/plugin` as the only contract a plugin imports type-only
 
 ## Open Questions
 

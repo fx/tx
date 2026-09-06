@@ -2,7 +2,7 @@
 
 ## Overview
 
-The plugin system is a generic host for trusted plugins. Core code under `src/` owns plugin identity, contribution staging, initialization, and command dispatch only. Marketplace behavior is owned entirely by the bundled marketplace plugin outside `src/`; that plugin could be copied to another repository and consume only public `@fx/tx/plugin` types plus standard Node.js and Bun APIs.
+The plugin system is a generic host for trusted plugins. Core code under `src/` owns plugin identity, contribution staging, initialization, and command dispatch only. Marketplace behavior is owned entirely by the bundled marketplace plugin outside `src/`; that plugin could be copied to another repository and consume only public `@fx/tx/plugin` types, the published contracts of the capabilities it uses, and standard Node.js and Bun APIs.
 
 The approved target architecture is implemented: the core is generic, the marketplace boundary is fully plugin-owned as specified in [Change 0003](../../changes/0003-externalize-marketplace-plugin.md), and the canonical package API is scoped as specified in [Change 0004](../../changes/0004-automate-versioning-and-publishing.md).
 
@@ -668,7 +668,7 @@ A user can seed the list of marketplaces they want installed before ever running
 - No module under `src/` MAY import, identify by name, or otherwise select a default plugin.
 - No module under `src/` MAY import a marketplace plugin implementation module.
 - A default plugin's complete module graph MUST NOT import core implementation modules under `src/`.
-- Default plugins MAY import public `@fx/tx/plugin` types type-only and MAY use standard Node.js and Bun APIs directly.
+- Default plugins MAY import public `@fx/tx/plugin` types and the published contract of any capability they consume, type-only in both cases, and MAY use standard Node.js and Bun APIs directly.
 - Plugin-owned nonliteral dynamic imports of plugin entry paths MUST be allowed.
 - Boundary enforcement MUST continue to forbid any static or dynamic import from a plugin into core implementation and any import from core implementation into a default plugin.
 - Copying the marketplace plugin to another repository MUST NOT require private core modules, repository-local aliases, or injected marketplace services.
@@ -677,7 +677,7 @@ A user can seed the list of marketplaces they want installed before ever running
 
 - **GIVEN** the marketplace plugin's complete module graph
 - **WHEN** its imports and runtime dependencies are inspected
-- **THEN** it relies only on public `@fx/tx/plugin` types, standard Node.js and Bun APIs, and its own modules, including its owned nonliteral dynamic imports
+- **THEN** it relies only on public `@fx/tx/plugin` types, the published contracts of the capabilities it consumes, standard Node.js and Bun APIs, and its own modules, including its owned nonliteral dynamic imports
 
 ## Design
 

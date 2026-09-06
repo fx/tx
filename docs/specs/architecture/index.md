@@ -206,7 +206,7 @@ Generic core implementation in `src/` has four responsibilities:
 3. Build one root program in which each plugin owns a namespace named after its identity.
 4. Resolve the first argument to a namespace, delegate the rest to its owner, and map the outcome to an exit code.
 
-The repository composition root lives outside `src/` and supplies ordered default definitions. Feature implementations, including marketplace management, live outside `src/` and depend only on the public plugin contract plus standard runtime APIs.
+The repository composition root lives outside `src/` and supplies ordered default definitions. Feature implementations, including marketplace management, live outside `src/` and depend only on the public plugin contract, the published capability contracts they consume, and standard runtime APIs.
 
 No general daemon, registry service, sandbox, signing system, or database is part of the initial architecture.
 
@@ -289,3 +289,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-06 | Exempted documentation-only runs from the CI quality commands while still reporting the required check | [0009-skip-quality-commands-for-documentation](../../changes/0009-skip-quality-commands-for-documentation.md) |
 | 2026-08-07 | Made composition order observable through update-participant ordering, and made the published release assets the executable's own update source | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |
 | 2026-09-05 | Every first-party executable file must be linted, type checked and covered; the demonstration became a documented script | [0024-relocate-and-cover-the-demo](../../changes/0024-relocate-and-cover-the-demo.md) |
+| 2026-09-06 | Widened the plugin dependency boundary to include the published capability contracts a plugin consumes, alongside the public plugin contract | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
