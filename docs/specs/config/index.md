@@ -6,7 +6,7 @@
 
 [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) specifies the config capability and its first consumer, the marketplace plugin's configured-marketplace list. The bundled provider is implemented under `plugins/config/` and composed only in `cli.ts`; the marketplace plugin consumes it at command time for explicit configured installs and add/remove write-back. The requirements below describe current behavior.
 
-[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/config` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented, so exactly two things below are ahead of the code: the contract is not published today, and the key in use is still the bare `config`. Every other requirement describes current behavior.
+[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/config` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is not yet implemented, so exactly two things below are ahead of the code: the contract is not published today, and the key in use is still the bare `config`. Every other requirement describes current behavior.
 
 ## Background
 
