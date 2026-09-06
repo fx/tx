@@ -55,7 +55,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ### Approach
 
-One contract module per capability at `plugins/<name>/`, containing `export type` declarations and nothing else, imported type-only by its own provider so the value the provider registers is checked against the contract it publishes. `package.json` gains a types-only `exports` entry per capability and the matching `files` entries. `test/plugin-boundary.test.ts` generalizes its `@fx/tx/plugin` rules over the published subpath set.
+One contract module per published key at `plugins/<name>/`, containing `export type` declarations and nothing else, imported type-only by its own provider so the value the provider registers is checked against the contract it publishes. The unit is the key rather than the capability, which is why `theme-override` gets a module and a subpath of its own alongside `theme`. `package.json` gains a types-only `exports` entry per key and the matching `files` entries. `test/plugin-boundary.test.ts` generalizes its `@fx/tx/plugin` rules over the published subpath set.
 
 Theming lands first because the grid contract depends on its vocabulary; the grid then demonstrates the cross-contract import that makes the whole arrangement worth having.
 
@@ -102,9 +102,10 @@ Theming lands first because the grid contract depends on its vocabulary; the gri
   - [ ] `plugins/theme/contract.ts` declaring `Hue`, `Appearance`, `ThemeVariable`, `Theme`, `Theming`, and `ThemeOverride` as types alone
   - [ ] Invert the derivation in `plugins/theme/variables.ts` so the default appearance table is typed against the contract's variable union
   - [ ] Have `plugins/theme/index.ts` import the contract type-only and register a value checked against `Theming`
-  - [ ] `exports` entry `./theme` with a `types` condition and no runtime condition, plus its `files` entries
+  - [ ] `plugins/theme/override-contract.ts` declaring `ThemeOverride` as types alone over the theme contract's `Appearance` and `ThemeVariable`, so `@fx/tx/theme-override` publishes the type of the value registered under it and nothing else
+  - [ ] `exports` entries `./theme` and `./theme-override`, each with a `types` condition and no runtime condition, plus their `files` entries
   - [ ] Extend `test/plugin-boundary.test.ts` so every published subpath is type-only, never loaded at runtime, and never imported from `src/`, with fixture cases for each new violation
-  - [ ] Update the exact packed-file assertion in `test/plugin-consumer.test.ts` and extend its consumer fixture to import and type check `@fx/tx/theme`
+  - [ ] Update the exact packed-file assertion in `test/plugin-consumer.test.ts` and extend its consumer fixture to import and type check `@fx/tx/theme` and `@fx/tx/theme-override`
   - [ ] Assert the published contract modules contain no runtime code
 - [ ] Publish the grid contract over the theming contract
   - [ ] `plugins/grid/contract.ts` taking `ThemeVariable` from `@fx/tx/theme` and declaring the grid vocabulary as types alone
