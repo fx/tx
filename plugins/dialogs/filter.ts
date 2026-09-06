@@ -1,14 +1,8 @@
-/**
- * When a column shows its filter.
- *
- * Filtering itself is never off: a printable character always narrows the
- * list, at every level and whatever the list's length, because typing is what
- * a reader reaches for the moment a list is longer than their patience and
- * there is no second thing that typing could sensibly mean. What the setting
- * decides is only whether the filter is on screen before they have typed
- * anything.
- */
-export type FilterMode = "typed" | "always";
+import type { FilterMode } from "./contract.ts";
+
+/** The setting this module reads is the caller's, so it arrives from the
+ * published contract rather than being declared here: a caller sets it on a
+ * request, and none of the matcher code below is a consumer's to compile. */
 
 /** Whether a column's filter is on screen: once anything has been typed into
  * it, and from the start for a caller that asked for it. Hidden while it is

@@ -27,9 +27,11 @@ import {
   isIdentifier,
   isImportDeclaration,
   isImportEqualsDeclaration,
+  isInterfaceDeclaration,
   isPostfixUnaryExpression,
   isPrefixUnaryExpression,
   isStringLiteral,
+  isTypeAliasDeclaration,
   isVariableDeclaration,
   type Node,
   NodeFlags,
@@ -481,6 +483,63 @@ async function publishedContractClosure(
   return [...reached].map((path) => relative(repositoryRoot, path)).sort();
 }
 
+/**
+ * Every capability contract module, keyed by the specifier it is published at.
+ *
+ * The public plugin contract is deliberately not one of them. It is the
+ * generic host's contract rather than any capability's, and the rule below is
+ * about capability vocabulary: `src/` declares the host's types and is the one
+ * place they belong.
+ */
+const capabilityContracts = new Map(
+  [...publishedTargets].filter(
+    ([specifier]) => specifier !== `${packageMetadata.name}/plugin`,
+  ),
+);
+
+/** Every type a module declares by name, whether or not it is exported. */
+function declaredTypeNames(sourceFile: SourceFile): string[] {
+  const names: string[] = [];
+  function visit(node: Node): void {
+    if (isTypeAliasDeclaration(node) || isInterfaceDeclaration(node)) {
+      names.push(node.name.text);
+    }
+    node.forEachChild(visit);
+  }
+  visit(sourceFile);
+  return names;
+}
+
+/** Every type name a capability contract exports, mapped to the module that
+ * owns it. Read from the contracts themselves rather than listed here, so a
+ * name added to one is held to the rule below without anyone widening this
+ * test. A contract's unexported helpers are left out: they are not the
+ * capability's vocabulary, so a module of its own naming one restates
+ * nothing. */
+async function capabilityContractOwners(
+  program: Program,
+): Promise<Map<string, string>> {
+  const owners = new Map<string, string>();
+  for (const target of capabilityContracts.values()) {
+    const path = await realpath(target);
+    const sourceFile = await requiredSourceFile(program, path);
+    sourceFile.forEachChild((node) => {
+      if (!isTypeAliasDeclaration(node) && !isInterfaceDeclaration(node)) {
+        return;
+      }
+      if (
+        !node.modifiers?.some(
+          (modifier) => modifier.kind === SyntaxKind.ExportKeyword,
+        )
+      ) {
+        return;
+      }
+      owners.set(node.name.text, relative(repositoryRoot, path));
+    });
+  }
+  return owners;
+}
+
 async function withProgram<T>(
   configPath: string,
   operation: (program: Program, checker: Checker) => Promise<T>,
@@ -532,6 +591,7 @@ test("every published subpath is a types condition over a module with no runtime
   expect(publishedSpecifiers).toEqual([
     "@fx/tx/plugin",
     "@fx/tx/config",
+    "@fx/tx/dialogs",
     "@fx/tx/grid",
     "@fx/tx/theme",
     "@fx/tx/theme-override",
@@ -589,6 +649,105 @@ test("importing the published config contract compiles no implementation", async
       }
     },
   );
+});
+
+test("importing the published dialogs contract compiles no rendering", async () => {
+  // Named rather than left to the equality below, and checked to exist so the
+  // absence assertions cannot pass by naming files that are not there. The
+  // published contract is a subset of `plugins/dialogs/types.ts` rather than
+  // that file: `types.ts` names the injected React through `@fx/tx/plugin`,
+  // `filter.ts` is matcher code, and `select.ts` is the renderer — none of
+  // which a consumer that only wants to say what it is asking for needs.
+  const implementation = ["types.ts", "filter.ts", "select.ts"].map((module) =>
+    join("plugins", "dialogs", module),
+  );
+
+  await withProgram(
+    join(repositoryRoot, "tsconfig.json"),
+    async (program, checker) => {
+      const reached = await publishedContractClosure(
+        program,
+        checker,
+        "@fx/tx/dialogs",
+      );
+      expect(reached).toEqual([join("plugins", "dialogs", "contract.ts")]);
+      for (const module of implementation) {
+        expect(await Bun.file(join(repositoryRoot, module)).exists()).toBe(
+          true,
+        );
+        expect(reached).not.toContain(module);
+      }
+    },
+  );
+});
+
+test("no capability contract type is declared outside the contract that owns it", async () => {
+  // Named exactly rather than counted, for the reason the published set is:
+  // a contract that stopped yielding names would leave the rule below passing
+  // over nothing.
+  await withProgram(join(repositoryRoot, "tsconfig.json"), async (program) => {
+    const owners = await capabilityContractOwners(program);
+    expect([...owners.keys()].sort()).toEqual([
+      "Appearance",
+      "Cell",
+      "Config",
+      "ConfigValidator",
+      "Dialogs",
+      "FilterMode",
+      "Grid",
+      "GridAction",
+      "GridRequest",
+      "GridSelectRequest",
+      "GridSelectRow",
+      "GridSelection",
+      "Hue",
+      "InputRequest",
+      "OutputStream",
+      "Row",
+      "SelectOption",
+      "SelectRequest",
+      "SelectResult",
+      "TextField",
+      "Theme",
+      "ThemeOverride",
+      "ThemeVariable",
+      "Theming",
+    ]);
+
+    // Every first-party TypeScript module, the tests included: a test that
+    // restates a contract stops testing that the provider matches it, which
+    // is the drift this rule exists to catch and the one place a copy looks
+    // most maintained. The living specifications are deliberately outside
+    // this set — each states its capability's contract as a conceptual shape,
+    // which specifies the contract rather than copying it.
+    const contractPaths = new Set(
+      await Promise.all(
+        [...capabilityContracts.values()].map((target) => realpath(target)),
+      ),
+    );
+    const roots = ["src", "plugins", "demo", "test"].map((directory) =>
+      join(repositoryRoot, directory),
+    );
+    const modules = (
+      await Promise.all(roots.map((root) => sourceModules(root)))
+    ).flat();
+    expect(modules.length).toBeGreaterThan(0);
+
+    const restated: string[] = [];
+    for (const modulePath of modules) {
+      const path = await realpath(modulePath);
+      if (contractPaths.has(path)) continue;
+      const sourceFile = await requiredSourceFile(program, path);
+      for (const name of declaredTypeNames(sourceFile)) {
+        const owner = owners.get(name);
+        if (owner === undefined) continue;
+        restated.push(
+          `${relative(repositoryRoot, path)} declares ${name}, which ${owner} publishes`,
+        );
+      }
+    }
+    expect(restated).toEqual([]);
+  });
 });
 
 test("bundled plugin entry discovery supports every TypeScript module extension", async () => {

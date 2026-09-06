@@ -5,7 +5,7 @@
 Publish the remaining two bundled capability contracts — dialogs and config — over the mechanism [Change 0030](./0030-publish-bundled-capability-contracts.md) establishes, and retire the local copies their consumers maintain.
 
 **Spec:** [Dialogs](../specs/dialogs/), [Config](../specs/config/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0030
 
 ## Motivation
@@ -100,20 +100,20 @@ The cleanup is the larger half. The sites are found by searching for the declara
   - [x] Reduce `plugins/marketplace/configured.ts` to importing the published contract, keeping `requireConfigCapability` and the marketplace's own key and value types
   - [x] `exports` entry `./config`, its `files` entries, the packed-file assertion, and the consumer-fixture import
   - [x] `test/config-plugin.test.ts` and `test/marketplace-plugin.test.ts` import the published contract; the latter declares its own `ConfigValidator` today
-- [ ] Publish the dialogs contract
-  - [ ] Rename the `dialogs` key to `@fx/tx/dialogs` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
-  - [ ] `plugins/dialogs/contract.ts` declaring the request, option, field, filter, expand, and result types and `Dialogs`, as types alone
-  - [ ] Leave `DialogElement` and the provider's rendering types in `plugins/dialogs/types.ts`, which keeps its `CoreDependencies` import
-  - [ ] Have `plugins/dialogs/index.ts` import the contract type-only and register a value checked against `Dialogs`
-  - [ ] `exports` entry `./dialogs`, its `files` entries, the packed-file assertion, and the consumer-fixture import
-  - [ ] Reduce `plugins/grid/dialogs.ts` to its capability lookup, importing the published contract
-- [ ] Retire every remaining restated copy and update the guide
-  - [ ] `plugins/dialogs/theme.ts` imports the published theming contract and keeps only its lookup
-  - [ ] `demo/scenarios.ts` imports the published dialogs contract instead of restating it
-  - [ ] `test/dialogs-plugin.test.ts` and `test/demo-scenarios.test.ts` import the published contracts
-  - [ ] Sweep for any remaining declaration rather than trusting the lists above, and make the completion check a search whose empty result is the evidence
-  - [ ] Rewrite the dialogs and config sections of [the plugin guide](../manual/plugins.md) to instruct importing rather than declaring locally, and drop the "not a public export" sentences
-  - [ ] Assert that no capability contract type is declared in `src/`, `plugins/`, `demo/`, or `test/` outside its published contract module, leaving the specs' conceptual shapes alone
+- [x] Publish the dialogs contract
+  - [x] Rename the `dialogs` key to `@fx/tx/dialogs` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
+  - [x] `plugins/dialogs/contract.ts` declaring the request, option, field, filter, expand, and result types and `Dialogs`, as types alone
+  - [x] Leave `DialogElement` and the provider's rendering types in `plugins/dialogs/types.ts`, which keeps its `CoreDependencies` import
+  - [x] Have `plugins/dialogs/index.ts` import the contract type-only and register a value checked against `Dialogs`
+  - [x] `exports` entry `./dialogs`, its `files` entries, the packed-file assertion, and the consumer-fixture import
+  - [x] Reduce `plugins/grid/dialogs.ts` to its capability lookup, importing the published contract
+- [x] Retire every remaining restated copy and update the guide
+  - [x] `plugins/dialogs/theme.ts` imports the published theming contract and keeps only its lookup
+  - [x] `demo/scenarios.ts` imports the published dialogs contract instead of restating it
+  - [x] `test/dialogs-plugin.test.ts` and `test/demo-scenarios.test.ts` import the published contracts
+  - [x] Sweep for any remaining declaration rather than trusting the lists above, and make the completion check a search whose empty result is the evidence
+  - [x] Rewrite the dialogs and config sections of [the plugin guide](../manual/plugins.md) to instruct importing rather than declaring locally, and drop the "not a public export" sentences
+  - [x] Assert that no capability contract type is declared in `src/`, `plugins/`, `demo/`, or `test/` outside its published contract module, leaving the specs' conceptual shapes alone
 
 ## Open Questions
 

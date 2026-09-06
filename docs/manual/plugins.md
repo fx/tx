@@ -383,50 +383,23 @@ A user-selectable theme, a theme name, a config key, persistence, background hue
 
 ## Use the bundled dialogs capability
 
-The namespace-free bundled dialogs provider registers one internal capability under the exact opaque key `dialogs`. Its current local structural shape is:
+The namespace-free bundled dialogs provider registers one capability under the exact opaque key `@fx/tx/dialogs`. It asks the person in front of the terminal a question and answers with what they chose. Import the contract from that same key rather than restating it — the string you read the capability from and the string you import its shape from are one string, so a contract that moves fails your build rather than your command:
 
 ```ts
-type TextField = {
-  readonly type: "text"
-  readonly name: string
-  readonly message: string
-  readonly initialValue?: string
-}
-
-type Dialogs = {
-  input(request: {
-    readonly message: string
-    readonly initialValue?: string
-  }): Promise<string | undefined>
-  select<T>(request: {
-    readonly message: string
-    readonly options: readonly SubDialogOption<T>[]
-    readonly filter?: "typed" | "always"
-    readonly expand?: "enter" | "tab"
-  }): Promise<
-    | {
-        readonly value: T
-        readonly values: Readonly<Record<string, string>>
-      }
-    | undefined
-  >
-}
-
-type SubDialogOption<T> = {
-  readonly label: string
-  readonly value: T
-  readonly fields?: readonly TextField[]
-  readonly dialog?: SubDialogRequest<T> | TextField
-}
-
-type SubDialogRequest<T> = {
-  readonly message: string
-  readonly options: readonly SubDialogOption<T>[]
-  readonly filter?: "typed" | "always"
-}
+import type {
+  Dialogs,
+  FilterMode,
+  InputRequest,
+  SelectOption,
+  SelectRequest,
+  SelectResult,
+  TextField,
+} from "@fx/tx/dialogs";
 ```
 
-A bundled consumer declares that compatible type locally and reads `registrations<Dialogs>("dialogs")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`; an absent capability and multiple registered providers remain the consumer's responsibility, and tx defines no winner semantics.
+`Dialogs` is what the key carries: `input(request)` collecting one line of text and `select(request)` driving a column browser, each resolving `undefined` where the reader cancelled. A `SelectRequest` carries the `message`, the `options`, optional `headers` for a column of cells, an optional `filter` of `"typed"` or `"always"`, and an optional `expand` of `"enter"` or `"tab"`. A `SelectOption` declares exactly one of a `label` or a row of `cells`, the opaque `value` it stands for, the `TextField`s it collects, and the `dialog` it opens — a nested request or a single field. A `SelectResult` carries the completing option's `value` and the `values` collected on the way to it. Every member is documented where it is declared, and the contract is types only: it publishes no way to draw a dialog, which stays the registry's job, and nothing behind the import is a renderer, a matcher, or React's element type. The provider's own rendering vocabulary is deliberately not published — a consumer that calls `select` never sees a rendered element, and publishing one would make an internal rendering decision a breaking change.
+
+A consumer reads `registrations<Dialogs>("@fx/tx/dialogs")` inside its command action, after initialization has committed every provider. What a read answering none, or more than one, means is the consumer's own decision: the contract types the values under the key and neither supplies one, selects among them, nor rejects one, and tx defines no winner semantics. The grid plugin decides it strictly — `requireDialogsCapability` treats both counts as errors naming the count — because a consumer that fell back would have to own movement, filtering, a viewport, and a terminal session of its own. A consumer with a reason to tolerate an absent provider is free to make the opposite choice.
 
 Every dialog requires both the provider's injected standard input and standard error to be TTYs and rejects a non-interactive stream before rendering or changing terminal state; there is no fallback. It then resolves a theme for its standard error stream through the theme capability above, so a `tx` composed without exactly one theme provider fails the dialog with an error naming the count rather than drawing an appearance of its own. Dialogs use the injected React and Ink instances, read only injected standard input, and render only on injected standard error, so standard output stays untouched for the consuming command.
 
@@ -612,7 +585,7 @@ Commands, child definitions, generic registry entries, and update participants c
 
 Bundled feature plugins live under `plugins/<name>/`, conventionally at `plugins/<name>/index.ts`. Only the root `cli.ts` composition root selects and orders defaults. Modules under `src/` must remain feature-neutral and must not import or name bundled plugins; a bundled plugin's complete module graph must not import private core implementation under `src/`.
 
-Use type-only imports from `@fx/tx/plugin` and from every capability contract the package publishes — `@fx/tx/config`, `@fx/tx/theme`, `@fx/tx/theme-override`, and `@fx/tx/grid` today — standard Node.js or Bun APIs, and plugin-owned modules. A published specifier is the one way a bundled plugin may name another bundled plugin's vocabulary: it carries types alone and is erased, so it shares no runtime module graph, while a relative path into another plugin's directory is rejected. None of them may be loaded at run time or imported from under `src/`. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
+Use type-only imports from `@fx/tx/plugin` and from every capability contract the package publishes — `@fx/tx/config`, `@fx/tx/dialogs`, `@fx/tx/theme`, `@fx/tx/theme-override`, and `@fx/tx/grid` today — standard Node.js or Bun APIs, and plugin-owned modules. A published specifier is the one way a bundled plugin may name another bundled plugin's vocabulary: it carries types alone and is erased, so it shares no runtime module graph, while a relative path into another plugin's directory is rejected. None of them may be loaded at run time or imported from under `src/`. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
 
 ## Validate changes
 

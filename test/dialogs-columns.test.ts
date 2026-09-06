@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { SelectOption } from "@fx/tx/dialogs";
 import {
   type CellLayout,
   type ColumnCell,
@@ -22,7 +23,6 @@ import {
   stretchLastColumn,
 } from "../plugins/dialogs/columns.ts";
 import { displayWidth } from "../plugins/dialogs/frame.ts";
-import type { SelectOption } from "../plugins/dialogs/types.ts";
 import type { OptionWindow } from "../plugins/dialogs/viewport.ts";
 
 /**

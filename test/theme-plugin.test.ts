@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import type { Dialogs } from "@fx/tx/dialogs";
 import type { Hue, Theming } from "@fx/tx/theme";
 import type { ThemeOverride } from "@fx/tx/theme-override";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
@@ -106,17 +107,12 @@ async function dialogFailure(
       ({ command, registrations }) => {
         command((namespace) =>
           namespace.action(async () => {
-            const [dialogs] = registrations<{
-              select(request: {
-                readonly message: string;
-                readonly options: readonly { readonly label: string }[];
-              }): Promise<unknown>;
-            }>("dialogs");
+            const [dialogs] = registrations<Dialogs>("@fx/tx/dialogs");
             if (!dialogs) throw new Error("dialogs capability missing");
             try {
               await dialogs.select({
                 message: "Pick one",
-                options: [{ label: "Alpha" }],
+                options: [{ label: "Alpha", value: "alpha" }],
               });
             } catch (error) {
               failure = error;
@@ -223,16 +219,11 @@ async function renderedSelect(
       ({ command, registrations }) => {
         command((namespace) =>
           namespace.action(async () => {
-            const [dialogs] = registrations<{
-              select(request: {
-                readonly message: string;
-                readonly options: readonly { readonly label: string }[];
-              }): Promise<unknown>;
-            }>("dialogs");
+            const [dialogs] = registrations<Dialogs>("@fx/tx/dialogs");
             if (!dialogs) throw new Error("dialogs capability missing");
             await dialogs.select({
               message: "Pick one",
-              options: [{ label: "Alpha" }],
+              options: [{ label: "Alpha", value: "alpha" }],
             });
           }),
         );

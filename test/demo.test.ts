@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import type {
+  Dialogs,
+  InputRequest,
+  SelectRequest,
+  SelectResult,
+} from "@fx/tx/dialogs";
+import type {
   Grid,
   GridRequest,
   GridSelection,
@@ -8,13 +14,9 @@ import type {
 } from "@fx/tx/grid";
 import { demoPlugin } from "../demo/index.ts";
 import {
-  type Dialogs,
-  type InputRequest,
   order,
   type PrintRequest,
   type ScenarioName,
-  type SelectRequest,
-  type SelectResult,
   scenarios,
 } from "../demo/scenarios.ts";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
@@ -51,7 +53,7 @@ function stubDialogs(
     load:
       () =>
       ({ register }) => {
-        register<Dialogs>("dialogs", {
+        register<Dialogs>("@fx/tx/dialogs", {
           async input(request) {
             const call = { kind: "input", request } as const;
             asked.push(call);
