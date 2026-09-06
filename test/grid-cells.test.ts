@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { Row } from "@fx/tx/grid";
 import {
   columnCount,
   displayWidth,
@@ -9,7 +10,6 @@ import {
   sanitize,
   tableCells,
 } from "../plugins/grid/cells.ts";
-import type { Row } from "../plugins/grid/types.ts";
 
 /** The text of every cell of every row, which is what most of these
  * assertions are about. */

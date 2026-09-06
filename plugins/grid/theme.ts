@@ -1,61 +1,16 @@
 /**
- * The theming contract as the grid plugin sees it.
+ * The one theming capability this plugin draws its appearances from.
  *
- * It is a local structural type rather than an import from the theme plugin:
- * the capability is internal, so core carries no theme vocabulary, and two
- * bundled plugins may not share a module graph. The provider reaches this one
- * through the registry, exactly as the dialogs plugin does.
+ * The vocabulary it is typed by is imported from `@fx/tx/theme` — the same
+ * string the read below passes — rather than restated here. A restated copy
+ * compiles whatever the theme plugin does, so a contract that moved would be
+ * discovered when a printed grid reached for an appearance rather than when
+ * this plugin was built. The import is a published specifier rather than a
+ * relative path into `../theme/`, so nothing about it puts two bundled plugins
+ * in one runtime module graph: it is erased entirely.
  */
 
-export type Hue =
-  | "black"
-  | "red"
-  | "green"
-  | "yellow"
-  | "blue"
-  | "magenta"
-  | "cyan"
-  | "white"
-  | "gray";
-
-/** What one variable looks like. An absent field means the attribute is not
- * applied — never that it is unresolved or inherited. */
-export type Appearance = {
-  readonly dim?: boolean;
-  readonly bold?: boolean;
-  readonly inverse?: boolean;
-  readonly hue?: Hue;
-};
-
-/** The semantic roles a surface may name. A printed grid names only `content`,
- * `strong`, and `muted` itself; the rest are part of the one shared vocabulary
- * and a cell may name any of them. */
-export type ThemeVariable =
-  | "chrome"
-  | "content"
-  | "cursor"
-  | "marker"
-  | "muted"
-  | "strong"
-  | "positive"
-  | "caution"
-  | "danger";
-
-/** A theme resolved for one stream. It answers with an appearance and never
- * says whether hues were enabled: that decision is already inside every
- * appearance it returns. */
-export type Theme = {
-  appearance(variable: ThemeVariable): Appearance;
-};
-
-/** The capability registered under `@fx/tx/theme`. A theme is resolved for
- * the stream the surface draws to, because colour enablement depends on it. */
-export type Theming = {
-  theme(
-    stream: { readonly isTTY?: boolean },
-    options?: { readonly colour?: boolean },
-  ): Theme;
-};
+import type { Theming } from "@fx/tx/theme";
 
 /**
  * The one theming capability, or a failure naming how many were found.

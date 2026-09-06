@@ -1,16 +1,30 @@
 import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
-import { requireDialogsCapability } from "./dialogs.ts";
-import { printGrid } from "./render.ts";
-import { selection, selectRequest } from "./select.ts";
-import { requireThemeCapability } from "./theme.ts";
 import type {
   Grid,
   GridRequest,
   GridSelection,
   GridSelectRequest,
-} from "./types.ts";
+} from "./contract.ts";
+import { requireDialogsCapability } from "./dialogs.ts";
+import { printGrid } from "./render.ts";
+import { selection, selectRequest } from "./select.ts";
+import { requireThemeCapability } from "./theme.ts";
+
+/**
+ * The provider is checked against the contract it publishes rather than
+ * against a shape declared here: it is imported type-only from beside this
+ * file, so the value registered under the key and the type a consumer imports
+ * from that same specifier cannot drift apart.
+ */
 
 const identity: PluginIdentity = Object.freeze({ name: "grid" });
+
+/** The key the capability is registered under, which is also the specifier its
+ * contract is published at — one string rather than two that have to be kept
+ * agreeing, and one a package other than this one could not claim. The plugin
+ * keeps its own bare identity name: that names the plugin, and a capability
+ * provider claiming no command namespace has nothing to collide over. */
+const gridKey = "@fx/tx/grid";
 
 /**
  * The grid capability: cells laid out in two dimensions, printed once or
@@ -82,7 +96,7 @@ const definition: PluginDefinition = Object.freeze({
         },
       });
 
-      register<Grid>("grid", grid);
+      register<Grid>(gridKey, grid);
     };
   },
 });

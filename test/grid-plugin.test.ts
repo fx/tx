@@ -1,20 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import type { Grid, GridRequest, OutputStream } from "@fx/tx/grid";
 import { defaultLayoutColumns } from "../plugins/grid/geometry.ts";
 import gridPlugin from "../plugins/grid/index.ts";
-import type { GridRequest, OutputStream } from "../plugins/grid/types.ts";
 import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { PluginDefinition } from "../src/plugin.ts";
 import { captureContext } from "./helpers.ts";
 
 /**
- * The grid capability as a consumer declares it for itself: a local structural
- * type, because the capability is internal and nothing about grids is imported
- * across a plugin boundary or exported publicly.
+ * The capability is typed by the contract the package publishes at the key it
+ * is read from, exactly as an external consumer types it. A local structural
+ * copy would compile whatever the provider did, so these tests would keep
+ * passing over a contract that had moved out from under them.
  */
-type Grid = {
-  print(request: GridRequest): void;
-};
 
 /** A stream that keeps what was written to it and answers only what the grid
  * is allowed to read: its width and whether it is a terminal. Nothing here is
@@ -104,7 +102,7 @@ async function obtainGrid(
       ({ command, registrations }) => {
         command((namespace) =>
           namespace.action(() => {
-            const registered = registrations<Grid>("grid");
+            const registered = registrations<Grid>("@fx/tx/grid");
             count = registered.length;
             grid = registered[0];
           }),
@@ -177,7 +175,7 @@ describe("the grid capability", () => {
         ({ command, registrations }) => {
           command((namespace) =>
             namespace.action(() => {
-              grid = registrations<Grid>("grid")[0];
+              grid = registrations<Grid>("@fx/tx/grid")[0];
             }),
           );
         },

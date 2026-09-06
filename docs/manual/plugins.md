@@ -469,7 +469,7 @@ Both dialogs are built on the same render session and obey the same cleanup cont
 
 ## Use the bundled grid capability
 
-The namespace-free bundled grid provider registers one internal capability under the exact opaque key `grid`. It exists so that a plugin with rows to show does not have to own column measurement, display-width arithmetic, colour resolution, canvas sizing, or a renderer lifecycle. Its current local structural shape is:
+The namespace-free bundled grid provider registers one internal capability under the exact opaque key `@fx/tx/grid`. It exists so that a plugin with rows to show does not have to own column measurement, display-width arithmetic, colour resolution, canvas sizing, or a renderer lifecycle. Its current local structural shape is:
 
 ```ts
 type Cell = {
@@ -516,7 +516,7 @@ type Grid = {
 }
 ```
 
-A bundled consumer declares that compatible type locally and reads `registrations<Grid>("grid")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
+A bundled consumer declares that compatible type locally and reads `registrations<Grid>("@fx/tx/grid")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
 
 A cell supplied as a bare string is exactly the cell that string would make with no variable and no alignment, so a row may mix the two notations freely. An absent `variable` names `content`; an absent `align` names `start`. Every string the grid renders — a cell's text, a header, the empty message, the summary, a selecting request's message, and an action's label — has its control characters removed before it is measured or drawn, and that removal is applied to every string it hands the dialogs capability too, so text carrying a newline or an escape sequence can neither break the layout apart nor reach the terminal as a command, and nothing else about the string is changed. Text is measured in terminal display columns rather than code units. A cell left empty after that removal renders as `—`; a header, an empty message, and a summary are the consumer's to leave blank and never get the placeholder. A grid's column count is the most cells any one row supplies, or the number of headers where there are more of those, and a short row's missing trailing cells render as the placeholder rather than shortening the row.
 
@@ -538,7 +538,7 @@ Once the promise settles, the terminal is yours. `select` does not settle until 
 const plugin: Plugin = ({ command, context, registrations }) => {
   command((namespace) => {
     namespace.action(async () => {
-      const [grid] = registrations<Grid>("grid");
+      const [grid] = registrations<Grid>("@fx/tx/grid");
       if (!grid) throw new Error("grid capability missing");
 
       const chosen = await grid.select({

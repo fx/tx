@@ -53,6 +53,7 @@ test("the packed package installs a standalone CLI and every published contract"
       "README.md",
       "dist/tx",
       "package.json",
+      "plugins/grid/contract.ts",
       "plugins/theme/contract.ts",
       "plugins/theme/override-contract.ts",
       "src/context.ts",
@@ -87,6 +88,7 @@ test("the packed package installs a standalone CLI and every published contract"
       writeFile(
         join(consumerRoot, "plugin.ts"),
         `import type { Command, Plugin } from "@fx/tx/plugin";
+import type { Grid, GridSelectRow, Row } from "@fx/tx/grid";
 import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
 import type { ThemeOverride } from "@fx/tx/theme-override";
 
@@ -104,6 +106,17 @@ const loud: Hue = "magenta";
 const emphasis: ThemeVariable = "strong";
 const override: ThemeOverride = { [emphasis]: { bold: true, hue: loud } };
 
+// The grid's vocabulary is declared over the theme's, so importing it makes
+// the consumer resolve one published contract through another. That is the
+// closure the packed file list above stands for: a cell naming a theme
+// variable type checks here only if the tarball carries both contracts.
+const cells: Row = ["greeter", { text: "ready", variable: emphasis }];
+const row: GridSelectRow<string, string> = {
+  cells,
+  value: "greeter",
+  actions: [{ label: "greet", value: "greet" }],
+};
+
 const plugin: Plugin = ({ command, context, register, registrations }) => {
   register<Greeter>("greeter", greeter);
   // The key and the specifier its contract is imported from are one string.
@@ -115,7 +128,7 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
       .description("Say hello")
       .argument("[name]", "who to greet")
       .option("--loud", "shout the greeting")
-      .action((name: string | undefined, options: { loud?: boolean }) => {
+      .action(async (name: string | undefined, options: { loud?: boolean }) => {
         const available: readonly Greeter[] = registrations<Greeter>("greeter");
         const greeting = available[0]?.greet(name) ?? greeter.greet(name);
         // Read while the command runs, exactly as a bundled consumer does, and
@@ -125,6 +138,12 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
         const appearance: Appearance = theme?.appearance(emphasis) ?? {};
         const shown = appearance.bold ? greeting.toUpperCase() : greeting;
         context.stdout.write(\`\${options.loud ? shown.toUpperCase() : shown}\\n\`);
+        // Read the same way and typed the same way: the grid's key is the
+        // specifier its contract came from, so a printed grid and a driven one
+        // are both checked against what the package published.
+        const grid: Grid | undefined = registrations<Grid>("@fx/tx/grid")[0];
+        grid?.print({ stream: context.stdout, rows: [cells] });
+        await grid?.select({ message: greeting, rows: [row] });
       });
   });
 };

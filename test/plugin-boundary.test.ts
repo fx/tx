@@ -482,6 +482,7 @@ test("every published subpath is a types condition over a module with no runtime
   // would leave the whole boundary passing vacuously.
   expect(publishedSpecifiers).toEqual([
     "@fx/tx/plugin",
+    "@fx/tx/grid",
     "@fx/tx/theme",
     "@fx/tx/theme-override",
   ]);

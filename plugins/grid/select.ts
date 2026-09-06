@@ -6,15 +6,15 @@ import {
   tableCells,
 } from "./cells.ts";
 import type {
-  SelectOption as DialogOption,
-  SelectRequest as DialogRequest,
-} from "./dialogs.ts";
-import type {
   GridAction,
   GridSelection,
   GridSelectRequest,
   GridSelectRow,
-} from "./types.ts";
+} from "./contract.ts";
+import type {
+  SelectOption as DialogOption,
+  SelectRequest as DialogRequest,
+} from "./dialogs.ts";
 
 /**
  * A grid request as a select request, and the answer back as a row and an

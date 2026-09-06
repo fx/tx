@@ -1,4 +1,6 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
+import type { Theme, ThemeVariable } from "@fx/tx/theme";
+import type { GridRequest, OutputStream } from "./contract.ts";
 import {
   canvasWidth,
   defaultLayoutColumns,
@@ -6,8 +8,6 @@ import {
   type Line,
   type LineSegment,
 } from "./geometry.ts";
-import type { Theme, ThemeVariable } from "./theme.ts";
-import type { GridRequest, OutputStream } from "./types.ts";
 
 /**
  * A laid-out grid turned into elements and written to the stream the consumer
