@@ -4,7 +4,9 @@
 
 Theming is the one place `tx` decides what its terminal output looks like. A theme is a set of named appearance variables — roles such as chrome, content, and the cursor bar — and every surface `tx` draws MUST ask the theme for a role rather than name an appearance itself. The default theme is the greyscale Norton Commander palette [Dialogs](../dialogs/) already renders, so adopting a theme MUST change nothing on screen until something overrides one.
 
-A theme is supplied by a bundled plugin as an internal capability, exactly as [Dialogs](../dialogs/) and [Config](../config/) are. Core carries no theme vocabulary.
+A theme is supplied by a bundled plugin, exactly as [Dialogs](../dialogs/) and [Config](../config/) are. Core carries no theme vocabulary.
+
+[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/theme`, so a consumer imports it rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented; every other requirement below describes current behavior.
 
 ## Background
 
@@ -20,12 +22,12 @@ Theming resolves both by moving the decision to one owner. Dialogs stops naming 
 
 ### Theme Capability
 
-- The bundled theme plugin MUST register one theming capability under the opaque registry key `theme` and MUST NOT claim a command namespace.
+- The bundled theme plugin MUST register one theming capability under the opaque registry key `@fx/tx/theme`, which is also the specifier its contract is published at under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), and MUST NOT claim a command namespace.
 - The capability MUST resolve a theme for a surface from the stream that surface draws to, because [Colour Enablement](#colour-enablement) depends on that stream. It MUST take the stream as an argument and MUST NOT retain it, expose it, expose the terminal, or expose a renderer.
 - A consumer MUST read the capability while its command runs rather than during its own initialization, because registry reads during initialization see only earlier providers.
 - A resolved theme MUST answer with an appearance alone. It MUST NOT expose whether hues were enabled, because [Colour Enablement](#colour-enablement) requires every appearance it returns to reflect that decision already, and a consumer given the flag is a consumer that can branch on it.
-- The contract MUST remain a local structural type shared by bundled plugins; nothing about theming MUST enter `src/` or the public `@fx/tx/plugin` contract.
-- Exactly one theme provider MUST be composed. A consumer reading the `theme` key that finds no capability, or finds more than one, MUST fail with an error naming how many it found, exactly as `requireConfigCapability` in `plugins/marketplace/configured.ts` already does for the [Config](../config/) capability. There is deliberately no fallback: the theme plugin is bundled and composed by default, so its absence is a misconfiguration rather than a supported mode, and a fallback would oblige every consumer to carry its own copy of the default theme — the duplication this capability exists to remove. [Why There Is No Fallback](#why-there-is-no-fallback) states the reasoning in full.
+- The contract MUST be published from the package as a types-only import under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), so a consumer types the capability by importing the contract rather than by restating it. Nothing about theming MUST enter `src/` or the public `@fx/tx/plugin` contract: the contract is published beside that contract rather than inside it.
+- Exactly one theme provider MUST be composed. A consumer reading the `@fx/tx/theme` key that finds no capability, or finds more than one, MUST fail with an error naming how many it found, exactly as `requireConfigCapability` in `plugins/marketplace/configured.ts` already does for the [Config](../config/) capability. There is deliberately no fallback: the theme plugin is bundled and composed by default, so its absence is a misconfiguration rather than a supported mode, and a fallback would oblige every consumer to carry its own copy of the default theme — the duplication this capability exists to remove. [Why There Is No Fallback](#why-there-is-no-fallback) states the reasoning in full.
 
 The initial shape is conceptual:
 
@@ -64,19 +66,19 @@ type Theming = {
 #### Scenario: Capability used by a command
 
 - **GIVEN** a bundled theme provider has initialized successfully
-- **WHEN** a consumer reads the `theme` key while its command runs and resolves a theme for the stream it draws to
+- **WHEN** a consumer reads the `@fx/tx/theme` key while its command runs and resolves a theme for the stream it draws to
 - **THEN** it receives exactly one theming capability and can resolve an appearance for every variable
 
 #### Scenario: Absent capability fails
 
 - **GIVEN** no theme provider is composed
-- **WHEN** a consumer reads the `theme` key while its command runs
+- **WHEN** a consumer reads the `@fx/tx/theme` key while its command runs
 - **THEN** it fails with an error saying no theme capability was found, and draws nothing
 
 #### Scenario: Duplicate providers fail
 
 - **GIVEN** two theme providers are composed
-- **WHEN** a consumer reads the `theme` key while its command runs
+- **WHEN** a consumer reads the `@fx/tx/theme` key while its command runs
 - **THEN** it fails with an error saying two were found, rather than silently taking either one
 
 ### Theme Variables
@@ -116,7 +118,7 @@ The variables are semantic roles, not appearances. A caller names what a piece o
 Overriding is supported because a surface will occasionally need it, not because varying the look is encouraged. A plugin that overrides nothing gets a coherent `tx`; a plugin that overrides freely gets one that no longer looks like itself.
 
 - A plugin MAY contribute an override for any subset of the variables during initialization, and MUST NOT be required to supply a complete theme.
-- An override MUST be registered under the opaque registry key `theme-override`, which is distinct from the `theme` key the capability itself is registered under. The two carry different values — a theming capability and a partial override — and the [Generic Registry](../plugin-system/index.md#generic-registry) keeps every entry under one key as a distinct member of one snapshot, so a single key could not hold both without a consumer having to tell them apart by shape.
+- An override MUST be registered under the opaque registry key `@fx/tx/theme-override`, which is also the specifier the override's own shape is published at, and which is distinct from the `@fx/tx/theme` key the capability itself is registered under. The two carry different values — a theming capability and a partial override — and the [Generic Registry](../plugin-system/index.md#generic-registry) keeps every entry under one key as a distinct member of one snapshot, so a single key could not hold both without a consumer having to tell them apart by shape.
 - Overrides MUST be composed when a theme is resolved for a surface, which happens while a command runs. They MUST NOT be composed during the theme provider's own initialization: the registry shows a plugin only what committed before it, so an override contributed by a later plugin is invisible at that point and composing then would silently drop it.
 - An unspecified variable MUST keep the default theme's appearance, so a one-variable override is a one-variable change.
 - Overrides MUST be composed over the default theme in the registry's deterministic commit order, and a later override of the same variable MUST win.
@@ -223,7 +225,7 @@ Theming is a refactor of where an appearance decision is made, not a restyle. If
 - Terminal capability detection beyond `TERM` being `dumb` is out of scope; `tx` does not probe terminfo.
 - Per-surface variable sets, theme inheritance, cascading scopes, and any selector language are out of scope. There is one variable set and one composed set of overrides per process; the only thing resolved per surface is [Colour Enablement](#colour-enablement), and it varies only because the stream does.
 - Runtime theme switching, live reloading, and re-rendering on a theme change are out of scope.
-- A public theme type export is out of scope while the only consumers are bundled plugins.
+- The theming contract is published as types alone. A runtime theme export, a theme package versioned separately from `tx`, and any way of obtaining the capability other than reading the `@fx/tx/theme` registry key are out of scope. Publishing the vocabulary does not publish the default appearances behind it: [Why There Is No Fallback](#why-there-is-no-fallback) is unaffected, because a consumer that can name a variable still cannot resolve one without the capability.
 - Glyph choice is not a theme variable. The glyphs [Dialogs: Presentation](../dialogs/index.md#presentation) fixes remain part of that contract.
 
 ## Open Questions
@@ -246,3 +248,4 @@ Theming is a refactor of where an appearance decision is made, not a restyle. If
 | Date | Change | Document |
 |------|--------|----------|
 | 2026-09-05 | Initial theme variables, default greyscale theme, plugin overrides, and colour enablement | [0026-add-theme-variables](../../changes/0026-add-theme-variables.md) |
+| 2026-09-06 | Required the theming contract to be published at `@fx/tx/theme` as a types-only import, replacing the local structural copy every consumer maintained | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |

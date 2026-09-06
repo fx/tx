@@ -259,3 +259,20 @@ changes:
     depends_on:
       - "0027"
       - "0028"
+  - id: "0030"
+    name: publish-bundled-capability-contracts
+    path: changes/0030-publish-bundled-capability-contracts.md
+    description: Make every bundled registry key the specifier its contract is published at, establish types-only subpath publication, extend boundary enforcement to cover it, and publish the theming and grid contracts.
+    spec: plugin-system
+    status: draft
+    depends_on:
+      - "0026"
+      - "0028"
+  - id: "0031"
+    name: publish-the-dialogs-and-config-contracts
+    path: changes/0031-publish-the-dialogs-and-config-contracts.md
+    description: Publish the dialogs and config contracts over the established mechanism and retire every remaining restated copy of a capability's vocabulary.
+    spec: dialogs
+    status: draft
+    depends_on:
+      - "0030"

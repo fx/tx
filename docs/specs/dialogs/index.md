@@ -12,6 +12,8 @@
 
 [Change 0027](../../changes/0027-add-multi-cell-select-rows.md) implements the aligned cells and headers in [Select Request](#select-request), [Filtering](#filtering), and [Presentation](#presentation), together with the `marker` variable on the glyph that marks an option leading to a sub-dialog: the marker was drawn with the row carrying it until a cell became a field of its own, so it landed with the cell rules rather than with theming. Those requirements are implemented.
 
+[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/dialogs`, so a consumer imports it rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented; every other requirement below describes current behavior.
+
 ## Background
 
 Plugins already receive the host's React and Ink instances and injected process streams through the [Plugin System](../plugin-system/). They can render their own terminal interfaces, but unrelated plugins have no supported way to share one runtime capability.
@@ -22,10 +24,10 @@ The dialogs plugin provides that first concrete use of the generic registry. It 
 
 ### Dialog Capability
 
-- The bundled dialogs plugin MUST register one dialog capability under the opaque registry key `dialogs` and MUST NOT claim a command namespace.
+- The bundled dialogs plugin MUST register one dialog capability under the opaque registry key `@fx/tx/dialogs`, which is also the specifier its contract is published at under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), and MUST NOT claim a command namespace.
 - The dialog capability MUST expose only `select` and `input`; confirm and every other dialog are outside the contract.
 - A consumer MUST read the capability while its command runs, after plugin initialization has completed, rather than snapshotting it during initialization.
-- The dialogs plugin and its consumers MUST use a local structural contract; the capability MUST NOT add dialog types or runtime values to `@fx/tx/plugin`.
+- The dialogs contract MUST be published from the package as a types-only import under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), so a consumer types the capability by importing the contract rather than by restating it; the capability MUST NOT add dialog types or runtime values to `@fx/tx/plugin`.
 - A consumer MUST own the behavior for an absent dialog capability; the registry and provider MUST NOT prescribe that command's output or exit code.
 
 Conceptual internal shape:
@@ -556,7 +558,7 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 ## Constraints
 
 - Only `select`, `input`, and their composition are in scope.
-- The dialogs capability is internal to bundled plugins; a stable external dialogs package or public export is out of scope.
+- The dialogs contract is published as types alone. A runtime dialogs export, a dialogs package versioned separately from `tx`, and any way of obtaining the capability other than reading the `@fx/tx/dialogs` registry key are out of scope.
 - `text` is the only field type. Dropdown, checkbox, numeric, masked, and multi-line fields are out of scope, as is a form that presents several fields at once with focus movement between them. An option's cells are display text and are unrelated to fields: they collect nothing and take no focus.
 - Field validation, required-field policy, defaults beyond an initial value, error messages, and re-prompting after a rejected value are out of scope; a caller validates what it receives.
 - Caret movement, word or line deletion, clipboard integration, paste-specific handling, entry history, completion, and character masking are out of scope for text entry and for the filter; a terminal paste arrives as ordinary input and is appended as such.
@@ -570,7 +572,7 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 
 ## Open Questions
 
-- A public dialogs type export MAY be considered when an external plugin needs one; the current internal consumers do not justify that contract.
+- ~~A public dialogs type export MAY be considered when an external plugin needs one; the current internal consumers do not justify that contract.~~ **Resolved: published.** An external plugin needed one, and what it did instead was restate the shape — an unchecked copy that keeps compiling after the contract it copies has moved. [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts) now requires every bundled capability to publish its contract, and this one is published at the subpath its registry key names.
 - A confirm dialog MAY be specified when a concrete bundled consumer needs one.
 - Further field types and a multi-choice dialog MAY reuse the field and option model when a concrete bundled consumer needs them; neither is specified here.
 - Whether a reduced-motion preference, such as an environment variable, SHOULD disable the caret blink, the indicator pulse, and the confirmation flash is undecided; all three are SHOULD-level, so adding one changes no MUST.
@@ -614,3 +616,4 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-05 | Appearance decisions delegated to Theming; the greyscale rule became the default theme's property | [0026-add-theme-variables](../../changes/0026-add-theme-variables.md) |
 | 2026-09-05 | Options may declare aligned cells and a column may declare headers | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |
 | 2026-09-05 | Implemented aligned cells and headers: the two display shapes with the validations that settle a column's, matching within one cell rather than across the join, fields measured over the whole visible list, the header row drawn as chrome at the top of its band at the cost of one option row, and the sub-dialog marker drawn as its own `marker` piece of the row | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |
+| 2026-09-06 | Required the dialogs contract to be published at `@fx/tx/dialogs` as a types-only import, and resolved the deferred public-export open question | [0031-publish-the-dialogs-and-config-contracts](../../changes/0031-publish-the-dialogs-and-config-contracts.md) |

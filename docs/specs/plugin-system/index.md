@@ -12,6 +12,8 @@ The approved target architecture is implemented: the core is generic, the market
 
 The second registry provider from [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) is implemented outside core under `plugins/config/`: it registers the opaque `config` capability and follows the separately owned [Config](../config/) contract. The marketplace plugin consumes it for [Configured Marketplaces](#configured-marketplaces), including explicit installation and add/remove write-back.
 
+[Published Capability Contracts](#published-capability-contracts) is approved and not yet implemented. It is planned by [Change 0030](../../changes/0030-publish-bundled-capability-contracts.md), which establishes the mechanism and publishes the [Theming](../theming/) and [Grid](../grid/) contracts, and [Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md), which publishes the [Dialogs](../dialogs/) and [Config](../config/) contracts. Every consumer restates those contracts today.
+
 [Minimal Clone Footprint](#minimal-clone-footprint) is implemented as specified in [Change 0019](../../changes/0019-reduce-marketplace-clone-footprint.md) for Git-sourced installs and updates, including the explicit complete-tree option, target-commit footprint re-derivation, complete-tree fallback, and transactional restoration.
 
 ## Requirements
@@ -181,6 +183,63 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - **WHEN** a consumer reads that key
 - **THEN** every registration appears in commit order without a host-selected winner
 
+
+### Published Capability Contracts
+
+A capability's runtime value reaches a consumer through the registry, which carries no types. Its *shape* is a separate question, and the answer is that the package publishes it. A consumer that had to restate the shape would be maintaining an unchecked copy of somebody else's contract: the copy compiles whatever the provider does, so a contract that moves is discovered when a command fails rather than when the consumer is built.
+
+- Every capability a plugin registers MUST have its structural contract published from the package that ships that plugin, and a consumer MUST be able to type the capability by importing the published contract rather than by restating it.
+- A registry key MUST be the import specifier its own contract is published at, so the string a consumer passes to the read and the string it imports the contract from are one string rather than two that have to be kept agreeing.
+- This rule MUST hold for every provider, whichever package ships it. A capability bundled with `tx` registers under a specifier `tx` publishes; a capability shipped by any other plugin registers under a specifier that plugin's own package publishes.
+- Keys therefore inherit the package namespace, in which a name already has exactly one owner, so two unrelated providers cannot collide by accident. The host gains no part in this: [Generic Registry](#generic-registry) continues to treat a key as an opaque string compared by exact equality, and MUST NOT begin reserving, parsing, namespacing, or resolving one.
+- A published contract MUST expose types alone and MUST NOT provide a runtime API, exactly as the public plugin contract does not.
+- A published contract MUST NOT require its consumer to obtain a value any way other than reading the registry key, and publishing it MUST NOT establish, imply, or check any runtime relationship between that key and the values registered under it. [Generic Registry](#generic-registry) continues to own the read, and the type a consumer asserts there remains a caller-side assertion the host never verifies.
+- Capability vocabulary MUST NOT enter `src/` or the public `@fx/tx/plugin` contract; a capability is published beside that contract rather than inside it.
+- The package's published files MUST be closed over everything its published contracts reach, so every published subpath type checks against an installed package alone.
+- A published contract is public API. Removing one, removing a member of one, or narrowing what a member accepts MUST be treated as a breaking change to the package.
+- Boundary enforcement MUST hold a published subpath to what it already holds the public plugin contract to: it MUST be imported for types only, MUST NOT be loaded at runtime, and MUST NOT be imported by any module under `src/`.
+
+#### Scenario: External consumer types a capability
+
+- **GIVEN** an external plugin installs the package and consumes a bundled capability
+- **WHEN** it types the value it reads from that capability's registry key
+- **THEN** it imports the published contract from that same key and declares no structural copy of its own
+
+#### Scenario: A plugin outside tx provides a capability
+
+- **GIVEN** a plugin shipped by some other package registers a capability and publishes its contract
+- **WHEN** a second plugin depends on that package and consumes the capability
+- **THEN** it reads and imports the one specifier that package publishes, by the same rule a bundled capability follows and with no mechanism particular to either
+
+#### Scenario: Unrelated providers do not collide
+
+- **GIVEN** two capabilities provided by plugins from different packages
+- **WHEN** both are composed into one `tx` and a consumer reads either key
+- **THEN** the keys differ because the package names differ, and the read returns only the provider the consumer meant
+
+#### Scenario: A moved contract fails the consumer's build
+
+- **GIVEN** an external plugin imports a published contract and uses a member of it
+- **WHEN** a later release of the package removes that member
+- **THEN** the consumer fails to type check against the new release rather than failing while its command runs
+
+#### Scenario: A published contract carries nothing to run
+
+- **GIVEN** a published capability subpath
+- **WHEN** it is loaded at runtime rather than imported for types
+- **THEN** the load fails, exactly as it does for the public plugin contract
+
+#### Scenario: Publication leaves the registry alone
+
+- **GIVEN** a consumer reads a capability's registry key while its command runs
+- **WHEN** no provider registered under that key, or several did
+- **THEN** the read answers exactly as [Generic Registry](#generic-registry) requires, and the published contract neither supplies a value, selects among values, nor rejects one
+
+#### Scenario: Published contracts install complete
+
+- **GIVEN** the package is installed from the registry with no repository checkout present
+- **WHEN** a consumer type checks an import of every published capability subpath
+- **THEN** each resolves and type checks without a file the package did not publish
 ### Update Participation
 
 A plugin that installs something on the user's behalf can be asked what it would change and told to change it. The host owns registering, isolating, and handing over those participants; what an update *means* is owned by [Updates](../updates/index.md), and the marketplace and executable participants are specified there.
@@ -624,7 +683,7 @@ The marketplace plugin is an ordinary default plugin and a producer of lazy chil
 
 ### Package API
 
-`@fx/tx/plugin` is the only core contract available to a portable plugin. Imports from that path SHOULD be type-only unless a future public runtime API is explicitly specified. React, Ink, the command parser, and versions remain dependency-injected runtime values.
+`@fx/tx/plugin` is the only *generic host* contract available to a portable plugin, and it stays free of feature vocabulary. It is not the only thing the package publishes: each bundled capability publishes its own contract at the subpath its registry key names, under [Published Capability Contracts](#published-capability-contracts). The two are deliberately separate paths rather than one growing surface — a plugin that never touches a capability never sees its vocabulary, and core stays neutral whichever capabilities exist. Imports from every one of those paths SHOULD be type-only unless a future public runtime API is explicitly specified. React, Ink, the command parser, and versions remain dependency-injected runtime values.
 
 The parser is deliberately exposed twice. A plugin that only wants a subcommand receives its namespace already built and never names the parser; a plugin that wants to compose commands, share option definitions, or reuse parser helpers takes the host's instance from injected dependencies. Neither path requires the plugin to install the parser itself.
 
@@ -692,3 +751,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-22 | Implemented the registry's namespace-free bundled dialogs provider without adding dialog vocabulary to core | [0016-add-plugin-capabilities-and-dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md) |
 | 2026-08-31 | Specified the persisted list of configured marketplaces, its `marketplace install` command, and its write-back from `marketplace add` and `marketplace remove` | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
 | 2026-08-31 | Specified a manifest-driven reduced clone footprint for Git-sourced marketplace install and update, with a fallback to a complete retrieval | [0019-reduce-marketplace-clone-footprint](../../changes/0019-reduce-marketplace-clone-footprint.md) |
+| 2026-09-06 | Specified Published Capability Contracts: every bundled capability publishes its structural contract at the subpath its registry key names, as types alone, held to the same boundary rules as the public plugin contract | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |

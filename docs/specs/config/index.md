@@ -6,6 +6,8 @@
 
 [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) specifies the config capability and its first consumer, the marketplace plugin's configured-marketplace list. The bundled provider is implemented under `plugins/config/` and composed only in `cli.ts`; the marketplace plugin consumes it at command time for explicit configured installs and add/remove write-back. The requirements below describe current behavior.
 
+[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/config`, so a consumer imports it rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is approved and not yet implemented; every other requirement below describes current behavior.
+
 ## Background
 
 Plugins already receive generic process and identity context through the [Plugin System](../plugin-system/), and a plugin MAY resolve its own platform-appropriate data paths and own its own mutable state, per [Architecture: State Ownership](../architecture/index.md#state-ownership). Nothing shared validates what a plugin persists there, so each plugin that wants durable state re-derives its own data directory, its own file format, and its own defense against a hand-edited or stale file.
@@ -18,9 +20,9 @@ The first concrete need is the marketplace plugin's list of marketplaces a user 
 
 ### Config Capability
 
-- The bundled config plugin MUST register one config capability under the opaque registry key `config` and MUST NOT claim a command namespace.
+- The bundled config plugin MUST register one config capability under the opaque registry key `@fx/tx/config`, which is also the specifier its contract is published at under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), and MUST NOT claim a command namespace.
 - A consumer MUST read the capability while its command runs, after plugin initialization has completed, rather than snapshotting it during initialization.
-- The config plugin and its consumers MUST use a local structural contract; the capability MUST NOT add config types or runtime values to `@fx/tx/plugin`.
+- The config contract MUST be published from the package as a types-only import under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), so a consumer types the capability by importing the contract rather than by restating it; the capability MUST NOT add config types or runtime values to `@fx/tx/plugin`.
 - The capability MUST persist independently of the current working directory, scoped to the current user, so the same key returns the same value regardless of where `tx` is invoked from.
 
 Conceptual internal shape:
@@ -173,3 +175,4 @@ The provider registers during initialization. Consumers read the committed value
 | Date | Change | Document |
 |------|--------|----------|
 | 2026-08-31 | Initial desired config capability, key definition, and persistence behavior | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
+| 2026-09-06 | Required the config contract to be published at `@fx/tx/config` as a types-only import, replacing the local structural copy every consumer maintained | [0031-publish-the-dialogs-and-config-contracts](../../changes/0031-publish-the-dialogs-and-config-contracts.md) |
