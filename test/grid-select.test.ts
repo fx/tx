@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import type { SelectOption, SelectRequest } from "@fx/tx/dialogs";
 import type { Grid, GridSelection, GridSelectRequest } from "@fx/tx/grid";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
-import type { CellOption } from "../plugins/grid/dialogs.ts";
 import gridPlugin from "../plugins/grid/index.ts";
 import {
   type RowChoice,
@@ -273,13 +273,29 @@ const plainFleet: GridSelectRequest<string, string> = {
   rows: fleet.rows.map(({ cells, value }) => ({ cells, value })),
 };
 
-/** The options of the rows column, narrowed to the shape they are: rows are
- * cells rather than labels, which is settled once here so the assertions can
- * read the fields a cell option has. */
+/** A row as the option it becomes: cells rather than a label. It is extracted
+ * from the published union rather than written out, so the assertions read the
+ * fields a cell option has without restating the contract they came from. */
+type RowOption = Extract<
+  SelectOption<RowChoice>,
+  { readonly cells: readonly string[] }
+>;
+
+/** The options of the rows column, narrowed to the shape they are, which is
+ * settled once here rather than at every assertion. */
 function rowOptions<T, A>(
   request: GridSelectRequest<T, A>,
-): readonly CellOption<RowChoice>[] {
-  return selectRequest(request).options as readonly CellOption<RowChoice>[];
+): readonly RowOption[] {
+  return selectRequest(request).options as readonly RowOption[];
+}
+
+/** The column a row's option opens. The contract leaves a sub-dialog either a
+ * nested column or a text leaf; every one the grid builds is a column, which
+ * is settled here for the same reason. */
+function openedColumn(
+  option: RowOption | undefined,
+): SelectRequest<RowChoice> | undefined {
+  return option?.dialog as SelectRequest<RowChoice> | undefined;
 }
 
 describe("composing a grid request onto a select", () => {
@@ -382,7 +398,7 @@ describe("composing a grid request onto a select", () => {
     expect(request.message).toBe("Pick[2J one");
     expect(request.headers).toEqual(["SERVICE"]);
     expect(option?.cells).toEqual(["api"]);
-    expect(option?.dialog?.options).toEqual([
+    expect(openedColumn(option)?.options).toEqual([
       { label: "conn[2Ject", value: { row: 0, action: 0 } },
     ]);
   });
@@ -414,7 +430,7 @@ describe("composing a grid request onto a select", () => {
       rows: [{ cells: [], value: "a", actions: [...actions] }],
     });
 
-    expect(options[0]?.dialog?.message).toBe("Pick one");
+    expect(openedColumn(options[0])?.message).toBe("Pick one");
   });
 });
 

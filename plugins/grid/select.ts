@@ -1,3 +1,7 @@
+import type {
+  SelectOption as DialogOption,
+  SelectRequest as DialogRequest,
+} from "@fx/tx/dialogs";
 import {
   columnCount,
   headerCells,
@@ -11,10 +15,6 @@ import type {
   GridSelectRequest,
   GridSelectRow,
 } from "./contract.ts";
-import type {
-  SelectOption as DialogOption,
-  SelectRequest as DialogRequest,
-} from "./dialogs.ts";
 
 /**
  * A grid request as a select request, and the answer back as a row and an

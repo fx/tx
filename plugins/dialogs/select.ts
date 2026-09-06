@@ -20,12 +20,15 @@ import {
   indicatorText,
   stretchLastColumn,
 } from "./columns.ts";
+import type {
+  FilterMode,
+  SelectOption,
+  SelectRequest,
+  SelectResult,
+  TextField,
+} from "./contract.ts";
 import { type EntryComponent, editedText, withCaret } from "./entry.ts";
-import {
-  type FilterMode,
-  filterIsShown,
-  visibleOptionIndices,
-} from "./filter.ts";
+import { filterIsShown, visibleOptionIndices } from "./filter.ts";
 import {
   availableInnerWidth,
   displayWidth,
@@ -36,15 +39,7 @@ import {
   panelWidth,
   segmentsWidth,
 } from "./frame.ts";
-import type {
-  DialogElement,
-  DialogView,
-  Outcome,
-  SelectOption,
-  SelectRequest,
-  SelectResult,
-  TextField,
-} from "./types.ts";
+import type { DialogElement, DialogView, Outcome } from "./types.ts";
 import { affordsBandRows, optionRowCount, optionWindow } from "./viewport.ts";
 
 /** The prompt the filter row carries, so the row the user types into is

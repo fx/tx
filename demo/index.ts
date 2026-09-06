@@ -25,6 +25,7 @@
  * `bun run demo grid | cat` prints the same bytes a terminal gets.
  */
 
+import type { Dialogs } from "@fx/tx/dialogs";
 import type { Grid } from "@fx/tx/grid";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
 import gridPlugin from "../plugins/grid/index.ts";
@@ -32,7 +33,6 @@ import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
 import {
-  type Dialogs,
   isScenario,
   order,
   present,
@@ -55,7 +55,7 @@ export const demoPlugin: PluginDefinition = {
     () =>
     ({ command, context, registrations }) => {
       const run = async (names: readonly ScenarioName[]) => {
-        const [dialogs] = registrations<Dialogs>("dialogs");
+        const [dialogs] = registrations<Dialogs>("@fx/tx/dialogs");
         if (!dialogs) throw new Error("dialogs capability missing");
         const [grid] = registrations<Grid>("@fx/tx/grid");
         if (!grid) throw new Error("grid capability missing");

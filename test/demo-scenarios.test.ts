@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  Dialogs,
+  InputRequest,
+  SelectOption,
+  SelectRequest,
+  SelectResult,
+  TextField,
+} from "@fx/tx/dialogs";
+import type {
   Cell,
   Grid,
   GridRequest,
@@ -7,17 +15,11 @@ import type {
   GridSelectRequest,
 } from "@fx/tx/grid";
 import {
-  type Dialogs,
-  type InputRequest,
   isScenario,
   order,
   type PrintRequest,
   present,
-  type SelectOption,
-  type SelectRequest,
-  type SelectResult,
   scenarios,
-  type TextField,
   usage,
 } from "../demo/scenarios.ts";
 

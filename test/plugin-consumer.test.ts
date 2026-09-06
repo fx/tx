@@ -54,6 +54,7 @@ test("the packed package installs a standalone CLI and every published contract"
       "dist/tx",
       "package.json",
       "plugins/config/contract.ts",
+      "plugins/dialogs/contract.ts",
       "plugins/grid/contract.ts",
       "plugins/theme/contract.ts",
       "plugins/theme/override-contract.ts",
@@ -90,6 +91,7 @@ test("the packed package installs a standalone CLI and every published contract"
         join(consumerRoot, "plugin.ts"),
         `import type { Command, Plugin } from "@fx/tx/plugin";
 import type { Config, ConfigValidator } from "@fx/tx/config";
+import type { Dialogs, SelectRequest } from "@fx/tx/dialogs";
 import type { Grid, GridSelectRow, Row } from "@fx/tx/grid";
 import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
 import type { ThemeOverride } from "@fx/tx/theme-override";
@@ -119,6 +121,14 @@ const cells: Row = ["greeter", { text: "ready", variable: emphasis }];
 // asks it this.
 const isGreeting: ConfigValidator<string> = (value): value is string =>
   typeof value === "string";
+// The dialogs vocabulary, imported at the key the capability is read from
+// rather than restated as the part this consumer happens to send. The
+// contract publishes what a request may hold; it publishes no rendering, so
+// nothing behind this import is a view, a matcher, or React's element type.
+const question: SelectRequest<string> = {
+  message: "Greet whom?",
+  options: [{ label: "world", value: "world" }],
+};
 const row: GridSelectRow<string, string> = {
   cells,
   value: "greeter",
@@ -160,6 +170,13 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
           registrations<Config>("@fx/tx/config")[0];
         config?.define("greeting", isGreeting);
         await config?.write("greeting", greeting);
+        // The dialogs capability, read and typed the same way. What an absent
+        // or repeated provider means stays this consumer's decision: the
+        // contract types the values under the key and answers nothing about
+        // how many there are.
+        const dialogs: Dialogs | undefined =
+          registrations<Dialogs>("@fx/tx/dialogs")[0];
+        await dialogs?.select(question);
       });
   });
 };

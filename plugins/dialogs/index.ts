@@ -8,19 +8,18 @@ import type {
   PluginIdentity,
 } from "@fx/tx/plugin";
 import { animationInterval, onPhase } from "./animation.ts";
+import type {
+  Dialogs,
+  InputRequest,
+  SelectOption,
+  SelectRequest,
+  SelectResult,
+} from "./contract.ts";
 import { createEntry } from "./entry.ts";
 import { createFrame } from "./frame.ts";
 import { createSelectView } from "./select.ts";
 import { requireThemeCapability } from "./theme.ts";
-import type {
-  Dialogs,
-  DialogView,
-  InputRequest,
-  Outcome,
-  SelectOption,
-  SelectRequest,
-  SelectResult,
-} from "./types.ts";
+import type { DialogView, Outcome } from "./types.ts";
 
 type Failure =
   | { readonly present: false }
@@ -455,6 +454,14 @@ async function runDialog<T>(
   return outcome?.type === "completed" ? outcome.value : undefined;
 }
 
+/** The key the capability is registered under, which is also the specifier its
+ * contract is published at — one string rather than two that have to be kept
+ * agreeing, and one a package other than this one could not claim. The plugin
+ * keeps its own bare identity name below: that names the plugin, and a
+ * capability provider claiming no command namespace has nothing to collide
+ * over. */
+const dialogsKey = "@fx/tx/dialogs";
+
 const identity: PluginIdentity = Object.freeze({ name: "dialogs" });
 
 const definition: PluginDefinition = Object.freeze({
@@ -540,7 +547,7 @@ const definition: PluginDefinition = Object.freeze({
         },
       };
 
-      register<Dialogs>("dialogs", dialogs);
+      register<Dialogs>(dialogsKey, dialogs);
     };
   },
 });

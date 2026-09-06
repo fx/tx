@@ -6,17 +6,18 @@
  * be asserted without a terminal. Rendering it — and waiting for the person
  * in front of it — is `./index.ts`, which is as thin as it can be made.
  *
- * The grid vocabulary and the theme variable a cell names are imported from
- * the specifiers they are published at — the same strings the runner reads
- * those capabilities from — so the catalogue is checked against the contracts
- * rather than against a copy of them that would compile whichever way they
- * moved.
- *
- * The dialog vocabulary is still restated here: that capability's contract is
- * not published yet, so a consumer describes structurally what it asks for,
- * exactly as the plugin's own tests do.
+ * Every capability's vocabulary is imported from the specifier it is published
+ * at — the same string the runner reads that capability from — so the
+ * catalogue is checked against the contracts rather than against copies of
+ * them that would compile whichever way they moved.
  */
 
+import type {
+  Dialogs,
+  InputRequest,
+  SelectOption,
+  SelectRequest,
+} from "@fx/tx/dialogs";
 import type {
   Grid,
   GridAction,
@@ -25,41 +26,6 @@ import type {
   OutputStream,
 } from "@fx/tx/grid";
 import type { ThemeVariable } from "@fx/tx/theme";
-
-export type TextField = {
-  readonly type: "text";
-  readonly name: string;
-  readonly message: string;
-  readonly initialValue?: string;
-};
-export type SelectRequest<T> = {
-  readonly message: string;
-  readonly options: readonly SelectOption<T>[];
-  readonly headers?: readonly string[];
-  readonly filter?: "typed" | "always";
-  readonly expand?: "enter" | "tab";
-};
-export type SelectOption<T> = {
-  /** Exactly one of these two, on every option of a column: a single label, or
-   * the cells a column aligns into fields. */
-  readonly label?: string;
-  readonly cells?: readonly string[];
-  readonly value: T;
-  readonly fields?: readonly TextField[];
-  readonly dialog?: SelectRequest<T> | TextField;
-};
-export type InputRequest = {
-  readonly message: string;
-  readonly initialValue?: string;
-};
-export type SelectResult<T> = {
-  readonly value: T;
-  readonly values: Readonly<Record<string, string>>;
-};
-export type Dialogs = {
-  input(request: InputRequest): Promise<string | undefined>;
-  select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
-};
 
 /** A printing request without the stream it goes to, which is the runner's to
  * supply rather than the catalogue's. It is the published request minus that

@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import type {
+  Dialogs,
+  InputRequest,
+  SelectOption,
+  SelectRequest,
+  SelectResult,
+  TextField,
+} from "@fx/tx/dialogs";
 import {
   animationInterval,
   flashDuration,
@@ -19,44 +27,6 @@ import type {
   PluginDefinition,
 } from "../src/plugin.ts";
 import { coreDependencies } from "../src/plugins.ts";
-
-type TextField = {
-  readonly type: "text";
-  readonly name: string;
-  readonly message: string;
-  readonly initialValue?: string;
-};
-
-type SelectOption<T> = {
-  readonly label?: string;
-  readonly cells?: readonly string[];
-  readonly value: T;
-  readonly fields?: readonly TextField[];
-  readonly dialog?: SelectRequest<T> | TextField;
-};
-
-type SelectRequest<T> = {
-  readonly message: string;
-  readonly options: readonly SelectOption<T>[];
-  readonly headers?: readonly string[];
-  readonly filter?: "typed" | "always";
-  readonly expand?: "enter" | "tab";
-};
-
-type SelectResult<T> = {
-  readonly value: T;
-  readonly values: Readonly<Record<string, string>>;
-};
-
-type InputRequest = {
-  readonly message: string;
-  readonly initialValue?: string;
-};
-
-type Dialogs = {
-  input(request: InputRequest): Promise<string | undefined>;
-  select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
-};
 
 const ESCAPE = String.fromCharCode(27);
 const BACKSPACE = String.fromCharCode(127);
@@ -251,7 +221,7 @@ function consumer(
       ({ command, context: commandContext, registrations }) => {
         command((namespace) =>
           namespace.action(async () => {
-            const [dialogs] = registrations<Dialogs>("dialogs");
+            const [dialogs] = registrations<Dialogs>("@fx/tx/dialogs");
             if (!dialogs) throw new Error("dialogs capability missing");
             await action(dialogs, commandContext);
           }),
@@ -716,7 +686,7 @@ describe("bundled dialogs provider", () => {
         ({ command, registrations: read }) => {
           command((namespace) =>
             namespace.action(() => {
-              registrations = read<Dialogs>("dialogs");
+              registrations = read<Dialogs>("@fx/tx/dialogs");
             }),
           );
         },
