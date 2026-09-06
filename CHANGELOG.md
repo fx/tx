@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.7.0](https://github.com/fx/tx/compare/v1.6.1...v1.7.0) (2026-09-06)
+
+
+### Features
+
+* **config:** publish the config contract at its registry key ([#75](https://github.com/fx/tx/issues/75)) ([dea5355](https://github.com/fx/tx/commit/dea535553ca34997d97cdad47a6e9ee7a312f53e))
+* **demo:** ship extensionless demo showcasing all dialog features ([#63](https://github.com/fx/tx/issues/63)) ([d54145c](https://github.com/fx/tx/commit/d54145c8790d0274663e1491eec6170185ea7961))
+* **dialogs:** add multi-cell select rows and column headers ([#70](https://github.com/fx/tx/issues/70)) ([e071364](https://github.com/fx/tx/commit/e071364215cd0c1b5ce06fed585a9d7cb0a8ecd4))
+* **dialogs:** cascade sub-dialogs as stacked shadowed panels ([#61](https://github.com/fx/tx/issues/61)) ([21659a3](https://github.com/fx/tx/commit/21659a3bb4fb8893f33c89b0cab4e940b32d5ff0))
+* **dialogs:** publish the dialogs contract at its registry key ([#76](https://github.com/fx/tx/issues/76)) ([47b10a4](https://github.com/fx/tx/commit/47b10a4a2b4bc89fb30e51e46d638896cc04bb25))
+* **dialogs:** render sub-dialogs as columns of one panel ([#64](https://github.com/fx/tx/issues/64)) ([14d35ed](https://github.com/fx/tx/commit/14d35ed82a70ae078569e8ee4e22280cfdbdce02))
+* **grid:** add the grid plugin for aligned printed output ([#69](https://github.com/fx/tx/issues/69)) ([c9c2912](https://github.com/fx/tx/commit/c9c29127b2837e24c6065c1488796c7366dce668))
+* **grid:** drive grid rows as a select with per-row actions ([#71](https://github.com/fx/tx/issues/71)) ([e3111c4](https://github.com/fx/tx/commit/e3111c4d9e0258a792b910e7f0925a73e10cc704))
+* **grid:** publish the grid contract at its registry key ([#74](https://github.com/fx/tx/issues/74)) ([1ee5e3b](https://github.com/fx/tx/commit/1ee5e3b40b416ad0bfa9becc9c21aa4008b4a7d3))
+* **theme:** add theme variables and move dialogs behind them ([#68](https://github.com/fx/tx/issues/68)) ([ce8b428](https://github.com/fx/tx/commit/ce8b428d205598a8ffebbcc0c3737f9dd9ce94e4))
+* **theme:** publish the theming contract at its registry key ([#73](https://github.com/fx/tx/issues/73)) ([4cdfc59](https://github.com/fx/tx/commit/4cdfc5992df6527bf593ed341e754b4d7ea76b9b))
+
+
+### Bug Fixes
+
+* **dialogs:** guarantee a cell's width by construction ([#66](https://github.com/fx/tx/issues/66)) ([139e185](https://github.com/fx/tx/commit/139e185499cfa1aee8a2200ae671f50d51639aa6))
+
 ## [1.6.1](https://github.com/fx/tx/compare/v1.6.0...v1.6.1) (2026-09-02)
 
 
