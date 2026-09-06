@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import type {
+  Cell,
+  Grid,
+  GridRequest,
+  GridSelection,
+  GridSelectRequest,
+} from "@fx/tx/grid";
 import {
-  type Cell,
   type Dialogs,
-  type Grid,
-  type GridRequest,
-  type GridSelection,
-  type GridSelectRequest,
   type InputRequest,
   isScenario,
   order,

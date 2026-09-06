@@ -1,44 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import type { Hue, Theming } from "@fx/tx/theme";
+import type { ThemeOverride } from "@fx/tx/theme-override";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
-import type { Hue } from "../plugins/dialogs/theme.ts";
 import themePlugin from "../plugins/theme/index.ts";
 import { defaultTheme, themeVariables } from "../plugins/theme/variables.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
 import { captureContext } from "./helpers.ts";
 
-/** The local structural contract a consumer of the theme capability declares
- * for itself, exactly as the dialogs plugin does: the capability is internal,
- * so nothing about theming is imported across a plugin boundary.
- *
- * The hue is the consumer's own `Hue` union rather than a `string`, so what
- * these tests drive through the provider is the vocabulary a real consumer can
- * name. A `string` here would let an override name a hue no consumer accepts
- * and pass anyway, which is a contract this file claims to mirror drifting
- * without a test noticing. */
-type Appearance = {
-  readonly dim?: boolean;
-  readonly bold?: boolean;
-  readonly inverse?: boolean;
-  readonly hue?: Hue;
-};
-
-type ThemeVariable = keyof typeof defaultTheme;
-
-type Theme = {
-  appearance(variable: ThemeVariable): Appearance;
-};
-
-type Theming = {
-  theme(
-    stream: { readonly isTTY?: boolean },
-    options?: { readonly colour?: boolean },
-  ): Theme;
-};
-
-type ThemeOverride = Partial<Record<ThemeVariable, Appearance>>;
+/**
+ * The capability and the overrides contributed to it are typed by the
+ * contracts the package publishes at the two keys they are registered under,
+ * exactly as an external consumer types them. A local structural copy would
+ * compile whatever the provider did, so what these tests drive through it
+ * could drift from the published shape without a case noticing — and the hue
+ * an override names is the published `Hue` union rather than a `string`, so an
+ * override naming a hue no consumer accepts fails here rather than passing.
+ */
 
 /** A terminal, so colour enablement never decides against a test that is not
  * about colour. */

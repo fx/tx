@@ -6,11 +6,25 @@
  * be asserted without a terminal. Rendering it — and waiting for the person
  * in front of it — is `./index.ts`, which is as thin as it can be made.
  *
- * The dialog vocabulary is restated here rather than imported: the capability
- * is internal to the dialogs plugin, so its types are not a public export and a
- * consumer describes structurally what it asks for, exactly as the plugin's own
- * tests do.
+ * The grid vocabulary and the theme variable a cell names are imported from
+ * the specifiers they are published at — the same strings the runner reads
+ * those capabilities from — so the catalogue is checked against the contracts
+ * rather than against a copy of them that would compile whichever way they
+ * moved.
+ *
+ * The dialog vocabulary is still restated here: that capability's contract is
+ * not published yet, so a consumer describes structurally what it asks for,
+ * exactly as the plugin's own tests do.
  */
+
+import type {
+  Grid,
+  GridAction,
+  GridRequest,
+  GridSelectRequest,
+  OutputStream,
+} from "@fx/tx/grid";
+import type { ThemeVariable } from "@fx/tx/theme";
 
 export type TextField = {
   readonly type: "text";
@@ -47,71 +61,11 @@ export type Dialogs = {
   select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
 };
 
-/** The grid vocabulary, restated here for the same reason the dialog one is:
- * the capability is internal to the grid plugin, so a consumer describes
- * structurally what it asks for rather than importing it. */
-export type ThemeVariable =
-  | "chrome"
-  | "content"
-  | "cursor"
-  | "marker"
-  | "muted"
-  | "strong"
-  | "positive"
-  | "caution"
-  | "danger";
-export type Cell = {
-  readonly text: string;
-  readonly variable?: ThemeVariable;
-  readonly align?: "start" | "end";
-};
-export type Row = readonly (Cell | string)[];
-export type OutputStream = {
-  write(chunk: string): unknown;
-  readonly columns?: number;
-  readonly isTTY?: boolean;
-};
 /** A printing request without the stream it goes to, which is the runner's to
- * supply rather than the catalogue's. */
-export type PrintRequest = {
-  readonly layout?: "table" | "flow";
-  readonly headers?: readonly string[];
-  readonly rows: readonly Row[];
-  readonly empty?: string;
-  readonly summary?: string;
-};
-export type GridRequest = PrintRequest & { readonly stream: OutputStream };
-/** One thing a consumer offers to do with a row. What the value means belongs
- * to the consumer: the grid reports it and never runs it. */
-export type GridAction<A> = {
-  readonly label: string;
-  readonly value: A;
-};
-/** One selectable row: its cells, the value identifying it, and the actions it
- * offers. An empty action list means the row offers none, exactly as omitting
- * it does. */
-export type GridSelectRow<T, A> = {
-  readonly cells: Row;
-  readonly value: T;
-  readonly actions?: readonly GridAction<A>[];
-};
-/** A grid presented for selection. It carries no stream: a dialog draws
- * through the streams the dialogs capability was injected with. */
-export type GridSelectRequest<T, A> = {
-  readonly message: string;
-  readonly headers?: readonly string[];
-  readonly rows: readonly GridSelectRow<T, A>[];
-};
-export type GridSelection<T, A> = {
-  readonly value: T;
-  readonly action?: A;
-};
-export type Grid = {
-  print(request: GridRequest): void;
-  select<T, A>(
-    request: GridSelectRequest<T, A>,
-  ): Promise<GridSelection<T, A> | undefined>;
-};
+ * supply rather than the catalogue's. It is the published request minus that
+ * one field rather than a shape of its own, so a field added to the contract
+ * reaches the catalogue without being retyped here. */
+export type PrintRequest = Omit<GridRequest, "stream">;
 
 /** The surfaces a scenario is presented on: the dialogs it drives, the grid it
  * prints through, and the stream a printed grid goes to. */

@@ -1,5 +1,5 @@
+import type { ThemeVariable } from "@fx/tx/theme";
 import { displayWidth, padToWidth } from "./frame.ts";
-import type { ThemeVariable } from "./theme.ts";
 import type { SelectOption } from "./types.ts";
 import type { OptionWindow } from "./viewport.ts";
 

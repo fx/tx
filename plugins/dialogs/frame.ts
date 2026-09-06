@@ -1,5 +1,5 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
-import type { Theme, ThemeVariable } from "./theme.ts";
+import type { Theme, ThemeVariable } from "@fx/tx/theme";
 import type { DialogElement } from "./types.ts";
 
 /** The columns a panel spends on chrome rather than content: one border column
