@@ -188,11 +188,12 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 A registered value reaches the plugin that wants it through the registry, which carries no types. Its *shape* is a separate question, and the answer is that the package publishes it. A plugin that had to restate the shape would be maintaining an unchecked copy of somebody else's contract: the copy compiles whatever the other side does, so a contract that moves is discovered when a command fails rather than when the plugin is built.
 
-The unit is the **key**, not the capability. A key whose value *is* a capability and a key whose values are contributions *to* one — an override, say — both need their shape published, because the plugin registering under a key has to type what it registers just as the plugin reading it has to type what it gets.
+The unit is the **key**, not the capability. A key whose value *is* a capability and a key whose values are contributions *to* one — an override, say — both need their shape published, because the plugin registering under a key has to type what it registers just as the plugin reading it has to type what it gets. Publishing is the key owner's job in both cases: a contributor imports what the owner published, since the specifier names the owner's package and nobody else can publish it.
 
-- Every key a plugin registers under MUST have the structural contract of the values registered under it published from the package that ships that plugin, and both a plugin reading that key and a plugin registering under it MUST be able to type the value by importing that contract rather than by restating it.
+- Every registry key MUST have exactly one owner: the plugin that decides what the key means and what a value under it has to look like. The owner's package MUST publish the structural contract of the values registered under that key.
+- Every plugin that reads a key, and every plugin that registers a value under one, MUST be able to type that value by importing the owner's published contract rather than by restating it. A plugin contributing under a key it does not own publishes nothing of its own for that key; it imports the owner's contract, which is the only thing that makes its contribution and the owner's reading of it the same shape.
 - A registry key MUST be the import specifier its own contract is published at, so the string a consumer passes to the read and the string it imports the contract from are one string rather than two that have to be kept agreeing.
-- This rule MUST hold for every plugin, whichever package ships it. A key belonging to something bundled with `tx` is a specifier `tx` publishes; a key belonging to something shipped by any other plugin is a specifier that plugin's own package publishes.
+- This rule MUST hold for every owner, whichever package ships it. A key owned by something bundled with `tx` is a specifier `tx` publishes; a key owned by any other plugin is a specifier that plugin's own package publishes. Ownership is what the specifier already encodes, so a plugin cannot own a key it could not publish.
 - Keys therefore inherit the package namespace, in which a name already has exactly one owner, so two unrelated providers cannot collide by accident. The host gains no part in this: [Generic Registry](#generic-registry) continues to treat a key as an opaque string compared by exact equality, and MUST NOT begin reserving, parsing, namespacing, or resolving one.
 - A published contract MUST expose types alone and MUST NOT provide a runtime API, exactly as the public plugin contract does not.
 - A published contract MUST NOT require its consumer to obtain a value any way other than reading the registry key, and publishing it MUST NOT establish, imply, or check any runtime relationship between that key and the values registered under it. [Generic Registry](#generic-registry) continues to own the read, and the type a consumer asserts there remains a caller-side assertion the host never verifies.
@@ -216,8 +217,8 @@ The unit is the **key**, not the capability. A key whose value *is* a capability
 #### Scenario: A contributor types what it registers
 
 - **GIVEN** a key whose values are contributed to a capability rather than being one
-- **WHEN** a plugin registers a value under that key
-- **THEN** it types that value by importing the contract published at that key, exactly as a plugin reading the key would
+- **WHEN** a plugin that does not own that key registers a value under it
+- **THEN** it types that value by importing the contract the key's owner publishes, and publishes no contract of its own for that key
 
 #### Scenario: Unrelated providers do not collide
 

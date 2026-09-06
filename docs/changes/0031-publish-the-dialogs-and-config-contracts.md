@@ -42,7 +42,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - Each capability's `exports` entry, `files` entries, and consumer-fixture import follow the pattern established by [Change 0030](./0030-publish-bundled-capability-contracts.md); the exact packed-file assertion in `test/plugin-consumer.test.ts` MUST be updated in the same PR as each addition.
 - Bundled consumers, `demo/scenarios.ts`, and the capability tests stop declaring their own copies and import the published contracts. `plugins/dialogs/theme.ts` and `plugins/grid/dialogs.ts` are copies of another capability's vocabulary and lose their type declarations, keeping only their capability lookups.
 - The dialogs and config sections of [the plugin guide](../manual/plugins.md) instruct consumers to declare the shape locally and state that it is not a public export; both MUST instead tell them to import it. The guide describes shipped behavior, so it changes with the code rather than ahead of it.
-- After this change no capability vocabulary is declared twice in the repository, which is the observable this change is finished by.
+- After this change no contract type is declared outside the published contract module that owns it, which is the observable this change is finished by. The file lists in this document are illustrative of where those declarations sit today; the search is authoritative, because two of these lists have already been found incomplete.
 
 #### Scenario: The config contract carries no implementation
 
@@ -62,7 +62,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 Two contract modules — `plugins/config/contract.ts` and `plugins/dialogs/contract.ts` — authored the way [Change 0030](./0030-publish-bundled-capability-contracts.md) authors the first two: type declarations alone, imported type-only by their own providers so each registered value is checked against the contract it publishes. Two `exports` entries, their `files` entries, two consumer-fixture imports.
 
-The cleanup is the larger half. `plugins/grid/dialogs.ts`, `plugins/dialogs/theme.ts`, `plugins/marketplace/configured.ts`, `demo/scenarios.ts`, and five test files each hold a restated copy of some capability's vocabulary; every one of them becomes an import.
+The cleanup is the larger half. The sites are found by searching for the declarations rather than worked from a list, because a hand-kept list has already gone stale twice: `plugins/grid/dialogs.ts`, `plugins/dialogs/theme.ts`, `plugins/marketplace/configured.ts`, `demo/scenarios.ts`, and every test declaring a contract type — today `config-plugin`, `marketplace-plugin`, `dialogs-plugin`, `theme-plugin`, `grid-plugin`, and `grid-select`. Every one becomes an import.
 
 ### Decisions
 
@@ -99,7 +99,7 @@ The cleanup is the larger half. `plugins/grid/dialogs.ts`, `plugins/dialogs/them
   - [ ] Have `plugins/config/index.ts` import it type-only and register a value checked against `Config`
   - [ ] Reduce `plugins/marketplace/configured.ts` to importing the published contract, keeping `requireConfigCapability` and the marketplace's own key and value types
   - [ ] `exports` entry `./config`, its `files` entries, the packed-file assertion, and the consumer-fixture import
-  - [ ] `test/config-plugin.test.ts` imports the published contract
+  - [ ] `test/config-plugin.test.ts` and `test/marketplace-plugin.test.ts` import the published contract; the latter declares its own `ConfigValidator` today
 - [ ] Publish the dialogs contract
   - [ ] Rename the `dialogs` key to `@fx/tx/dialogs` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
   - [ ] `plugins/dialogs/contract.ts` declaring the request, option, field, filter, expand, and result types and `Dialogs`, as types alone
@@ -111,6 +111,7 @@ The cleanup is the larger half. `plugins/grid/dialogs.ts`, `plugins/dialogs/them
   - [ ] `plugins/dialogs/theme.ts` imports the published theming contract and keeps only its lookup
   - [ ] `demo/scenarios.ts` imports the published dialogs contract instead of restating it
   - [ ] `test/dialogs-plugin.test.ts` and `test/demo-scenarios.test.ts` import the published contracts
+  - [ ] Sweep for any remaining declaration rather than trusting the lists above, and make the completion check a search whose empty result is the evidence
   - [ ] Rewrite the dialogs and config sections of [the plugin guide](../manual/plugins.md) to instruct importing rather than declaring locally, and drop the "not a public export" sentences
   - [ ] Assert that no capability contract type is declared outside its published contract module
 
