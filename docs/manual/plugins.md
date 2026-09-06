@@ -234,6 +234,21 @@ const plugin: Plugin = ({ command, context }) => {
 export default plugin;
 ```
 
+Every specifier tx publishes — `@fx/tx/plugin` and each capability contract below — is published as TypeScript source under a `types` condition rather than as emitted declarations. That asks one thing of your own `tsconfig.json`: `moduleResolution` must be a mode that reads a package's `exports` map, since that map is the only place these subpaths are described. `bundler` needs nothing beside it:
+
+```json
+{
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "Bundler"
+  }
+}
+```
+
+`node16` and `nodenext` work as well, under two conditions TypeScript imposes on those modes rather than on this package. `module` must be set to the matching `Node16` or `NodeNext` — a mismatch is rejected before anything is type-checked — and the importing file must itself be an ES module, because a type-only import of an ES module from a CommonJS file otherwise wants a `resolution-mode` attribute; `"type": "module"` in your own `package.json`, or an `.mts` file, settles that. The legacy `node` resolution ignores `exports` entirely, so no subpath resolves under it.
+
+Nothing else is required. The contracts name one another by `.ts` path internally, and TypeScript follows those without `allowImportingTsExtensions` — you import `@fx/tx/grid`, not a path into it. Set that option only if your *own* sources import each other by `.ts` path, and know what it costs: TypeScript accepts it only alongside `noEmit` or `emitDeclarationOnly`, so a plugin emitting its own JavaScript or declarations cannot have it, and nothing about these contracts asks it to.
+
 The initialization API provides an immutable `identity`, read-only `env`, the generic command `context`, shared `dependencies`, `command(build)`, `plugin(childDefinition)`, `register(key, value)`, `registrations(key)`, `update(participant)`, and `updaters()`. The `context` carries process streams, environment, working directory, and the owning plugin identity, so your actions keep whatever signature you give them. Loading, initialization, and command actions may be asynchronous.
 
 Use the initialization API's `dependencies.react` and `dependencies.ink` instead of importing separate runtime copies; the injected values share the host's React and Ink instances and include tx and dependency version metadata.
@@ -333,42 +348,24 @@ There is no `tx config` command, key listing or deletion API, schema language, m
 
 ## Use the bundled theme capability
 
-The namespace-free bundled theme provider registers one internal capability under the exact opaque key `@fx/tx/theme`. It is the one place `tx` decides what its terminal output looks like: a surface names what a piece of text *is* and the theme answers with an appearance. Its local structural shape is:
+The namespace-free bundled theme provider registers one capability under the exact opaque key `@fx/tx/theme`. It is the one place `tx` decides what its terminal output looks like: a surface names what a piece of text *is* and the theme answers with an appearance. Import the contract from that same key rather than restating it — the string you read the capability from and the string you import its shape from are one string, so a contract that moves fails your build rather than your command:
 
 ```ts
-type Hue =
-  | "black" | "red" | "green" | "yellow"
-  | "blue" | "magenta" | "cyan" | "white"
-  | "gray"
-
-type Appearance = {
-  readonly dim?: boolean
-  readonly bold?: boolean
-  readonly inverse?: boolean
-  readonly hue?: Hue
-}
-
-type ThemeVariable =
-  | "chrome" | "content" | "cursor" | "marker"
-  | "muted" | "strong"
-  | "positive" | "caution" | "danger"
-
-type Theme = {
-  appearance(variable: ThemeVariable): Appearance
-}
-
-// A partial override, registered under `@fx/tx/theme-override` by any plugin.
-type ThemeOverride = Partial<Record<ThemeVariable, Appearance>>
-
-type Theming = {
-  theme(
-    stream: { readonly isTTY?: boolean },
-    options?: { readonly colour?: boolean },
-  ): Theme
-}
+import type {
+  Appearance,
+  Hue,
+  Theme,
+  ThemeVariable,
+  Theming,
+} from "@fx/tx/theme";
+// A partial override any plugin may contribute, published at the separate key
+// it is registered under.
+import type { ThemeOverride } from "@fx/tx/theme-override";
 ```
 
-A bundled consumer declares that compatible type locally and reads `registrations<Theming>("@fx/tx/theme")` inside its command action, after initialization has committed every provider. It must find **exactly one** — as a config consumer already must, through the same rule `requireConfigCapability` applies, and unlike the dialogs capability, where the consumer owns what an absent capability means: none and several are both errors naming the count, and there is deliberately no fallback, because a consumer that fell back would have to carry its own copy of the default theme. The theme plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
+`Theming` is what the key carries: `theme(stream, options?)` resolving a `Theme`, which answers `appearance(variable)` with an `Appearance` of optional `dim`, `bold`, `inverse`, and `hue`. A `ThemeVariable` is one of nine semantic roles — `chrome`, `content`, `cursor`, `marker`, `muted`, `strong`, `positive`, `caution`, and `danger` — and a `Hue` is one of nine colours: the eight ANSI ones plus `gray`. Background hues, 256-colour, and truecolour are deliberately absent. Every member is documented where it is declared, and the contract is types only: it publishes no way to obtain a theme, which stays the registry's job.
+
+A consumer reads `registrations<Theming>("@fx/tx/theme")` inside its command action, after initialization has committed every provider. It must find **exactly one** — as a config consumer already must, through the same rule `requireConfigCapability` applies, and unlike the dialogs capability, where the consumer owns what an absent capability means: none and several are both errors naming the count, and there is deliberately no fallback, because a consumer that fell back would have to carry its own copy of the default theme. The theme plugin is composed by default, so a `tx` without it is misconfigured rather than degraded.
 
 A theme is resolved for the stream a surface draws to rather than handed out ready-made, because whether hues are emitted depends on that stream. Only the stream's TTY-ness is read; the capability never writes to it, retains it, or exposes a terminal or renderer. A resolved theme answers with an appearance alone and never says whether hues were enabled — that decision is already inside every appearance it returns.
 
@@ -469,54 +466,25 @@ Both dialogs are built on the same render session and obey the same cleanup cont
 
 ## Use the bundled grid capability
 
-The namespace-free bundled grid provider registers one internal capability under the exact opaque key `grid`. It exists so that a plugin with rows to show does not have to own column measurement, display-width arithmetic, colour resolution, canvas sizing, or a renderer lifecycle. Its current local structural shape is:
+The namespace-free bundled grid provider registers one capability under the exact opaque key `@fx/tx/grid`. It exists so that a plugin with rows to show does not have to own column measurement, display-width arithmetic, colour resolution, canvas sizing, or a renderer lifecycle. Its contract is published at that same key, so you import it rather than restating it:
 
 ```ts
-type Cell = {
-  readonly text: string
-  readonly variable?: ThemeVariable
-  readonly align?: "start" | "end"
-}
-
-type Row = readonly (Cell | string)[]
-
-type OutputStream = {
-  write(chunk: string): unknown
-  readonly columns?: number
-  readonly isTTY?: boolean
-}
-
-type GridAction<A> = {
-  readonly label: string
-  readonly value: A
-}
-
-type GridSelectRow<T, A> = {
-  readonly cells: Row
-  readonly value: T
-  readonly actions?: readonly GridAction<A>[]
-}
-
-type Grid = {
-  print(request: {
-    readonly stream: OutputStream
-    readonly layout?: "table" | "flow"
-    readonly headers?: readonly string[]
-    readonly rows: readonly Row[]
-    readonly empty?: string
-    readonly summary?: string
-  }): void
-  select<T, A>(request: {
-    readonly message: string
-    readonly headers?: readonly string[]
-    readonly rows: readonly GridSelectRow<T, A>[]
-  }): Promise<
-    { readonly value: T; readonly action?: A } | undefined
-  >
-}
+import type {
+  Cell,
+  Grid,
+  GridAction,
+  GridRequest,
+  GridSelection,
+  GridSelectRequest,
+  GridSelectRow,
+  OutputStream,
+  Row,
+} from "@fx/tx/grid";
 ```
 
-A bundled consumer declares that compatible type locally and reads `registrations<Grid>("grid")` inside its command action, after initialization has committed every provider. The provider and this shape are implementation details for bundled plugins, not public or stable exports from `@fx/tx/plugin`. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
+`Grid` is what the key carries: `print(request)` writing a `GridRequest` — a `stream`, an optional `layout` of `"table"` or `"flow"`, optional `headers`, the `rows`, an optional `empty` message, and an optional `summary` — and `select(request)` driving a `GridSelectRequest` of a `message`, optional `headers`, and `GridSelectRow`s, each carrying its `cells`, the `value` identifying it, and the `GridAction`s it offers, resolving to a `GridSelection` of the chosen `value` and `action` or to `undefined`. A `Row` is a list of `Cell`s or bare strings, and an `OutputStream` is anything that can be written to and may report its `columns` and `isTTY`.
+
+A consumer reads `registrations<Grid>("@fx/tx/grid")` inside its command action, after initialization has committed every provider. The contract is types only, and it declares a cell's `variable` as [Theming](#use-the-bundled-theme-capability)'s own `ThemeVariable` by importing `@fx/tx/theme` rather than restating that vocabulary, so a variable renamed there is renamed in every cell that can name one. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
 
 A cell supplied as a bare string is exactly the cell that string would make with no variable and no alignment, so a row may mix the two notations freely. An absent `variable` names `content`; an absent `align` names `start`. Every string the grid renders — a cell's text, a header, the empty message, the summary, a selecting request's message, and an action's label — has its control characters removed before it is measured or drawn, and that removal is applied to every string it hands the dialogs capability too, so text carrying a newline or an escape sequence can neither break the layout apart nor reach the terminal as a command, and nothing else about the string is changed. Text is measured in terminal display columns rather than code units. A cell left empty after that removal renders as `—`; a header, an empty message, and a summary are the consumer's to leave blank and never get the placeholder. A grid's column count is the most cells any one row supplies, or the number of headers where there are more of those, and a short row's missing trailing cells render as the placeholder rather than shortening the row.
 
@@ -538,7 +506,7 @@ Once the promise settles, the terminal is yours. `select` does not settle until 
 const plugin: Plugin = ({ command, context, registrations }) => {
   command((namespace) => {
     namespace.action(async () => {
-      const [grid] = registrations<Grid>("grid");
+      const [grid] = registrations<Grid>("@fx/tx/grid");
       if (!grid) throw new Error("grid capability missing");
 
       const chosen = await grid.select({
@@ -648,7 +616,7 @@ Commands, child definitions, generic registry entries, and update participants c
 
 Bundled feature plugins live under `plugins/<name>/`, conventionally at `plugins/<name>/index.ts`. Only the root `cli.ts` composition root selects and orders defaults. Modules under `src/` must remain feature-neutral and must not import or name bundled plugins; a bundled plugin's complete module graph must not import private core implementation under `src/`.
 
-Use type-only imports from `@fx/tx/plugin`, standard Node.js or Bun APIs, and plugin-owned modules. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
+Use type-only imports from `@fx/tx/plugin` and from every capability contract the package publishes — `@fx/tx/theme`, `@fx/tx/theme-override`, and `@fx/tx/grid` today — standard Node.js or Bun APIs, and plugin-owned modules. A published specifier is the one way a bundled plugin may name another bundled plugin's vocabulary: it carries types alone and is erased, so it shares no runtime module graph, while a relative path into another plugin's directory is rejected. None of them may be loaded at run time or imported from under `src/`. Plugin-owned nonliteral dynamic imports of configured entry paths are allowed.
 
 ## Validate changes
 

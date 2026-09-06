@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { Row } from "@fx/tx/grid";
 import {
   flowItems,
   headerCells,
@@ -21,7 +22,6 @@ import {
   padTo,
   tableLines,
 } from "../plugins/grid/geometry.ts";
-import type { Row } from "../plugins/grid/types.ts";
 
 /** One laid-out line as the text it prints. */
 function text(line: Line): string {

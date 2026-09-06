@@ -1,5 +1,5 @@
-import type { ThemeVariable } from "./theme.ts";
-import type { Cell, Row } from "./types.ts";
+import type { ThemeVariable } from "@fx/tx/theme";
+import type { Cell, Row } from "./contract.ts";
 
 /**
  * What a consumer's text becomes before anything measures or draws it.

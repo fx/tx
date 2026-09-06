@@ -1,11 +1,29 @@
-import type { ThemeVariable } from "./theme.ts";
-
 /**
- * The local structural contract the bundled grid provider and its bundled
- * consumers share. It deliberately lives beside the provider rather than in
- * `@fx/tx/plugin`: the capability is internal, so core carries no grid
- * vocabulary and nothing here is a public export.
+ * The published grid contract: everything a plugin needs to type the value it
+ * reads from the `@fx/tx/grid` registry key, and nothing else.
+ *
+ * It is published at that same specifier, so the string a consumer passes to
+ * the read and the string it imports this file from are one string rather than
+ * two that have to be kept agreeing. A consumer that imported this instead of
+ * restating it learns about a contract that moved when it builds rather than
+ * when its command reaches for a member that is no longer there.
+ *
+ * It declares types alone — one type-only import, no statements, nothing that
+ * survives compilation — which is what lets it be published under a `types`
+ * condition with no runtime condition beside it. The capability's value comes
+ * from the registry and must keep coming from there: nothing here prints,
+ * measures, or knows a renderer.
+ *
+ * The theme vocabulary arrives through `@fx/tx/theme` rather than through a
+ * relative path into the theme plugin. A relative import is the escape the
+ * boundary test exists to forbid, because it would put two bundled plugins in
+ * one runtime module graph; the published path shares no graph at all, since
+ * it is erased. It is the mechanism `@fx/tx/plugin` already uses between the
+ * same two directories, and it means a variable renamed in one place is
+ * renamed everywhere a cell can name one.
  */
+
+import type { ThemeVariable } from "@fx/tx/theme";
 
 /** One cell of a grid. `variable` and `align` describe a *printed* cell; the
  * selecting half of the capability drops both, so a consumer should not expect
@@ -93,14 +111,19 @@ export type GridSelectRequest<T, A> = {
 /** What a selection carries: the chosen row's value, and the chosen action's
  * where the row declared any. An absent `action` means the chosen row offered
  * none — it is never what backing out of an actions column produces, because
- * backing out returns to the row list rather than selecting the row. */
+ * backing out returns to the row list rather than selecting the row.
+ *
+ * Absent means the key is not there, so a consumer tells the two apart with
+ * `"action" in chosen` rather than `chosen.action === undefined`: an action's
+ * value is the consumer's own, so `undefined` is a value it may legitimately
+ * give one. */
 export type GridSelection<T, A> = {
   readonly value: T;
   readonly action?: A;
 };
 
-/** The value registered under `grid`: cells printed once, or driven. A grid is
- * one or the other in a call, never both. */
+/** The value registered under `@fx/tx/grid`: cells printed once, or driven. A
+ * grid is one or the other in a call, never both. */
 export type Grid = {
   print(request: GridRequest): void;
   select<T, A>(

@@ -1,3 +1,4 @@
+import type { ThemeVariable } from "@fx/tx/theme";
 import {
   columnCount,
   displayWidth,
@@ -7,8 +8,7 @@ import {
   sanitize,
   tableCells,
 } from "./cells.ts";
-import type { ThemeVariable } from "./theme.ts";
-import type { Row } from "./types.ts";
+import type { Row } from "./contract.ts";
 
 /**
  * Every layout decision a grid makes, as pure functions over values: column

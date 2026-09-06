@@ -53,6 +53,7 @@ test("the packed package installs a standalone CLI and every published contract"
       "README.md",
       "dist/tx",
       "package.json",
+      "plugins/grid/contract.ts",
       "plugins/theme/contract.ts",
       "plugins/theme/override-contract.ts",
       "src/context.ts",
@@ -87,6 +88,7 @@ test("the packed package installs a standalone CLI and every published contract"
       writeFile(
         join(consumerRoot, "plugin.ts"),
         `import type { Command, Plugin } from "@fx/tx/plugin";
+import type { Grid, GridSelectRow, Row } from "@fx/tx/grid";
 import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
 import type { ThemeOverride } from "@fx/tx/theme-override";
 
@@ -104,6 +106,17 @@ const loud: Hue = "magenta";
 const emphasis: ThemeVariable = "strong";
 const override: ThemeOverride = { [emphasis]: { bold: true, hue: loud } };
 
+// The grid's vocabulary is declared over the theme's, so importing it makes
+// the consumer resolve one published contract through another. That is the
+// closure the packed file list above stands for: a cell naming a theme
+// variable type checks here only if the tarball carries both contracts.
+const cells: Row = ["greeter", { text: "ready", variable: emphasis }];
+const row: GridSelectRow<string, string> = {
+  cells,
+  value: "greeter",
+  actions: [{ label: "greet", value: "greet" }],
+};
+
 const plugin: Plugin = ({ command, context, register, registrations }) => {
   register<Greeter>("greeter", greeter);
   // The key and the specifier its contract is imported from are one string.
@@ -115,7 +128,7 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
       .description("Say hello")
       .argument("[name]", "who to greet")
       .option("--loud", "shout the greeting")
-      .action((name: string | undefined, options: { loud?: boolean }) => {
+      .action(async (name: string | undefined, options: { loud?: boolean }) => {
         const available: readonly Greeter[] = registrations<Greeter>("greeter");
         const greeting = available[0]?.greet(name) ?? greeter.greet(name);
         // Read while the command runs, exactly as a bundled consumer does, and
@@ -125,6 +138,12 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
         const appearance: Appearance = theme?.appearance(emphasis) ?? {};
         const shown = appearance.bold ? greeting.toUpperCase() : greeting;
         context.stdout.write(\`\${options.loud ? shown.toUpperCase() : shown}\\n\`);
+        // Read the same way and typed the same way: the grid's key is the
+        // specifier its contract came from, so a printed grid and a driven one
+        // are both checked against what the package published.
+        const grid: Grid | undefined = registrations<Grid>("@fx/tx/grid")[0];
+        grid?.print({ stream: context.stdout, rows: [cells] });
+        await grid?.select({ message: greeting, rows: [row] });
       });
   });
 };
@@ -132,6 +151,11 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
 export default plugin;
 `,
       ),
+      // The whole consumer, its own plugin sources included. Those name one
+      // another by `.ts` path, which is what `allowImportingTsExtensions` is
+      // for here — a property of how this consumer writes its own imports, not
+      // something importing the published subpaths asks for. The two projects
+      // below are what pin that distinction.
       writeFile(
         join(consumerRoot, "tsconfig.json"),
         JSON.stringify({
@@ -144,6 +168,44 @@ export default plugin;
             allowImportingTsExtensions: true,
           },
           include: ["plugin.ts", "plugins/**/*.ts"],
+        }),
+      ),
+      // Exactly the settings [the plugin guide](../docs/manual/plugins.md)
+      // tells a consumer of the published subpaths it needs, over the module
+      // that imports all four of them and nothing else: a `moduleResolution`
+      // that reads an `exports` map, with no `allowImportingTsExtensions`
+      // beside it. Requiring that option would force `noEmit` or
+      // `emitDeclarationOnly` on every consumer, so a raw-TypeScript `types`
+      // target growing a need for it is a change to what the guide promises,
+      // and it fails here rather than in a reader's project.
+      writeFile(
+        join(consumerRoot, "tsconfig.published.json"),
+        JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            noEmit: true,
+            target: "ESNext",
+            module: "Preserve",
+            moduleResolution: "Bundler",
+          },
+          include: ["plugin.ts"],
+        }),
+      ),
+      // The other resolution mode the guide names, under the two conditions it
+      // states TypeScript imposes: `module` matching the resolution, and an
+      // importer that is an ES module — which the consumer's own `type`:
+      // `module` above supplies.
+      writeFile(
+        join(consumerRoot, "tsconfig.node16.json"),
+        JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            noEmit: true,
+            target: "ESNext",
+            module: "Node16",
+            moduleResolution: "node16",
+          },
+          include: ["plugin.ts"],
         }),
       ),
     ]);
@@ -173,14 +235,20 @@ export default plugin;
       }),
     ).toEqual({ stdout: `${packageMetadata.version}\n`, stderr: "" });
 
-    run(
-      [
-        join(repositoryRoot, "node_modules", ".bin", "tsc"),
-        "--project",
-        consumerRoot,
-      ],
+    for (const project of [
       consumerRoot,
-    );
+      "tsconfig.published.json",
+      "tsconfig.node16.json",
+    ]) {
+      run(
+        [
+          join(repositoryRoot, "node_modules", ".bin", "tsc"),
+          "--project",
+          project,
+        ],
+        consumerRoot,
+      );
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }

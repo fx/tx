@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import type {
+  Grid,
+  GridRequest,
+  GridSelection,
+  GridSelectRequest,
+} from "@fx/tx/grid";
 import { demoPlugin } from "../demo/index.ts";
 import {
   type Dialogs,
-  type Grid,
-  type GridRequest,
-  type GridSelection,
-  type GridSelectRequest,
   type InputRequest,
   order,
   type PrintRequest,
@@ -79,7 +81,7 @@ function stubGrid(asked: Asked[]): PluginDefinition {
     load:
       () =>
       ({ register }) => {
-        register<Grid>("grid", {
+        register<Grid>("@fx/tx/grid", {
           print({ stream: _stream, ...request }: GridRequest) {
             asked.push({ kind: "grid", request });
           },

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import type { Grid, GridSelection, GridSelectRequest } from "@fx/tx/grid";
 import { animationInterval } from "../plugins/dialogs/animation.ts";
 import dialogsPlugin from "../plugins/dialogs/index.ts";
 import type { CellOption } from "../plugins/grid/dialogs.ts";
@@ -9,26 +10,15 @@ import {
   selection,
   selectRequest,
 } from "../plugins/grid/select.ts";
-import type {
-  GridRequest,
-  GridSelection,
-  GridSelectRequest,
-} from "../plugins/grid/types.ts";
 import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
 
 /**
- * The grid capability as a consumer declares it for itself: a local structural
- * type, because the capability is internal and nothing about grids is imported
- * across a plugin boundary or exported publicly.
+ * The capability is typed by the contract the package publishes at the key it
+ * is read from, exactly as an external consumer types it, rather than by a
+ * local structural copy that would compile whatever the provider did.
  */
-type Grid = {
-  print(request: GridRequest): void;
-  select<T, A>(
-    request: GridSelectRequest<T, A>,
-  ): Promise<GridSelection<T, A> | undefined>;
-};
 
 const ESCAPE = String.fromCharCode(27);
 const CARRIAGE_RETURN = "\r";
@@ -218,7 +208,7 @@ async function drive<T, A>(
       ({ command, registrations }) => {
         command((namespace) =>
           namespace.action(async () => {
-            const [grid] = registrations<Grid>("grid");
+            const [grid] = registrations<Grid>("@fx/tx/grid");
             if (!grid)
               throw new Error("the grid capability was not registered");
             try {
