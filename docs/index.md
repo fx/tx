@@ -46,4 +46,4 @@
 | 0028 | [Add the Grid Plugin](changes/0028-add-the-grid-plugin.md) | [Grid](specs/grid/) | complete | 0026 |
 | 0029 | [Add Interactive Grid Row Actions](changes/0029-add-interactive-grid-row-actions.md) | [Grid](specs/grid/) | complete | 0027, 0028 |
 | 0030 | [Publish Bundled Capability Contracts](changes/0030-publish-bundled-capability-contracts.md) | [Plugin System](specs/plugin-system/) | complete | 0026, 0028 |
-| 0031 | [Publish the Dialogs and Config Contracts](changes/0031-publish-the-dialogs-and-config-contracts.md) | [Dialogs](specs/dialogs/) | draft | 0030 |
+| 0031 | [Publish the Dialogs and Config Contracts](changes/0031-publish-the-dialogs-and-config-contracts.md) | [Dialogs](specs/dialogs/) | complete | 0030 |

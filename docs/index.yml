@@ -273,6 +273,6 @@ changes:
     path: changes/0031-publish-the-dialogs-and-config-contracts.md
     description: Publish the dialogs and config contracts over the established mechanism and retire every remaining restated copy of a capability's vocabulary.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0030"
