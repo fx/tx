@@ -186,15 +186,17 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 
 ### Published Capability Contracts
 
-A capability's runtime value reaches a consumer through the registry, which carries no types. Its *shape* is a separate question, and the answer is that the package publishes it. A consumer that had to restate the shape would be maintaining an unchecked copy of somebody else's contract: the copy compiles whatever the provider does, so a contract that moves is discovered when a command fails rather than when the consumer is built.
+A registered value reaches the plugin that wants it through the registry, which carries no types. Its *shape* is a separate question, and the answer is that the package publishes it. A plugin that had to restate the shape would be maintaining an unchecked copy of somebody else's contract: the copy compiles whatever the other side does, so a contract that moves is discovered when a command fails rather than when the plugin is built.
 
-- Every capability a plugin registers MUST have its structural contract published from the package that ships that plugin, and a consumer MUST be able to type the capability by importing the published contract rather than by restating it.
+The unit is the **key**, not the capability. A key whose value *is* a capability and a key whose values are contributions *to* one — an override, say — both need their shape published, because the plugin registering under a key has to type what it registers just as the plugin reading it has to type what it gets.
+
+- Every key a plugin registers under MUST have the structural contract of the values registered under it published from the package that ships that plugin, and both a plugin reading that key and a plugin registering under it MUST be able to type the value by importing that contract rather than by restating it.
 - A registry key MUST be the import specifier its own contract is published at, so the string a consumer passes to the read and the string it imports the contract from are one string rather than two that have to be kept agreeing.
-- This rule MUST hold for every provider, whichever package ships it. A capability bundled with `tx` registers under a specifier `tx` publishes; a capability shipped by any other plugin registers under a specifier that plugin's own package publishes.
+- This rule MUST hold for every plugin, whichever package ships it. A key belonging to something bundled with `tx` is a specifier `tx` publishes; a key belonging to something shipped by any other plugin is a specifier that plugin's own package publishes.
 - Keys therefore inherit the package namespace, in which a name already has exactly one owner, so two unrelated providers cannot collide by accident. The host gains no part in this: [Generic Registry](#generic-registry) continues to treat a key as an opaque string compared by exact equality, and MUST NOT begin reserving, parsing, namespacing, or resolving one.
 - A published contract MUST expose types alone and MUST NOT provide a runtime API, exactly as the public plugin contract does not.
 - A published contract MUST NOT require its consumer to obtain a value any way other than reading the registry key, and publishing it MUST NOT establish, imply, or check any runtime relationship between that key and the values registered under it. [Generic Registry](#generic-registry) continues to own the read, and the type a consumer asserts there remains a caller-side assertion the host never verifies.
-- Capability vocabulary MUST NOT enter `src/` or the public `@fx/tx/plugin` contract; a capability is published beside that contract rather than inside it.
+- A published contract's vocabulary MUST NOT enter `src/` or the public `@fx/tx/plugin` contract; it is published beside that contract rather than inside it.
 - The package's published files MUST be closed over everything its published contracts reach, so every published subpath type checks against an installed package alone.
 - A published contract is public API. Removing one, removing a member of one, or narrowing what a member accepts MUST be treated as a breaking change to the package.
 - Boundary enforcement MUST hold a published subpath to what it already holds the public plugin contract to: it MUST be imported for types only, MUST NOT be loaded at runtime, and MUST NOT be imported by any module under `src/`.
@@ -210,6 +212,12 @@ A capability's runtime value reaches a consumer through the registry, which carr
 - **GIVEN** a plugin shipped by some other package registers a capability and publishes its contract
 - **WHEN** a second plugin depends on that package and consumes the capability
 - **THEN** it reads and imports the one specifier that package publishes, by the same rule a bundled capability follows and with no mechanism particular to either
+
+#### Scenario: A contributor types what it registers
+
+- **GIVEN** a key whose values are contributed to a capability rather than being one
+- **WHEN** a plugin registers a value under that key
+- **THEN** it types that value by importing the contract published at that key, exactly as a plugin reading the key would
 
 #### Scenario: Unrelated providers do not collide
 
