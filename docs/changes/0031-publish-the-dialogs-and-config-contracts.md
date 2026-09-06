@@ -42,7 +42,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - Each capability's `exports` entry, `files` entries, and consumer-fixture import follow the pattern established by [Change 0030](./0030-publish-bundled-capability-contracts.md); the exact packed-file assertion in `test/plugin-consumer.test.ts` MUST be updated in the same PR as each addition.
 - Bundled consumers, `demo/scenarios.ts`, and the capability tests stop declaring their own copies and import the published contracts. `plugins/dialogs/theme.ts` and `plugins/grid/dialogs.ts` are copies of another capability's vocabulary and lose their type declarations, keeping only their capability lookups.
 - The dialogs and config sections of [the plugin guide](../manual/plugins.md) instruct consumers to declare the shape locally and state that it is not a public export; both MUST instead tell them to import it. The guide describes shipped behavior, so it changes with the code rather than ahead of it.
-- After this change no contract type is declared outside the published contract module that owns it, which is the observable this change is finished by. The file lists in this document are illustrative of where those declarations sit today; the search is authoritative, because two of these lists have already been found incomplete.
+- After this change no contract type is declared in TypeScript source — `src/`, `plugins/`, `demo/`, `test/` — outside the published contract module that owns it, which is the observable this change is finished by. The living specs are deliberately excluded: [Config](../specs/config/), [Dialogs](../specs/dialogs/), [Theming](../specs/theming/), and [Grid](../specs/grid/) each state their contract as a conceptual shape, which is the specification of the contract rather than a copy of it, and none of them is a declaration an implementer may delete. Within that file set the file lists in this document are illustrative of where the declarations sit today and the search is authoritative, because two of these lists have already been found incomplete.
 
 #### Scenario: The config contract carries no implementation
 
@@ -52,9 +52,9 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 #### Scenario: No capability vocabulary is declared twice
 
-- **GIVEN** the repository after this change
+- **GIVEN** the repository's TypeScript source after this change, excluding the living specs' conceptual shapes
 - **WHEN** every declaration of a capability's contract types is counted
-- **THEN** each type is declared once, in the published contract module of the capability that owns it
+- **THEN** each type is declared once, in the published contract module that owns it
 
 ## Design
 
@@ -78,7 +78,7 @@ The cleanup is the larger half. The sites are found by searching for the declara
   - **Why**: config is the smaller contract and its extraction from `plugins/marketplace/configured.ts` is the sharper demonstration that publication removes a real coupling rather than adding a file.
   - **Alternatives considered**: either order works; this one puts the clearer win first.
 
-- **Decision**: treat "no capability vocabulary declared twice" as this change's completion test.
+- **Decision**: treat "no capability vocabulary declared twice in TypeScript source" as this change's completion test, with the living specs' conceptual shapes deliberately outside it.
   - **Why**: the drift this whole effort is aimed at comes from copies, and a copy left behind after the contract is published is worse than one left before it — it looks maintained. Counting declarations is something a reviewer can check and a test can assert.
   - **Alternatives considered**: leaving the test copies alone as deliberate independent restatements, rejected because a test that restates the contract stops testing that the provider matches it.
 
@@ -113,7 +113,7 @@ The cleanup is the larger half. The sites are found by searching for the declara
   - [ ] `test/dialogs-plugin.test.ts` and `test/demo-scenarios.test.ts` import the published contracts
   - [ ] Sweep for any remaining declaration rather than trusting the lists above, and make the completion check a search whose empty result is the evidence
   - [ ] Rewrite the dialogs and config sections of [the plugin guide](../manual/plugins.md) to instruct importing rather than declaring locally, and drop the "not a public export" sentences
-  - [ ] Assert that no capability contract type is declared outside its published contract module
+  - [ ] Assert that no capability contract type is declared in `src/`, `plugins/`, `demo/`, or `test/` outside its published contract module, leaving the specs' conceptual shapes alone
 
 ## Open Questions
 
