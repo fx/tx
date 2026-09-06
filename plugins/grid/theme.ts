@@ -48,8 +48,8 @@ export type Theme = {
   appearance(variable: ThemeVariable): Appearance;
 };
 
-/** The capability registered under `theme`. A theme is resolved for the stream
- * the surface draws to, because colour enablement depends on it. */
+/** The capability registered under `@fx/tx/theme`. A theme is resolved for
+ * the stream the surface draws to, because colour enablement depends on it. */
 export type Theming = {
   theme(
     stream: { readonly isTTY?: boolean },
@@ -70,7 +70,7 @@ export type Theming = {
 export function requireThemeCapability(
   registrations: <T>(key: string) => readonly T[],
 ): Theming {
-  const themes = registrations<Theming>("theme");
+  const themes = registrations<Theming>("@fx/tx/theme");
   if (themes.length !== 1) {
     throw new Error(
       `Expected exactly one theme capability, but found ${themes.length}`,

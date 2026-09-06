@@ -1,46 +1,29 @@
 /**
- * The theme's vocabulary: what an appearance may say, what the variables are,
- * and what each of them looks like before anything overrides it.
+ * What each theme variable looks like before anything overrides it.
+ *
+ * The vocabulary itself — what an appearance may say and what the variables
+ * are — is the published contract's, imported type-only from beside this file.
+ * This module supplies only the values behind it, which are deliberately not
+ * published: a consumer that can name a variable still resolves one through
+ * the capability rather than by reading a table.
  *
  * Nothing here draws, reads a stream, or knows a renderer. A variable names
  * what a piece of text *is*; the appearance it resolves to is the only place
  * `tx` decides what that looks like.
  */
 
-/** The hues a theme may name: the eight ANSI colours plus `gray`. Background
- * hues, 256-colour, and truecolour are deliberately absent — a palette wide
- * enough to be precise is a palette wide enough to be inconsistent. */
-export type Hue =
-  | "black"
-  | "red"
-  | "green"
-  | "yellow"
-  | "blue"
-  | "magenta"
-  | "cyan"
-  | "white"
-  | "gray";
+import type { Appearance, ThemeVariable } from "./contract.ts";
 
 /**
- * What one variable looks like.
+ * The default appearance of every variable.
  *
- * An appearance asserts only what it carries: an absent `dim`, `bold`, or
- * `inverse` means that attribute is not applied, and an absent `hue` means no
- * hue is emitted. An absent field is never unresolved and never inherited,
- * which is what lets the default theme resolve every variable while naming no
- * hue at all.
- */
-export type Appearance = {
-  readonly dim?: boolean;
-  readonly bold?: boolean;
-  readonly inverse?: boolean;
-  readonly hue?: Hue;
-};
-
-/**
- * The default theme, and the one source of truth for what a variable is: the
- * variable union below is derived from these keys, so a variable cannot be
- * named without a default appearance or given one without being named.
+ * The table is typed against the contract's variable union rather than the
+ * union being derived from these keys, because the union is what is published
+ * and a published contract cannot depend on a runtime value's shape. The check
+ * runs in both directions: a variable named in the contract without an entry
+ * here is a missing property, and an entry here that the contract does not
+ * name is an excess one, so adding a variable to either alone fails to
+ * compile.
  *
  * It is the greyscale Norton Commander presentation the dialogs plugin drew
  * before theming existed — chrome, muted, and marker dimmed, cursor inverted,
@@ -50,32 +33,16 @@ export type Appearance = {
  * written into a layout module.
  */
 const defaultAppearances = {
-  /** Everything a surface draws around its content: frame edges, corners,
-   * titles, dividers, key hints, prompts, and overflow counts. */
   chrome: { dim: true },
-  /** A surface's own text: an option label, a grid cell, entered text. */
   content: {},
-  /** The bar marking the active row. */
   cursor: { inverse: true },
-  /** A glyph annotating a row rather than belonging to it, such as the one
-   * saying a row leads somewhere. */
   marker: { dim: true },
-  /** Content de-emphasized relative to `content`, and nothing more. */
   muted: { dim: true },
-  /** Content emphasized relative to `content`, and nothing more. */
   strong: { bold: true },
-  /** Content whose state is good. */
   positive: {},
-  /** Content whose state needs attention. */
   caution: {},
-  /** Content whose state is bad. */
   danger: {},
-} as const satisfies Readonly<Record<string, Appearance>>;
-
-/** The semantic roles a surface may name. Adding one is backward compatible;
- * removing or repurposing one is a breaking change to every surface naming
- * it. */
-export type ThemeVariable = keyof typeof defaultAppearances;
+} as const satisfies Readonly<Record<ThemeVariable, Appearance>>;
 
 /** Every variable, which is what composition and exhaustiveness walk. */
 export const themeVariables = Object.freeze(

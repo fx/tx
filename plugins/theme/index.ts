@@ -1,50 +1,27 @@
 import type { Plugin, PluginDefinition } from "@fx/tx/plugin";
 import { coloursEnabled } from "./colour.ts";
-import {
-  type Appearance,
-  defaultTheme,
-  type ThemeVariable,
-  themeVariables,
-} from "./variables.ts";
+import type { Appearance, ThemeVariable, Theming } from "./contract.ts";
+import type { ThemeOverride } from "./override-contract.ts";
+import { defaultTheme, themeVariables } from "./variables.ts";
 
 /**
- * The local structural contract the bundled theme provider and its bundled
- * consumers share. It lives beside the provider rather than in
- * `@fx/tx/plugin`: the capability is internal, so core carries no theme
- * vocabulary and nothing here is a public export.
+ * The provider is checked against the contracts it publishes rather than
+ * against a shape declared here: both are imported type-only from beside this
+ * file, so the value registered under a key and the type a consumer imports
+ * from that same specifier cannot drift apart.
  */
 
-/** A resolved theme, which answers with an appearance and nothing else. It
- * deliberately cannot be asked whether hues were enabled — every appearance it
- * returns already reflects that decision, and a consumer given the flag is a
- * consumer that can branch on it. */
-type Theme = {
-  appearance(variable: ThemeVariable): Appearance;
-};
+/** The key the capability is registered under, which is also the specifier its
+ * contract is published at — one string rather than two that have to be kept
+ * agreeing, and one a package other than this one could not claim. */
+const themeKey = "@fx/tx/theme";
 
-/** A partial override, registered under `theme-override` by any plugin. */
-type ThemeOverride = Partial<Record<ThemeVariable, Appearance>>;
-
-/** The value registered under `theme`. A theme is resolved for the stream a
- * surface draws to rather than handed out ready-made, because colour
- * enablement depends on that stream; only its TTY-ness is read, and it is
- * neither retained nor written to. */
-type Theming = {
-  theme(
-    stream: { readonly isTTY?: boolean },
-    options?: { readonly colour?: boolean },
-  ): Theme;
-};
-
-/** The key the capability is registered under. */
-const themeKey = "theme";
-
-/** The key overrides are registered under, distinct from the capability's own.
- * The registry keeps every entry under one key as a distinct member of one
- * snapshot and never merges them, so a shared key would hand every consumer a
- * snapshot mixing a capability with partial overrides and leave it to tell
- * them apart by shape. */
-const themeOverrideKey = "theme-override";
+/** The key overrides are registered under, distinct from the capability's own
+ * and published at a subpath of its own. The registry keeps every entry under
+ * one key as a distinct member of one snapshot and never merges them, so a
+ * shared key would hand every consumer a snapshot mixing a capability with
+ * partial overrides and leave it to tell them apart by shape. */
+const themeOverrideKey = "@fx/tx/theme-override";
 
 /**
  * The defaults with every override laid over them, in the registry's commit

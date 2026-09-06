@@ -53,8 +53,15 @@ function namespaceNames(
 }
 
 describe("public plugin contract", () => {
-  test("cannot be imported at runtime", async () => {
-    await expect(import("@fx/tx/plugin")).rejects.toThrow();
+  // Every published subpath, not the plugin contract alone: a capability
+  // contract carries a `types` condition and no runtime one for the same
+  // reason, so that the registry stays the only way to obtain the value.
+  test.each(
+    Object.keys(packageMetadata.exports).map(
+      (subpath) => `${packageMetadata.name}${subpath.slice(1)}`,
+    ),
+  )("cannot import %s at runtime", async (specifier) => {
+    await expect(import(specifier)).rejects.toThrow();
   });
 
   test("injects shared frozen dependencies for the type-only contract", async () => {

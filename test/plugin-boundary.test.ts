@@ -38,11 +38,28 @@ import {
   SyntaxKind,
 } from "typescript/unstable/ast";
 import { API, type Checker, type Program } from "typescript/unstable/async";
+import packageMetadata from "../package.json" with { type: "json" };
 
 const repositoryRoot = resolve(import.meta.dir, "..");
 const pluginsRoot = join(repositoryRoot, "plugins");
 const sourceRoot = join(repositoryRoot, "src");
 const moduleExtensions = [".ts", ".tsx", ".mts", ".cts"];
+
+/**
+ * Every specifier the package publishes, read from the `exports` map rather
+ * than listed here.
+ *
+ * The rules below used to name `@fx/tx/plugin` literally, which was safe while
+ * it was the only published specifier and became a hole the moment it was not:
+ * a bare `@fx/tx/<capability>` import is neither relative nor that literal, so
+ * it would have been invisible to every check in this file. Deriving the set
+ * means a subpath added to `package.json` is held to the type-only, no-runtime
+ * and no-`src/` rules without anyone remembering to widen a test.
+ */
+const publishedSpecifiers: readonly string[] = Object.keys(
+  packageMetadata.exports,
+).map((subpath) => `${packageMetadata.name}${subpath.slice(1)}`);
+const publishedSpecifierSet = new Set(publishedSpecifiers);
 
 function isWithin(root: string, candidate: string): boolean {
   const relation = relative(root, candidate);
@@ -175,9 +192,19 @@ async function moduleSpecifiers(
   return specifiers;
 }
 
-async function txPluginViolations(
+/**
+ * Every way this module breaks the rules a published specifier is held to: it
+ * is imported for types alone and never loaded at run time.
+ *
+ * The rules are the same for every published specifier, so the check is one
+ * pass over the set rather than one pass per subpath — which is what keeps a
+ * capability contract from being held to less than the public plugin contract
+ * simply because nobody copied a branch for it.
+ */
+async function publishedContractViolations(
   sourceFile: SourceFile,
   checker: Checker,
+  published: ReadonlySet<string> = publishedSpecifierSet,
 ): Promise<string[]> {
   const violations: string[] = [];
   const runtimeIdentifiers: Node[] = [];
@@ -187,33 +214,39 @@ async function txPluginViolations(
     if (
       isImportDeclaration(node) &&
       isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === "@fx/tx/plugin" &&
+      published.has(node.moduleSpecifier.text) &&
       node.importClause?.phaseModifier !== SyntaxKind.TypeKeyword
     ) {
-      violations.push("@fx/tx/plugin imports must use import type");
+      violations.push(
+        `${node.moduleSpecifier.text} imports must use import type`,
+      );
     }
     if (
       isExportDeclaration(node) &&
       node.moduleSpecifier &&
       isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === "@fx/tx/plugin" &&
+      published.has(node.moduleSpecifier.text) &&
       !node.isTypeOnly
     ) {
-      violations.push("@fx/tx/plugin re-exports must use export type");
+      violations.push(
+        `${node.moduleSpecifier.text} re-exports must use export type`,
+      );
     }
     if (
       isImportEqualsDeclaration(node) &&
       isExternalModuleReference(node.moduleReference) &&
       isStringLiteral(node.moduleReference.expression) &&
-      node.moduleReference.expression.text === "@fx/tx/plugin" &&
+      published.has(node.moduleReference.expression.text) &&
       !node.isTypeOnly
     ) {
-      violations.push("@fx/tx/plugin imports must use import type");
+      violations.push(
+        `${node.moduleReference.expression.text} imports must use import type`,
+      );
     }
     if (isCallExpression(node) && isRuntimeModuleCall(node)) {
       const specifier = runtimeModuleSpecifier(node);
-      if (specifier?.text === "@fx/tx/plugin") {
-        violations.push("@fx/tx/plugin cannot be loaded at runtime");
+      if (specifier && published.has(specifier.text)) {
+        violations.push(`${specifier.text} cannot be loaded at runtime`);
       } else if (!specifier) {
         const argument = node.arguments[0];
         if (argument && isIdentifier(argument)) {
@@ -231,8 +264,8 @@ async function txPluginViolations(
       bindings,
       checker,
     );
-    if (specifier?.text === "@fx/tx/plugin") {
-      violations.push("@fx/tx/plugin cannot be loaded at runtime");
+    if (specifier && published.has(specifier.text)) {
+      violations.push(`${specifier.text} cannot be loaded at runtime`);
     }
   }
   return violations;
@@ -296,7 +329,7 @@ async function bundledPluginViolations(
     visited.add(canonicalPath);
     const sourceFile = await requiredSourceFile(program, canonicalPath);
     violations.push(
-      ...(await txPluginViolations(sourceFile, checker)).map(
+      ...(await publishedContractViolations(sourceFile, checker)).map(
         (message) => `${relative(repositoryRoot, canonicalPath)}: ${message}`,
       ),
     );
@@ -338,6 +371,18 @@ async function bundledPluginViolations(
   return violations;
 }
 
+/**
+ * Every way a module under `src/` reaches into what the plugins own: a
+ * relative import of a bundled plugin's implementation, or an import of a
+ * published contract.
+ *
+ * The second is the same boundary stated from the other side. A published
+ * capability contract is published *beside* the public plugin contract rather
+ * than inside it, so core carrying its vocabulary — a theme variable, say —
+ * would put feature vocabulary in a package surface that is deliberately
+ * feature-neutral. The specifier is bare rather than relative, which is
+ * exactly why the relative check below cannot see it.
+ */
 async function corePluginImportViolations(
   program: Program,
   checker: Checker,
@@ -346,6 +391,7 @@ async function corePluginImportViolations(
     readonly plugins: string;
     readonly repository: string;
   } = { source: sourceRoot, plugins: pluginsRoot, repository: repositoryRoot },
+  published: ReadonlySet<string> = publishedSpecifierSet,
 ): Promise<string[]> {
   const violations: string[] = [];
   const canonicalPluginsRoot = await realpath(roots.plugins);
@@ -353,6 +399,12 @@ async function corePluginImportViolations(
     const path = await realpath(discoveredPath);
     const sourceFile = await requiredSourceFile(program, path);
     for (const literal of await moduleSpecifiers(sourceFile, checker)) {
+      if (published.has(literal.text)) {
+        violations.push(
+          `${relative(roots.repository, path)} imports published contract ${literal.text}`,
+        );
+        continue;
+      }
       if (!literal.text.startsWith(".")) continue;
       const imported = await resolveRelativeModule(path, literal.text);
       if (imported && isWithin(canonicalPluginsRoot, imported)) {
@@ -424,6 +476,39 @@ test("bundled plugin module graphs stay behind the public boundary", async () =>
   );
 });
 
+test("every published subpath is a types condition over a module with no runtime code", async () => {
+  // Named exactly rather than counted, because every rule in this file is
+  // driven off this set: an `exports` map that stopped yielding specifiers
+  // would leave the whole boundary passing vacuously.
+  expect(publishedSpecifiers).toEqual([
+    "@fx/tx/plugin",
+    "@fx/tx/theme",
+    "@fx/tx/theme-override",
+  ]);
+
+  const conditions = Object.values(packageMetadata.exports);
+  // A runtime condition would be a second way to obtain a capability — one
+  // that bypasses composition and hands a consumer a value the host never
+  // committed — so `types` is the only condition any subpath carries.
+  expect(conditions.map((condition) => Object.keys(condition))).toEqual(
+    conditions.map(() => ["types"]),
+  );
+
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  const targets = conditions.map((condition) => condition.types);
+  const emitted = await Promise.all(
+    targets.map(async (target) => {
+      const source = await Bun.file(join(repositoryRoot, target)).text();
+      return [target, transpiler.transformSync(source).trim()] as const;
+    }),
+  );
+  // Nothing survives compilation, which is what makes "types alone" a property
+  // of the published files rather than of the `exports` map alone: a contract
+  // module that grew a constant, a helper, or a value import would be shipped
+  // by a subpath that publishes no way to load it.
+  expect(emitted).toEqual(targets.map((target) => [target, ""] as const));
+});
+
 test("bundled plugin entry discovery supports every TypeScript module extension", async () => {
   const root = await mkdtemp(join(tmpdir(), "tx-plugin-entries-"));
   const fixtures = [
@@ -458,29 +543,50 @@ test("bundled plugin entry discovery supports every TypeScript module extension"
   }
 });
 
-test("AST checks reject forbidden @fx/tx/plugin syntax and graph escapes", async () => {
+test("AST checks reject forbidden published-contract syntax and graph escapes", async () => {
   const root = await mkdtemp(join(tmpdir(), "tx-plugin-boundary-"));
-  const fixtureSources = [
-    ["allowed-import.ts", 'import type { Plugin } from "@fx/tx/plugin";', 0],
-    ["allowed-export.ts", 'export type { Plugin } from "@fx/tx/plugin";', 0],
+  // Every published specifier gets the whole case list rather than the public
+  // plugin contract getting it and the capability subpaths being taken on
+  // trust. A subpath added to the `exports` map that the rules did not cover
+  // would otherwise pass this test by never appearing in it.
+  const syntaxCases = [
     [
-      "allowed-import-type.ts",
-      'type Plugin = import("@fx/tx/plugin").Plugin;',
+      "allowed-import",
+      (from: string) => `import type { C } from "${from}";`,
       0,
     ],
     [
-      "allowed-import-equals.ts",
-      'import type api = require("@fx/tx/plugin");',
+      "allowed-export",
+      (from: string) => `export type { C } from "${from}";`,
       0,
     ],
-    ["mixed-import.ts", 'import { type Plugin } from "@fx/tx/plugin";', 1],
-    ["side-effect.ts", 'import "@fx/tx/plugin";', 1],
-    ["value-import.ts", 'import { Plugin } from "@fx/tx/plugin";', 1],
-    ["value-export.ts", 'export { Plugin } from "@fx/tx/plugin";', 1],
-    ["dynamic-import.ts", 'const plugin = import("@fx/tx/plugin");', 1],
-    ["require.ts", 'const plugin = require("@fx/tx/plugin");', 1],
-    ["import-equals.ts", 'import api = require("@fx/tx/plugin");', 1],
+    [
+      "allowed-import-type",
+      (from: string) => `type C = import("${from}").C;`,
+      0,
+    ],
+    [
+      "allowed-import-equals",
+      (from: string) => `import type api = require("${from}");`,
+      0,
+    ],
+    ["mixed-import", (from: string) => `import { type C } from "${from}";`, 1],
+    ["side-effect", (from: string) => `import "${from}";`, 1],
+    ["value-import", (from: string) => `import { C } from "${from}";`, 1],
+    ["value-export", (from: string) => `export { C } from "${from}";`, 1],
+    ["dynamic-import", (from: string) => `const c = import("${from}");`, 1],
+    ["require", (from: string) => `const c = require("${from}");`, 1],
+    ["import-equals", (from: string) => `import api = require("${from}");`, 1],
   ] as const;
+  const fixtureSources = publishedSpecifiers.flatMap((specifier, index) =>
+    syntaxCases.map(
+      ([name, source, expectedCount]) =>
+        [`${index}-${name}.ts`, source(specifier), expectedCount] as const,
+    ),
+  );
+  expect(fixtureSources).toHaveLength(
+    publishedSpecifiers.length * syntaxCases.length,
+  );
 
   try {
     await mkdir(join(root, "plugins", "one"), { recursive: true });
@@ -507,6 +613,17 @@ test("AST checks reject forbidden @fx/tx/plugin syntax and graph escapes", async
       ),
       writeFile(join(root, "src", "dynamic.ts"), "export {};"),
       writeFile(join(root, "src", "required.ts"), "export {};"),
+      // One core module per published specifier: a published contract is
+      // published beside the public plugin contract rather than inside it, so
+      // core importing one — even type-only, which is why the source below is
+      // the most innocuous form there is — puts feature vocabulary in a
+      // package surface that is deliberately feature-neutral.
+      ...publishedSpecifiers.map((specifier, index) =>
+        writeFile(
+          join(root, "src", `published-${index}.ts`),
+          `import type { C } from "${specifier}";\nexport type Local = C;`,
+        ),
+      ),
       writeFile(
         join(root, "tsconfig.json"),
         JSON.stringify({
@@ -518,12 +635,13 @@ test("AST checks reject forbidden @fx/tx/plugin syntax and graph escapes", async
 
     await withProgram(join(root, "tsconfig.json"), async (program, checker) => {
       for (const [name, , expectedCount] of fixtureSources) {
-        expect(
-          await txPluginViolations(
-            await requiredSourceFile(program, await realpath(join(root, name))),
-            checker,
-          ),
-        ).toHaveLength(expectedCount);
+        const violations = await publishedContractViolations(
+          await requiredSourceFile(program, await realpath(join(root, name))),
+          checker,
+        );
+        // The fixture's name rides along in the assertion so a failure names
+        // the case and the specifier that broke rather than only a count.
+        expect([name, violations.length]).toEqual([name, expectedCount]);
       }
 
       const graphViolations = await bundledPluginViolations(program, checker, [
@@ -548,15 +666,25 @@ test("AST checks reject forbidden @fx/tx/plugin syntax and graph escapes", async
       expect(
         graphViolations.every((message) => message.includes("escapes")),
       ).toBe(true);
+      // Sorted rather than compared in discovery order: the core modules are
+      // read from the directory, whose order is the file system's business.
       expect(
-        await corePluginImportViolations(program, checker, {
-          source: join(root, "src"),
-          plugins: join(root, "plugins"),
-          repository: root,
-        }),
-      ).toEqual([
-        "src/core.ts imports bundled implementation plugins/one/index.ts",
-      ]);
+        (
+          await corePluginImportViolations(program, checker, {
+            source: join(root, "src"),
+            plugins: join(root, "plugins"),
+            repository: root,
+          })
+        ).sort(),
+      ).toEqual(
+        [
+          "src/core.ts imports bundled implementation plugins/one/index.ts",
+          ...publishedSpecifiers.map(
+            (specifier, index) =>
+              `src/published-${index}.ts imports published contract ${specifier}`,
+          ),
+        ].sort(),
+      );
     });
   } finally {
     await rm(root, { recursive: true, force: true });

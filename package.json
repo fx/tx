@@ -18,12 +18,20 @@
   "exports": {
     "./plugin": {
       "types": "./src/plugin.ts"
+    },
+    "./theme": {
+      "types": "./plugins/theme/contract.ts"
+    },
+    "./theme-override": {
+      "types": "./plugins/theme/override-contract.ts"
     }
   },
   "files": [
     "dist/tx",
     "src/plugin.ts",
     "src/context.ts",
+    "plugins/theme/contract.ts",
+    "plugins/theme/override-contract.ts",
     "README.md",
     "LICENSE"
   ],
