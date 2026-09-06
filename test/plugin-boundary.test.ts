@@ -61,6 +61,15 @@ const publishedSpecifiers: readonly string[] = Object.keys(
 ).map((subpath) => `${packageMetadata.name}${subpath.slice(1)}`);
 const publishedSpecifierSet = new Set(publishedSpecifiers);
 
+/** Each published specifier against the file its `types` condition points at,
+ * which is where resolving that specifier starts. */
+const publishedTargets = new Map(
+  Object.entries(packageMetadata.exports).map(([subpath, condition]) => [
+    `${packageMetadata.name}${subpath.slice(1)}`,
+    join(repositoryRoot, condition.types),
+  ]),
+);
+
 function isWithin(root: string, candidate: string): boolean {
   const relation = relative(root, candidate);
   return (
@@ -432,6 +441,46 @@ async function bundledPluginEntries(root = pluginsRoot): Promise<string[]> {
   return entries.sort();
 }
 
+/**
+ * Every module a consumer compiles when it imports a published specifier: the
+ * file the `exports` map points at, and the transitive closure of what that
+ * file imports, each named relative to the repository root.
+ *
+ * Both kinds of specifier a contract may carry are followed — a relative path
+ * beside it, and another published specifier, which is the one way a contract
+ * names another's vocabulary — so a contract that grew an import into an
+ * implementation would widen this rather than escape it. An unresolvable
+ * specifier fails rather than silently ending the walk short.
+ */
+async function publishedContractClosure(
+  program: Program,
+  checker: Checker,
+  specifier: string,
+): Promise<string[]> {
+  const entry = publishedTargets.get(specifier);
+  if (!entry) throw new Error(`${specifier} is not published`);
+  const reached = new Set<string>();
+  const pending = [await realpath(entry)];
+
+  for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+    if (reached.has(path)) continue;
+    reached.add(path);
+    const sourceFile = await requiredSourceFile(program, path);
+    for (const literal of await moduleSpecifiers(sourceFile, checker)) {
+      const imported = literal.text.startsWith(".")
+        ? await resolveRelativeModule(path, literal.text)
+        : publishedTargets.get(literal.text);
+      if (!imported) {
+        throw new Error(
+          `${relative(repositoryRoot, path)} imports unresolvable ${literal.text}`,
+        );
+      }
+      pending.push(await realpath(imported));
+    }
+  }
+  return [...reached].map((path) => relative(repositoryRoot, path)).sort();
+}
+
 async function withProgram<T>(
   configPath: string,
   operation: (program: Program, checker: Checker) => Promise<T>,
@@ -482,6 +531,7 @@ test("every published subpath is a types condition over a module with no runtime
   // would leave the whole boundary passing vacuously.
   expect(publishedSpecifiers).toEqual([
     "@fx/tx/plugin",
+    "@fx/tx/config",
     "@fx/tx/grid",
     "@fx/tx/theme",
     "@fx/tx/theme-override",
@@ -508,6 +558,37 @@ test("every published subpath is a types condition over a module with no runtime
   // module that grew a constant, a helper, or a value import would be shipped
   // by a subpath that publishes no way to load it.
   expect(emitted).toEqual(targets.map((target) => [target, ""] as const));
+});
+
+test("importing the published config contract compiles no implementation", async () => {
+  // Named rather than left to the equality below, and checked to exist so the
+  // absence assertions cannot pass by naming files that are not there. The
+  // config shape used to be exported only from
+  // `plugins/marketplace/configured.ts`, so naming a config value pulled in
+  // the marketplace manager and, behind it, `node:child_process`, `node:fs`,
+  // the source resolver, and the install storage — none of which a consumer
+  // that only wants to say what a persisted value looks like needs.
+  const implementation = ["manager.ts", "source.ts", "storage.ts"].map(
+    (module) => join("plugins", "marketplace", module),
+  );
+
+  await withProgram(
+    join(repositoryRoot, "tsconfig.json"),
+    async (program, checker) => {
+      const reached = await publishedContractClosure(
+        program,
+        checker,
+        "@fx/tx/config",
+      );
+      expect(reached).toEqual([join("plugins", "config", "contract.ts")]);
+      for (const module of implementation) {
+        expect(await Bun.file(join(repositoryRoot, module)).exists()).toBe(
+          true,
+        );
+        expect(reached).not.toContain(module);
+      }
+    },
+  );
 });
 
 test("bundled plugin entry discovery supports every TypeScript module extension", async () => {

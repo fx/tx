@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Config } from "@fx/tx/config";
 import configPlugin from "../plugins/config/index.ts";
 import {
   createConfigStorage,
@@ -11,13 +12,12 @@ import { main } from "../src/cli.ts";
 import type { PluginDefinition } from "../src/plugin.ts";
 import { captureContext, temporaryDirectory } from "./helpers.ts";
 
-type ConfigValidator<T> = (value: unknown) => value is T;
-
-type Config = {
-  define<T>(key: string, isValid: ConfigValidator<T>): void;
-  read<T>(key: string): Promise<T | undefined>;
-  write<T>(key: string, value: T): Promise<void>;
-};
+/**
+ * The capability is typed by the contract the package publishes at the key it
+ * is registered under, exactly as an external consumer types it. A local
+ * structural copy would compile whatever the provider did, so what these cases
+ * drive through it could drift from the published shape without one noticing.
+ */
 
 const isNumber = (value: unknown): value is number => typeof value === "number";
 const isString = (value: unknown): value is string => typeof value === "string";
@@ -39,10 +39,10 @@ async function obtainConfig(dataHome: string): Promise<Config> {
     load:
       () =>
       ({ command, registrations }) => {
-        expect(registrations<Config>("config")).toEqual([]);
+        expect(registrations<Config>("@fx/tx/config")).toEqual([]);
         command((namespace) =>
           namespace.action(() => {
-            const registered = registrations<Config>("config");
+            const registered = registrations<Config>("@fx/tx/config");
             expect(registered).toHaveLength(1);
             config = registered[0];
           }),

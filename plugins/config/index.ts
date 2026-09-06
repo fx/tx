@@ -1,13 +1,20 @@
 import type { Plugin, PluginDefinition } from "@fx/tx/plugin";
+import type { Config, ConfigValidator } from "./contract.ts";
 import { createConfigStorage, resolveConfigPath } from "./storage.ts";
 
-type ConfigValidator<T> = (value: unknown) => value is T;
+/**
+ * The provider is checked against the contract it publishes rather than
+ * against a shape declared here: it is imported type-only from beside this
+ * file, so the value registered under the key and the type a consumer imports
+ * from that same specifier cannot drift apart.
+ */
 
-type Config = {
-  define<T>(key: string, isValid: ConfigValidator<T>): void;
-  read<T>(key: string): Promise<T | undefined>;
-  write<T>(key: string, value: T): Promise<void>;
-};
+/** The key the capability is registered under, which is also the specifier its
+ * contract is published at — one string rather than two that have to be kept
+ * agreeing, and one a package other than this one could not claim. The plugin
+ * keeps its own bare identity name: that names the plugin, and a capability
+ * provider claiming no command namespace has nothing to collide over. */
+const configKey = "@fx/tx/config";
 
 function undefinedKey(key: string): Error {
   return new Error(
@@ -67,7 +74,7 @@ const definition: PluginDefinition = Object.freeze({
         },
       };
 
-      register<Config>("config", config);
+      register<Config>(configKey, config);
     };
   },
 });
