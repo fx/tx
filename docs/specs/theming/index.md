@@ -53,10 +53,10 @@ type Theme = {
   appearance(variable: ThemeVariable): Appearance
 }
 
-// A partial override, registered under `theme-override` by any plugin.
+// A partial override, registered under `@fx/tx/theme-override` by any plugin.
 type ThemeOverride = Partial<Record<ThemeVariable, Appearance>>
 
-// The value registered under `theme`. `stream` is the surface being drawn to;
+// The value registered under `@fx/tx/theme`. `stream` is the surface being drawn to;
 // only its TTY-ness is read, and it is not retained.
 type Theming = {
   theme(stream: { readonly isTTY?: boolean }, options?: { readonly colour?: boolean }): Theme

@@ -42,7 +42,7 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 #### Scenario: Capability used by a command
 
 - **GIVEN** the config provider and an internal consumer initialized successfully
-- **WHEN** the consumer reads `config` while its command runs
+- **WHEN** the consumer reads `@fx/tx/config` while its command runs
 - **THEN** it can define, read, and write its own key without importing the provider's implementation
 
 #### Scenario: Provider claims no namespace

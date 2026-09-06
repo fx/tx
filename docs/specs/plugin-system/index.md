@@ -8,9 +8,9 @@ The approved target architecture is implemented: the core is generic, the market
 
 [Update Participation](#update-participation) is implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md): the contribution, its staging, and its public types are in the shipped `@fx/tx/plugin` contract, and no bundled plugin contributes a participant yet. The marketplace version and pin behavior that section points at is not implemented, and is planned by [Change 0013](../../changes/0013-update-installed-marketplaces.md) and [Change 0014](../../changes/0014-pin-marketplace-versions.md).
 
-[Generic Registry](#generic-registry) and its first concrete provider are implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). The provider remains outside core under `plugins/dialogs/`, registers the opaque `dialogs` capability, and follows the separately owned [Dialogs](../dialogs/) contract.
+[Generic Registry](#generic-registry) and its first concrete provider are implemented by [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md). The provider remains outside core under `plugins/dialogs/`, registers the dialogs capability, and follows the separately owned [Dialogs](../dialogs/) contract.
 
-The second registry provider from [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) is implemented outside core under `plugins/config/`: it registers the opaque `config` capability and follows the separately owned [Config](../config/) contract. The marketplace plugin consumes it for [Configured Marketplaces](#configured-marketplaces), including explicit installation and add/remove write-back.
+The second registry provider from [Change 0018](../../changes/0018-add-config-store-and-marketplace-installs.md) is implemented outside core under `plugins/config/`: it registers the config capability and follows the separately owned [Config](../config/) contract. The marketplace plugin consumes it for [Configured Marketplaces](#configured-marketplaces), including explicit installation and add/remove write-back.
 
 [Published Capability Contracts](#published-capability-contracts) is approved and not yet implemented. It is planned by [Change 0030](../../changes/0030-publish-bundled-capability-contracts.md), which establishes the mechanism and publishes the [Theming](../theming/) and [Grid](../grid/) contracts, and [Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md), which publishes the [Dialogs](../dialogs/) and [Config](../config/) contracts. Every consumer restates those contracts today.
 
@@ -228,6 +228,12 @@ A capability's runtime value reaches a consumer through the registry, which carr
 - **GIVEN** a published capability subpath
 - **WHEN** it is loaded at runtime rather than imported for types
 - **THEN** the load fails, exactly as it does for the public plugin contract
+
+#### Scenario: Boundary enforcement covers a published subpath
+
+- **GIVEN** a module loads a published capability subpath at run time, imports it as a value, or imports it from under `src/`
+- **WHEN** boundary enforcement runs
+- **THEN** each of those is reported as a violation, exactly as it is for the public plugin contract
 
 #### Scenario: Publication leaves the registry alone
 

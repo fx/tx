@@ -79,7 +79,7 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 #### Scenario: Capability used by a command
 
 - **GIVEN** the dialogs provider and an internal consumer initialized successfully
-- **WHEN** the consumer reads `dialogs` while its command runs
+- **WHEN** the consumer reads `@fx/tx/dialogs` while its command runs
 - **THEN** it can present a selection without importing the provider's implementation
 
 #### Scenario: Provider claims no namespace

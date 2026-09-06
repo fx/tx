@@ -51,30 +51,6 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - Bundled consumers, `demo/scenarios.ts`, and the capability tests stop declaring their own copies and import the published contracts.
 - The four capability sections of [the plugin guide](../manual/plugins.md) instruct consumers to declare the shape locally; the two this change publishes MUST instead tell them to import it. The guide describes shipped behavior, so it changes with the code rather than ahead of it.
 
-#### Scenario: The key and the specifier are one string
-
-- **GIVEN** a consumer that imports a bundled capability's contract and reads that capability from the registry
-- **WHEN** the import specifier and the key passed to the read are compared
-- **THEN** they are the same string, and no other string identifies that capability
-
-#### Scenario: A published subpath ships nothing to run
-
-- **GIVEN** the packed package
-- **WHEN** every file a published capability subpath resolves to is inspected
-- **THEN** each contains type declarations alone and the package declares no runtime condition for that subpath
-
-#### Scenario: Boundary enforcement sees a published subpath
-
-- **GIVEN** a module loads a published capability subpath at run time, imports it as a value, or imports it from under `src/`
-- **WHEN** the boundary checks run
-- **THEN** each of those is reported as a violation, exactly as it is for `@fx/tx/plugin`
-
-#### Scenario: A published subpath resolves from the installed package
-
-- **GIVEN** the packed package installed into a consumer with no repository checkout present
-- **WHEN** the consumer type checks an import of each published capability subpath
-- **THEN** each resolves against published files alone
-
 ## Design
 
 ### Approach

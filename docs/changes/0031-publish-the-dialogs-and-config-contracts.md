@@ -36,7 +36,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 [Plugin System: Published Capability Contracts](../specs/plugin-system/index.md#published-capability-contracts) owns what publication means, and [Change 0030](./0030-publish-bundled-capability-contracts.md) owns the mechanism, the boundary enforcement, and the packaging rules this change reuses without re-deciding. [Dialogs](../specs/dialogs/) and [Config](../specs/config/) own their contracts' content. Those are this change's acceptance criteria and are not restated here. What implementing them requires of this change:
 
 - The config contract MUST be reachable without the marketplace implementation graph. `plugins/marketplace/configured.ts` becomes a consumer of the published contract rather than the place the type is declared, and `requireConfigCapability` stays where it is — it is a lookup, not a contract.
-- The published dialogs contract is the part a consumer sends and receives: the select and input requests, the option and field shapes, the filter and expand settings, the result, and `Dialogs` itself. `DialogElement` and everything else describing how a dialog is rendered stays unpublished in `plugins/dialogs/types.ts`, which keeps its `CoreDependencies` import.
+- [Dialogs](../specs/dialogs/) owns what the capability's contract contains; what this change owns is which of `plugins/dialogs/types.ts`'s declarations move into the contract module and which stay behind. The provider's rendering vocabulary stays behind, so `plugins/dialogs/types.ts` keeps its `CoreDependencies` import and no consumer acquires React's element type by importing a dialogs contract.
 - Publishing the dialogs contract MUST NOT change who owns the absent-capability decision. [Dialogs](../specs/dialogs/index.md) requires the consumer to own that behavior, and a published type says nothing about how many providers registered.
 - Each capability's `exports` entry, `files` entries, and consumer-fixture import follow the pattern established by [Change 0030](./0030-publish-bundled-capability-contracts.md); the exact packed-file assertion in `test/plugin-consumer.test.ts` MUST be updated in the same PR as each addition.
 - Bundled consumers, `demo/scenarios.ts`, and the capability tests stop declaring their own copies and import the published contracts. `plugins/dialogs/theme.ts` and `plugins/grid/dialogs.ts` are copies of another capability's vocabulary and lose their type declarations, keeping only their capability lookups.
@@ -48,12 +48,6 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - **GIVEN** a consumer imports the published config contract
 - **WHEN** the modules that import resolves are inspected
 - **THEN** none of them is the marketplace manager, its storage, or its source module
-
-#### Scenario: Rendering internals stay unpublished
-
-- **GIVEN** the published dialogs contract
-- **WHEN** a consumer imports it
-- **THEN** it obtains what a dialog request and result contain and obtains nothing describing how a dialog is rendered
 
 #### Scenario: No capability vocabulary is declared twice
 
