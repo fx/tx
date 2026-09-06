@@ -38,7 +38,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 [Plugin System: Published Capability Contracts](../specs/plugin-system/index.md#published-capability-contracts) owns what publication means — the key-is-the-specifier rule, the types-only rule, the closure over published files, the breaking-change status, and the boundary rules — together with its scenarios. [Theming](../specs/theming/) and [Grid](../specs/grid/) own their own contracts' content. Those are this change's acceptance criteria and are not restated here. What implementing them requires of this change:
 
-- Every registry key a bundled plugin uses becomes the specifier its contract is published at: `"@fx/tx/theme"`, `"@fx/tx/dialogs"`, `"@fx/tx/grid"`, `"@fx/tx/config"`, and `"@fx/tx/theme-override"` replace the bare words in use today. Providers, consumers, the demo, and every test that names a key change together.
+- A key is renamed in the same change that publishes its contract, never ahead of it, so no release exists in which a key names a specifier that publishes nothing — which would be a `tx` violating the rule its own specification states. This change renames `"theme"`, `"theme-override"`, and `"grid"` to `"@fx/tx/theme"`, `"@fx/tx/theme-override"`, and `"@fx/tx/grid"` as it publishes each. [Change 0031](./0031-publish-the-dialogs-and-config-contracts.md) renames `"dialogs"` and `"config"` when it publishes those two, and they keep their bare keys until then. Providers, consumers, the demo, and every test naming a renamed key change with it.
 - The rename is a breaking change to anything reading a bundled capability, and is accepted as one. No alias, dual registration, or deprecation period is provided: registering under both spellings would put two entries in one snapshot and hand every consumer the ambiguity the rename exists to remove.
 - `@fx/tx/theme-override` gets a published subpath of its own like every other key, carrying the shape of the value registered under it. It is not a capability, which changes nothing about the rule: the rule is about keys, and every key names the type of what is registered under it.
 - Each published capability gets a contract module of its own holding type declarations alone. The existing type-bearing files cannot be published as they stand: `plugins/grid/theme.ts`, `plugins/theme/variables.ts`, and `plugins/theme/colour.ts` all carry executable code beside their types, and the package publishes no runtime condition for anything.
@@ -61,7 +61,7 @@ Theming lands first because the grid contract depends on its vocabulary; the gri
 
 ### Decisions
 
-- **Decision**: a capability's registry key becomes the specifier its contract is published at — the key is `"@fx/tx/theme"`, imported from `@fx/tx/theme` — replacing the bare `"theme"`, `"dialogs"`, `"grid"`, `"config"`, and `"theme-override"` keys.
+- **Decision**: a capability's registry key becomes the specifier its contract is published at — the key is `"@fx/tx/theme"`, imported from `@fx/tx/theme` — replacing the bare `"theme"`, `"dialogs"`, `"grid"`, `"config"`, and `"theme-override"` keys, each rename landing with its own contract's publication rather than all at once.
   - **Why**: one string instead of two that have to be kept agreeing. A consumer cannot import one capability's contract while reading another's key, because there is only one string to get wrong. It is also the only form of the rule that survives a plugin shipped outside `tx`: "the subpath is the key" silently means "`@fx/tx/` plus the key", and that prefix is not something another package can follow. Keys then inherit the package namespace, where a name already has one owner, so unrelated providers cannot collide without the host reserving or parsing anything.
   - **Why now**: the keys are internal today. Once this change publishes the contracts, the key strings are public API beside them and changing one breaks every consumer rather than the few in this repository. This is the last point at which the rename is cheap.
   - **Alternatives considered**: keeping the bare keys and stating the subpath rule as `@fx/tx/` plus the key, which does not generalize and leaves `tx` holding the four most collidable names in the ecosystem — a third-party plugin providing its own grid could not avoid landing in the same snapshot; a single `@fx/tx/capabilities` barrel, which would hand every consumer every capability's vocabulary and make one capability's change a rebuild for all of them; a `@fx/tx/plugin` re-export, which is the feature vocabulary in the generic contract that [Change 0016](./0016-add-plugin-capabilities-and-dialogs.md) rejected and this change does not revisit.
@@ -97,10 +97,8 @@ Theming lands first because the grid contract depends on its vocabulary; the gri
 
 ## Tasks
 
-- [ ] Rename every bundled registry key to its published specifier
-  - [ ] `@fx/tx/theme`, `@fx/tx/theme-override`, `@fx/tx/dialogs`, `@fx/tx/grid`, and `@fx/tx/config` at every provider, consumer, demo, and test that names one
-  - [ ] Confirm no bare key survives, including in the capability lookups and in `plugins/marketplace/configured.ts`
 - [ ] Establish the publication mechanism and publish the theming contract
+  - [ ] Rename the `theme` and `theme-override` keys to `@fx/tx/theme` and `@fx/tx/theme-override` at every provider, consumer, demo, and test naming one, in the same commit that publishes the contract
   - [ ] `plugins/theme/contract.ts` declaring `Hue`, `Appearance`, `ThemeVariable`, `Theme`, `Theming`, and `ThemeOverride` as types alone
   - [ ] Invert the derivation in `plugins/theme/variables.ts` so the default appearance table is typed against the contract's variable union
   - [ ] Have `plugins/theme/index.ts` import the contract type-only and register a value checked against `Theming`
@@ -111,6 +109,7 @@ Theming lands first because the grid contract depends on its vocabulary; the gri
 - [ ] Publish the grid contract over the theming contract
   - [ ] `plugins/grid/contract.ts` taking `ThemeVariable` from `@fx/tx/theme` and declaring the grid vocabulary as types alone
   - [ ] Delete the theme vocabulary copied into `plugins/grid/theme.ts`, leaving it the capability lookup alone
+  - [ ] Rename the `grid` key to `@fx/tx/grid` at every site naming it, in the same commit that publishes the contract
   - [ ] `exports` entry `./grid`, its `files` entries, and the consumer fixture import
 - [ ] Move consumers and documentation off the restated copies
   - [ ] `demo/scenarios.ts` imports the published grid and theme contracts instead of restating them

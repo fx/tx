@@ -35,6 +35,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 [Plugin System: Published Capability Contracts](../specs/plugin-system/index.md#published-capability-contracts) owns what publication means, and [Change 0030](./0030-publish-bundled-capability-contracts.md) owns the mechanism, the boundary enforcement, and the packaging rules this change reuses without re-deciding. [Dialogs](../specs/dialogs/) and [Config](../specs/config/) own their contracts' content. Those are this change's acceptance criteria and are not restated here. What implementing them requires of this change:
 
+- This change renames the `dialogs` and `config` keys to `@fx/tx/dialogs` and `@fx/tx/config`, each in the same commit that publishes its contract. [Change 0030](./0030-publish-bundled-capability-contracts.md) deliberately left these two bare for that reason: a key renamed ahead of its contract would name a specifier publishing nothing, which is a `tx` violating the rule its own specification states.
 - The config contract MUST be reachable without the marketplace implementation graph. `plugins/marketplace/configured.ts` becomes a consumer of the published contract rather than the place the type is declared, and `requireConfigCapability` stays where it is — it is a lookup, not a contract.
 - [Dialogs](../specs/dialogs/) owns what the capability's contract contains; what this change owns is which of `plugins/dialogs/types.ts`'s declarations move into the contract module and which stay behind. The provider's rendering vocabulary stays behind, so `plugins/dialogs/types.ts` keeps its `CoreDependencies` import and no consumer acquires React's element type by importing a dialogs contract.
 - Publishing the dialogs contract MUST NOT change who owns the absent-capability decision. [Dialogs](../specs/dialogs/index.md) requires the consumer to own that behavior, and a published type says nothing about how many providers registered.
@@ -93,12 +94,14 @@ The cleanup is the larger half. `plugins/grid/dialogs.ts`, `plugins/dialogs/them
 ## Tasks
 
 - [ ] Publish the config contract
+  - [ ] Rename the `config` key to `@fx/tx/config` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
   - [ ] `plugins/config/contract.ts` declaring `Config` and `ConfigValidator` as types alone
   - [ ] Have `plugins/config/index.ts` import it type-only and register a value checked against `Config`
   - [ ] Reduce `plugins/marketplace/configured.ts` to importing the published contract, keeping `requireConfigCapability` and the marketplace's own key and value types
   - [ ] `exports` entry `./config`, its `files` entries, the packed-file assertion, and the consumer-fixture import
   - [ ] `test/config-plugin.test.ts` imports the published contract
 - [ ] Publish the dialogs contract
+  - [ ] Rename the `dialogs` key to `@fx/tx/dialogs` at every provider, consumer, demo, and test naming it, in the same commit that publishes the contract
   - [ ] `plugins/dialogs/contract.ts` declaring the request, option, field, filter, expand, and result types and `Dialogs`, as types alone
   - [ ] Leave `DialogElement` and the provider's rendering types in `plugins/dialogs/types.ts`, which keeps its `CoreDependencies` import
   - [ ] Have `plugins/dialogs/index.ts` import the contract type-only and register a value checked against `Dialogs`
