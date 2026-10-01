@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/fx/tx/compare/v1.7.0...v1.8.0) (2026-10-01)
+
+
+### Features
+
+* **release:** publish a linux arm64 executable ([#77](https://github.com/fx/tx/issues/77)) ([cfb95e1](https://github.com/fx/tx/commit/cfb95e1de2f6d925f1942ad426a955ceaf1a97f5))
+
 ## [1.7.0](https://github.com/fx/tx/compare/v1.6.1...v1.7.0) (2026-09-06)
 
 
