@@ -97,9 +97,9 @@ Each job gets only the permissions it uses, so the jobs that run release code â€
   - [x] Require a native arm64 smoke test to gate every publication, with a scenario
   - [x] Narrow the open question on architectures, and update references, the changelog, the [Updates](../specs/updates/) changelog, and both documentation indexes
 
-- [ ] Compile both executables in `build.ts`
-  - [ ] Build `dist/tx` for `bun-linux-x64-baseline` and `dist/tx-linux-arm64` for `bun-linux-arm64` from one constant list, failing on either
-  - [ ] Assert each executable's ELF machine in `test/standalone.test.ts`
+- [x] Compile both executables in `build.ts`
+  - [x] Build `dist/tx` for `bun-linux-x64-baseline` and `dist/tx-linux-arm64` for `bun-linux-arm64` from one constant list, failing on either
+  - [x] Assert each executable's ELF machine in `test/standalone.test.ts`
 
 - [ ] Let an arm64 `tx` update itself
   - [ ] Add `linux-arm64` to the executable plugin's published platforms

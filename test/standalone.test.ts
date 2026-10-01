@@ -21,6 +21,23 @@ interface CommandResult {
   readonly stderr: string;
 }
 
+/** The ELF magic and the `e_machine` field of an executable's header, read
+ * rather than inferred from the file's name: an x64 build written under the
+ * arm64 name would otherwise pass. */
+async function elfMachine(
+  path: string,
+): Promise<{ magic: number[]; machine: number }> {
+  const header = await Bun.file(path).slice(0, 20).arrayBuffer();
+  return {
+    magic: [...new Uint8Array(header, 0, 4)],
+    machine: new DataView(header).getUint16(18, true),
+  };
+}
+
+const elfMagic = [0x7f, 0x45, 0x4c, 0x46];
+const x86_64 = 0x3e;
+const aarch64 = 0xb7;
+
 test("the production build is a standalone executable", async () => {
   // Realpath: the fixture marketplace is referenced by its resolved path, so
   // an intermediate link in the platform temporary directory would otherwise
@@ -35,6 +52,7 @@ test("the production build is a standalone executable", async () => {
     const stagedPlugins = join(stagedProject, "plugins");
     const stagedNodeModules = join(stagedProject, "node_modules");
     const binaryPath = join(stagedProject, "dist", "tx");
+    const arm64BinaryPath = join(stagedProject, "dist", "tx-linux-arm64");
     const runtimeDirectory = join(temporaryRoot, "runtime");
     await mkdir(stagedProject);
     await Promise.all([
@@ -58,6 +76,14 @@ test("the production build is a standalone executable", async () => {
     });
 
     expect(build.exitCode).toBe(0);
+    expect(await elfMachine(binaryPath)).toEqual({
+      magic: elfMagic,
+      machine: x86_64,
+    });
+    expect(await elfMachine(arm64BinaryPath)).toEqual({
+      magic: elfMagic,
+      machine: aarch64,
+    });
     await Promise.all([
       rm(stagedSource, { recursive: true }),
       rm(stagedPlugins, { recursive: true }),
@@ -335,4 +361,4 @@ test("the production build is a standalone executable", async () => {
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
-});
+}, 120_000);
