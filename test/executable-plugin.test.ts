@@ -85,8 +85,15 @@ function digestOf(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-function checksumDocument(digest: string, asset = assetName): string {
-  return `${digest}  ${asset}\n${digestOf("unrelated")}  tx-linux-arm64\n`;
+/** A `SHA256SUMS` listing `asset` with `digest`, beside another published
+ * asset whose digest is something else entirely, so a lookup that read the
+ * wrong line would fail its checksum. */
+function checksumDocument(
+  digest: string,
+  asset = assetName,
+  other = "tx-linux-arm64",
+): string {
+  return `${digest}  ${asset}\n${digestOf("unrelated")}  ${other}\n`;
 }
 
 interface RecordedRequest {
@@ -131,9 +138,10 @@ function downloadRoutes(
   tag: string,
   executable: string,
   document: string,
+  asset = assetName,
 ): Record<string, () => Response> {
   return {
-    [downloadUrl(tag, assetName)]: () => new Response(executable),
+    [downloadUrl(tag, asset)]: () => new Response(executable),
     [downloadUrl(tag, checksumName)]: () => new Response(document),
   };
 }
@@ -224,7 +232,7 @@ function miseListing(store: string, ...versions: readonly string[]): string {
   });
 }
 
-/** A compiled `tx` on the one platform an executable is published for. */
+/** A compiled `tx` on a platform an executable is published for. */
 function options(
   overrides: ExecutableUpdaterOptions = {},
 ): ExecutableUpdaterOptions {
@@ -279,18 +287,21 @@ describe("semantic version ordering", () => {
 });
 
 describe("executable update gathering", () => {
-  test("offers a strictly newer published release", async () => {
-    const { fetch, urls } = stubFetch(releaseRoutes("v1.3.0"));
-    const { run, commands } = recorder();
-    const updater = new ExecutableUpdater(
-      runningVersion,
-      options({ fetch, run }),
-    );
+  test.each(["linux-x64", "linux-arm64"])(
+    "offers a strictly newer published release on %s",
+    async (platform) => {
+      const { fetch, urls } = stubFetch(releaseRoutes("v1.3.0"));
+      const { run, commands } = recorder();
+      const updater = new ExecutableUpdater(
+        runningVersion,
+        options({ fetch, run, platform }),
+      );
 
-    expect(await updater.gather()).toEqual([availableItem]);
-    expect(urls()).toEqual([releaseUrl]);
-    expect(commands).toEqual([]);
-  });
+      expect(await updater.gather()).toEqual([availableItem]);
+      expect(urls()).toEqual([releaseUrl]);
+      expect(commands).toEqual([]);
+    },
+  );
 
   test.each(["v1.2.0", "v1.1.0", "nightly"])(
     "reports nothing to apply for the release %p",
@@ -445,7 +456,7 @@ describe("executable update guards", () => {
     {
       guard: { compiled: true, platform: "darwin-arm64" },
       reason:
-        "no executable is published for darwin-arm64 (published: linux-x64)",
+        "no executable is published for darwin-arm64 (published: linux-x64, linux-arm64)",
     },
   ])(
     "withholds an available version and applies nothing ($reason)",
@@ -950,6 +961,35 @@ describe("executable update delegation", () => {
     ]);
   });
 
+  test("delegates to mise on linux-arm64 exactly as on x64", async () => {
+    const { store, target } = await miseInstallation("mise-arm64");
+    const { fetch, urls } = stubFetch(releaseRoutes("v1.3.0"));
+    const { run, commands } = upgrading(
+      miseListing(store, runningVersion),
+      miseListing(store, runningVersion, publishedVersion),
+      { exitCode: 0, stdout: "mise github:fx/tx@1.3.0\n", stderr: "" },
+    );
+    const updater = new ExecutableUpdater(
+      runningVersion,
+      options({ fetch, run, executablePath: target, platform: "linux-arm64" }),
+    );
+
+    expect(await updater.gather()).toEqual([availableItem]);
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: true,
+      version: publishedVersion,
+      detail: '"mise upgrade github:fx/tx": mise github:fx/tx@1.3.0',
+    });
+    expect(commands).toEqual([
+      ["mise", "ls", "--installed", "--json"],
+      ["mise", "upgrade", "github:fx/tx"],
+      ["mise", "ls", "--installed", "--json"],
+    ]);
+    // Only the release lookup: no executable is downloaded on this path.
+    expect(urls()).toEqual([releaseUrl]);
+    expect(await readFile(target, "utf8")).toBe(installedBytes);
+  });
+
   test("runs npm's own install with no override of its own", async () => {
     // npm has no release-age policy, so its upgrade gets the environment it
     // was given and nothing more.
@@ -1154,7 +1194,12 @@ describe("executable replacement", () => {
     const root = await workspace(prefix);
     const target = await installedExecutable(root, join("bin", "tx"));
     const { fetch, urls } = stubFetch(
-      downloadRoutes(`v${publishedVersion}`, stubExecutable, document),
+      downloadRoutes(
+        `v${publishedVersion}`,
+        stubExecutable,
+        document,
+        `tx-${overrides.platform ?? "linux-x64"}`,
+      ),
     );
     const staged: { path: string; mode: number }[] = [];
     const { run, commands } = recorder(async (command) => {
@@ -1196,6 +1241,44 @@ describe("executable replacement", () => {
     expect(await readFile(target, "utf8")).toBe(stubExecutable);
     expect((await stat(target)).mode & 0o111).toBeGreaterThan(0);
     // One rename, and nothing staged survives it.
+    expect(await readdir(directory)).toEqual(["tx"]);
+  });
+
+  test("replaces an arm64 executable from its own line of the checksums", async () => {
+    // The x64 line carries a different digest, so reading it instead of the
+    // arm64 one would refuse the download rather than pass.
+    const { updater, target, urls, directory } = await replacement(
+      "replace-arm64",
+      { platform: "linux-arm64" },
+      checksumDocument(digestOf(stubExecutable), "tx-linux-arm64", assetName),
+    );
+
+    expect(await updater.apply(availableItem)).toEqual({
+      applied: true,
+      version: publishedVersion,
+    });
+    expect(urls()).toEqual([
+      downloadUrl("v1.3.0", checksumName),
+      downloadUrl("v1.3.0", "tx-linux-arm64"),
+    ]);
+    expect(await readFile(target, "utf8")).toBe(stubExecutable);
+    expect(await readdir(directory)).toEqual(["tx"]);
+  });
+
+  test("refuses an arm64 update from a release that predates the arm64 asset", async () => {
+    // Releases published before the arm64 executable list only the x64 one.
+    const { updater, target, urls, commands, directory } = await replacement(
+      "predates-arm64",
+      { platform: "linux-arm64" },
+      `${digestOf(stubExecutable)}  ${assetName}\n`,
+    );
+
+    await expect(updater.apply(availableItem)).rejects.toThrow(
+      "SHA256SUMS for v1.3.0 publishes no tx-linux-arm64",
+    );
+    expect(urls()).toEqual([downloadUrl("v1.3.0", checksumName)]);
+    expect(commands).toEqual([]);
+    expect(await readFile(target, "utf8")).toBe(installedBytes);
     expect(await readdir(directory)).toEqual(["tx"]);
   });
 

@@ -101,9 +101,9 @@ Each job gets only the permissions it uses, so the jobs that run release code â€
   - [x] Build `dist/tx` for `bun-linux-x64-baseline` and `dist/tx-linux-arm64` for `bun-linux-arm64` from one constant list, failing on either
   - [x] Assert each executable's ELF machine in `test/standalone.test.ts`
 
-- [ ] Let an arm64 `tx` update itself
-  - [ ] Add `linux-arm64` to the executable plugin's published platforms
-  - [ ] Cover gathering, replacement against the arm64 checksum line, a release predating the arm64 asset, and mise delegation on `linux-arm64` in `test/executable-plugin.test.ts`
+- [x] Let an arm64 `tx` update itself
+  - [x] Add `linux-arm64` to the executable plugin's published platforms
+  - [x] Cover gathering, replacement against the arm64 checksum line, a release predating the arm64 asset, and mise delegation on `linux-arm64` in `test/executable-plugin.test.ts`
 
 - [ ] Publish `tx-linux-arm64` from the release workflow
   - [ ] Split `.github/workflows/release.yml` into `release`, `build`, `smoke-arm64`, and `publish` jobs with least-privilege permissions

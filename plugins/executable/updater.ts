@@ -51,7 +51,7 @@ const downloadPrefix = `https://github.com/${repository}/releases/download`;
 const checksumAsset = "SHA256SUMS";
 /** [Architecture: Runtime and Distribution] decides what is published; the
  * asset for a platform is named after it. */
-const publishedPlatforms: readonly string[] = ["linux-x64"];
+const publishedPlatforms: readonly string[] = ["linux-x64", "linux-arm64"];
 /** Exactly these two, in this order, and no other variable: a token is sent to
  * the release host, so a credential configured for a package registry or
  * another forge is not one the user offered to this request. */
