@@ -5,7 +5,7 @@
 Publish a standalone Linux arm64 (glibc) executable, `tx-linux-arm64`, on every GitHub Release beside `tx-linux-x64`, with one `SHA256SUMS` covering both, and let an arm64 `tx` update itself from it. The executable is cross-compiled with Bun on the existing x64 runner and run natively on a GitHub-hosted arm64 runner before anything about the release is published. [Architecture: Runtime and Distribution](../specs/architecture/index.md#runtime-and-distribution) and [Architecture: Continuous Integration](../specs/architecture/index.md#continuous-integration) own the behavior.
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** 0004, 0015
 
 ## Motivation
@@ -105,16 +105,16 @@ Each job gets only the permissions it uses, so the jobs that run release code â€
   - [x] Add `linux-arm64` to the executable plugin's published platforms
   - [x] Cover gathering, replacement against the arm64 checksum line, a release predating the arm64 asset, and mise delegation on `linux-arm64` in `test/executable-plugin.test.ts`
 
-- [ ] Publish `tx-linux-arm64` from the release workflow
-  - [ ] Split `.github/workflows/release.yml` into `release`, `build`, `smoke-arm64`, and `publish` jobs with least-privilege permissions
-  - [ ] Run the arm64 executable natively and gate the package publish and every upload on it
-  - [ ] Upload both executables with one `SHA256SUMS` covering both
+- [x] Publish `tx-linux-arm64` from the release workflow
+  - [x] Split `.github/workflows/release.yml` into `release`, `build`, `smoke-arm64`, and `publish` jobs with least-privilege permissions
+  - [x] Run the arm64 executable natively and gate the package publish and every upload on it
+  - [x] Upload both executables with one `SHA256SUMS` covering both
 
-- [ ] Amend the wording the change makes wrong
-  - [ ] `README.md`: supported platforms, the release flow, and its prerequisites
-  - [ ] `docs/manual/plugins.md`: the standalone installation sentence
+- [x] Amend the wording the change makes wrong
+  - [x] `README.md`: supported platforms, the release flow, and its prerequisites
+  - [x] `docs/manual/plugins.md`: the standalone installation sentence
 
-- [ ] Verify 100% coverage, `bun run check`, the packed package's contents, and `actionlint` and `shellcheck` on the workflows
+- [x] Verify 100% coverage, `bun run check`, the packed package's contents, and `actionlint` and `shellcheck` on the workflows
 
 ## Open Questions
 
