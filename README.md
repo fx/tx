@@ -4,9 +4,9 @@ Extensible command-line toolbox.
 
 ## Install
 
-The first supported release target is Linux x64 with glibc and a baseline x86-64 CPU. The standalone executable does not require Bun or Node.js.
+Supported release targets are Linux x64 with glibc and a baseline x86-64 CPU, and Linux arm64 with glibc. The standalone executables do not require Bun or Node.js.
 
-The low-setup installation path uses the public GitHub Release asset:
+The low-setup installation path uses the public GitHub Release assets, and mise picks the executable for the machine's architecture:
 
 ```sh
 mise use -g github:fx/tx
@@ -20,7 +20,7 @@ tx --version
 
 ### GitHub Packages
 
-`@fx/tx` is also published to `npm.pkg.github.com`. GitHub requires authentication to download npm packages even when the package is public. Create a classic personal access token with `read:packages`, then configure npm without committing the token:
+`@fx/tx` is also published to `npm.pkg.github.com`, for Linux x64 only. GitHub requires authentication to download npm packages even when the package is public. Create a classic personal access token with `read:packages`, then configure npm without committing the token:
 
 ```sh
 npm config set @fx:registry https://npm.pkg.github.com
@@ -85,9 +85,9 @@ The demo runs from a source checkout with dependencies installed. It is not part
 
 [Release Please](https://github.com/googleapis/release-please-action) maintains the release PR, `package.json` version, tag, GitHub Release, and CHANGELOG from conventional commits. Release PRs are never auto-merged; a maintainer must review required CI and merge each one manually.
 
-After the merge's push-to-main CI succeeds, the same release workflow invocation verifies the release SHA and version invariants, publishes the absent `@fx/tx` version to GitHub Packages, and uploads `tx-linux-x64` plus `SHA256SUMS` to the existing GitHub Release. Retries do not overwrite an existing package version; release assets may be replaced after verification.
+After the merge's push-to-main CI succeeds, the same release workflow invocation verifies the release SHA and version invariants, builds both executables, and runs the arm64 one natively on a GitHub-hosted arm64 runner, which must report the release version and print root help. Only then does it publish the absent `@fx/tx` version to GitHub Packages and upload `tx-linux-x64`, `tx-linux-arm64`, and a `SHA256SUMS` covering both to the existing GitHub Release; if the arm64 check fails, nothing is published. Retries do not overwrite an existing package version; release assets may be replaced after verification.
 
-Repository prerequisites are documented by the workflow permissions: Actions must be allowed to create pull requests, `GITHUB_TOKEN` must have package write access, the `CI` check remains required, and a maintainer must make the GitHub Package public after its first publication if public access is desired. The package visibility change and first release are manual operations.
+Repository prerequisites are documented by the workflow permissions: Actions must be allowed to create pull requests, `GITHUB_TOKEN` must have package write access, GitHub-hosted `ubuntu-24.04-arm` runners must be available to the repository, the `CI` check remains required, and a maintainer must make the GitHub Package public after its first publication if public access is desired. The package visibility change and first release are manual operations.
 
 ## License
 

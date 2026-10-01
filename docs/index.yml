@@ -276,3 +276,12 @@ changes:
     status: complete
     depends_on:
       - "0030"
+  - id: "0032"
+    name: publish-a-linux-arm64-executable
+    path: changes/0032-publish-a-linux-arm64-executable.md
+    description: Publish a standalone Linux arm64 executable beside the x64 one under one SHA256SUMS, gate every publication on a native arm64 smoke test, and let an arm64 tx update itself.
+    spec: architecture
+    status: complete
+    depends_on:
+      - "0004"
+      - "0015"

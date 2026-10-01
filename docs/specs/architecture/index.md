@@ -62,17 +62,17 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 ### Runtime and Distribution
 
 - The host MUST target Bun and TypeScript.
-- The initial supported platform is Linux x64 with glibc and the Bun baseline CPU target.
-- The deterministic production build MUST create the standalone executable at `dist/tx` using `bun-linux-x64-baseline`.
+- The supported platforms are Linux x64 with glibc and the Bun baseline CPU target, and Linux arm64 with glibc.
+- Every run of the deterministic production build MUST create both standalone executables: `dist/tx` using `bun-linux-x64-baseline` and `dist/tx-linux-arm64` using `bun-linux-arm64`. The build MUST NOT select a subset of them, and a failure to create either MUST fail the build.
 - A compiled executable MAY load trusted plugin source and dependencies from plugin-owned storage, or from a location that storage references rather than from the storage itself.
-- The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist.
-- GitHub Releases MUST provide the Linux x64 executable and a SHA-256 checksum file suitable for mise's GitHub backend. Those two assets are also what an executable no version manager owns replaces itself from; where one does own it, self-update delegates to that manager instead. [Updates: Executable Updates](../updates/index.md#executable-updates) owns both paths and the platforms they reach.
+- The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist. It MUST declare Linux x64 as its only CPU and MUST NOT contain the arm64 executable.
+- GitHub Releases MUST provide the Linux x64 executable as `tx-linux-x64`, the Linux arm64 executable as `tx-linux-arm64`, and one SHA-256 checksum file, `SHA256SUMS`, covering both, suitable for mise's GitHub backend. Those assets are also what an executable no version manager owns replaces itself from; where one does own it, self-update delegates to that manager instead. [Updates: Executable Updates](../updates/index.md#executable-updates) owns both paths and the platforms they reach.
 - `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
 
 #### Scenario: Standalone host
 
 - **GIVEN** a compiled `tx` executable
-- **WHEN** the user runs it on supported Linux x64 glibc
+- **WHEN** the user runs it on supported Linux x64 or arm64 glibc
 - **THEN** the generic host starts without a separately installed Node.js or Bun runtime
 
 #### Scenario: Version without plugins
@@ -156,6 +156,7 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - Release Please MUST use the manifest/node release type and conventional commits; release PRs MUST be merged manually.
 - Release orchestration MUST run after successful push-to-`main` CI, dispatch CI for each Release Please PR head, and verify the dispatched run uses the exact head SHA.
 - A release created by Release Please MUST be built, checked, packaged, published to GitHub Packages, and uploaded to the existing GitHub Release in the same workflow invocation.
+- Before the package is published or any release asset is uploaded, the arm64 executable MUST be run natively on an arm64 runner and MUST report the release version and print root help. If it does not, the release workflow MUST NOT publish the package or upload any asset for that release.
 - Release automation MUST use `GITHUB_TOKEN`, MUST NOT rely on token-created tag or release events to trigger publication, and MUST NOT use `pull_request_target` or weaken required CI.
 - Publishing MUST be idempotent: an existing package version MUST NOT be overwritten, while release assets MAY be replaced safely on retry.
 
@@ -164,6 +165,12 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - **GIVEN** Release Please creates or updates a release PR with `GITHUB_TOKEN`
 - **WHEN** release orchestration processes that PR
 - **THEN** it explicitly dispatches CI and waits for a successful `workflow_dispatch` run at the exact PR head SHA
+
+#### Scenario: arm64 smoke test gates publication
+
+- **GIVEN** Release Please has created a release and both executables have been built
+- **WHEN** the arm64 executable fails to report the release version or to print root help on a native arm64 runner
+- **THEN** the release workflow fails without publishing the package or uploading any release asset
 
 #### Scenario: Documentation-only pull request
 
@@ -258,7 +265,7 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 
 ## Open Questions
 
-- Additional supported operating systems and architectures may be decided in a future change.
+- Additional supported operating systems and libc variants — macOS, Windows, musl — and an arm64 npm package may be decided in a future change.
 - Plugin initialization is eager: on every invocation that reaches dispatch, every installed plugin loads to contribute its namespace and description. Making it lazy is worth revisiting if startup cost comes to justify the added caching contract.
 - Automatic update checking is prohibited outright rather than deferred; [Updates](../updates/) owns that prohibition and the user-invoked update lifecycle that replaces it.
 
@@ -271,7 +278,9 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 - [Change 0008: Link Local Marketplace Sources](../../changes/0008-link-local-marketplace-sources.md)
 - [Change 0009: Skip Quality Commands for Documentation](../../changes/0009-skip-quality-commands-for-documentation.md)
 - [Change 0015: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
+- [Change 0032: Publish a Linux arm64 Executable](../../changes/0032-publish-a-linux-arm64-executable.md)
 - [Bun executables](https://bun.sh/docs/bundler/executables)
+- [GitHub-hosted runners](https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners)
 
 ## Changelog
 
@@ -290,3 +299,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-08-07 | Made composition order observable through update-participant ordering, and made the published release assets the executable's own update source | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |
 | 2026-09-05 | Every first-party executable file must be linted, type checked and covered; the demonstration became a documented script | [0024-relocate-and-cover-the-demo](../../changes/0024-relocate-and-cover-the-demo.md) |
 | 2026-09-06 | Widened the plugin dependency boundary to include the published capability contracts a plugin consumes, alongside the public plugin contract | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
+| 2026-10-01 | Added Linux arm64 glibc as a supported platform: both executables built every run, `tx-linux-arm64` published beside `tx-linux-x64` under one `SHA256SUMS`, the package kept x64-only, and publication gated on a native arm64 smoke test | [0032-publish-a-linux-arm64-executable](../../changes/0032-publish-a-linux-arm64-executable.md) |

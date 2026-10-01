@@ -7,11 +7,7 @@ name: Release
     types:
       - completed
 
-permissions:
-  actions: write
-  contents: write
-  packages: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.event.workflow_run.head_branch }}
@@ -26,6 +22,15 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.repository.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    outputs:
+      publish: ${{ steps.publication.outputs.publish }}
+      sha: ${{ steps.publication.outputs.sha }}
+      tag: ${{ steps.publication.outputs.tag }}
+      version: ${{ steps.publication.outputs.version }}
     steps:
       - name: Run Release Please
         id: release
@@ -139,36 +144,41 @@ jobs:
             echo "version=${RELEASE_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
+  build:
+    name: Build
+    needs: release
+    if: needs.release.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      archive: ${{ steps.package.outputs.archive }}
+      archive_sha256: ${{ steps.package.outputs.archive_sha256 }}
+      x64_sha256: ${{ steps.package.outputs.x64_sha256 }}
+      arm64_sha256: ${{ steps.package.outputs.arm64_sha256 }}
+    steps:
       - name: Check out released commit
-        if: steps.publication.outputs.publish == 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.publication.outputs.sha }}
+          ref: ${{ needs.release.outputs.sha }}
           fetch-depth: 0
 
       - name: Set up Bun
-        if: steps.publication.outputs.publish == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
       - name: Set up Node
-        if: steps.publication.outputs.publish == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://npm.pkg.github.com
-          scope: "@fx"
 
-      - name: Validate, package, and publish
-        if: steps.publication.outputs.publish == 'true'
+      - name: Validate, build, and package
+        id: package
         env:
-          GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_SHA: ${{ steps.publication.outputs.sha }}
-          RELEASE_TAG: ${{ steps.publication.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.publication.outputs.version }}
+          RELEASE_SHA: ${{ needs.release.outputs.sha }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
@@ -180,16 +190,140 @@ jobs:
           package_version=$(node -p "require('./package.json').version")
           [[ "$package_version" == "$RELEASE_VERSION" ]]
           [[ "$(./dist/tx --version)" == "$RELEASE_VERSION" ]]
+          [[ "$(file -b dist/tx)" == "ELF 64-bit LSB executable, x86-64,"* ]]
+          [[ "$(file -b dist/tx-linux-arm64)" == "ELF 64-bit LSB executable, ARM aarch64,"* ]]
 
           mkdir -p release package
           npm pack --ignore-scripts --json --pack-destination package > package/pack.json
           archive=$(jq -r '.[0].filename' package/pack.json)
           [[ "$archive" == "fx-tx-${RELEASE_VERSION}.tgz" ]]
           [[ "$(tar -xOf "package/${archive}" package/package.json | jq -r .version)" == "$RELEASE_VERSION" ]]
+          [[ "$(tar -xOf "package/${archive}" package/package.json | jq -c .cpu)" == '["x64"]' ]]
+          contents=$(tar -tzf "package/${archive}")
+          [[ "$contents" != *tx-linux-arm64* ]]
+
+          cp dist/tx release/tx-linux-x64
+          cp dist/tx-linux-arm64 release/tx-linux-arm64
+          cp "package/${archive}" "release/${archive}"
+          {
+            echo "archive=${archive}"
+            echo "archive_sha256=$(sha256sum "release/${archive}" | cut -d ' ' -f 1)"
+            echo "x64_sha256=$(sha256sum release/tx-linux-x64 | cut -d ' ' -f 1)"
+            echo "arm64_sha256=$(sha256sum release/tx-linux-arm64 | cut -d ' ' -f 1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidates
+          path: release/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+
+  # The arm64 executable is cross-compiled above; this is the only place it
+  # runs on real arm64 hardware, and nothing is published until it has.
+  smoke-arm64:
+    name: Smoke test arm64
+    needs:
+      - release
+      - build
+    if: needs.release.outputs.publish == 'true'
+    runs-on: ubuntu-24.04-arm
+    permissions: {}
+    steps:
+      - name: Download release candidates
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidates
+          path: release
+
+      - name: Run the arm64 executable natively
+        env:
+          ARM64_SHA256: ${{ needs.build.outputs.arm64_sha256 }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$(uname -m)" == "aarch64" ]]
+          [[ "$ARM64_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          echo "${ARM64_SHA256}  release/tx-linux-arm64" | sha256sum --check --strict -
+          chmod 755 release/tx-linux-arm64
+
+          sandbox=$(mktemp -d)
+          trap 'rm -rf "$sandbox"' EXIT
+          export HOME="${sandbox}/home"
+          export XDG_CONFIG_HOME="${sandbox}/config"
+          export XDG_DATA_HOME="${sandbox}/data"
+          export XDG_CACHE_HOME="${sandbox}/cache"
+          export XDG_STATE_HOME="${sandbox}/state"
+          mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
+
+          version=$(release/tx-linux-arm64 --version)
+          [[ "$version" == "$RELEASE_VERSION" ]] || {
+            echo "tx-linux-arm64 reported ${version}, expected ${RELEASE_VERSION}" >&2
+            exit 1
+          }
+          help=$(release/tx-linux-arm64 --help)
+          grep -qF 'Usage: tx' <<<"$help"
+          grep -qF 'marketplace' <<<"$help"
+
+  # Gated on the smoke test as well as the build, so a release is published
+  # everywhere or nowhere: the package version cannot be republished later.
+  publish:
+    name: Publish
+    needs:
+      - release
+      - build
+      - smoke-arm64
+    if: needs.release.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Download release candidates
+        uses: actions/download-artifact@v4
+        with:
+          name: release-candidates
+          path: release
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@fx"
+
+      - name: Publish package and release assets
+        env:
+          ARCHIVE: ${{ needs.build.outputs.archive }}
+          ARCHIVE_SHA256: ${{ needs.build.outputs.archive_sha256 }}
+          ARM64_SHA256: ${{ needs.build.outputs.arm64_sha256 }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ needs.release.outputs.sha }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+          X64_SHA256: ${{ needs.build.outputs.x64_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" == "v${RELEASE_VERSION}" ]]
+          [[ "$ARCHIVE" == "fx-tx-${RELEASE_VERSION}.tgz" ]]
+          [[ "$(gh api "/repos/${GH_REPO}/commits/${RELEASE_TAG}" --jq .sha)" == "$RELEASE_SHA" ]]
+          (
+            cd release
+            printf '%s  %s\n' \
+              "$X64_SHA256" tx-linux-x64 \
+              "$ARM64_SHA256" tx-linux-arm64 \
+              "$ARCHIVE_SHA256" "$ARCHIVE" |
+              sha256sum --check --strict -
+          )
+          chmod 755 release/tx-linux-x64 release/tx-linux-arm64
 
           published=$(npm view "@fx/tx@${RELEASE_VERSION}" version --registry https://npm.pkg.github.com 2>/dev/null || true)
           if [[ -z "$published" ]]; then
-            npm publish "./package/${archive}" --registry https://npm.pkg.github.com
+            npm publish "./release/${ARCHIVE}" --registry https://npm.pkg.github.com
           else
             [[ "$published" == "$RELEASE_VERSION" ]]
             echo "@fx/tx@${RELEASE_VERSION} is already published; refusing to overwrite it."
@@ -197,14 +331,13 @@ jobs:
           [[ "$(npm view "@fx/tx@${RELEASE_VERSION}" version --registry https://npm.pkg.github.com)" == "$RELEASE_VERSION" ]]
           mkdir published
           npm pack "@fx/tx@${RELEASE_VERSION}" --ignore-scripts --pack-destination published --registry https://npm.pkg.github.com
-          cmp "package/${archive}" "published/${archive}"
+          cmp "release/${ARCHIVE}" "published/${ARCHIVE}"
 
-          cp dist/tx release/tx-linux-x64
-          chmod 755 release/tx-linux-x64
-          (cd release && sha256sum tx-linux-x64 > SHA256SUMS)
-          gh release upload "$RELEASE_TAG" release/tx-linux-x64 release/SHA256SUMS --clobber
+          (cd release && sha256sum tx-linux-x64 tx-linux-arm64 > SHA256SUMS)
+          gh release upload "$RELEASE_TAG" release/tx-linux-x64 release/tx-linux-arm64 release/SHA256SUMS --clobber
 
-          expected_size=$(stat -c %s release/tx-linux-x64)
-          read -r actual_size checksum_size < <(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
-            --jq '[([.assets[] | select(.name == "tx-linux-x64") | .size][0] // 0), ([.assets[] | select(.name == "SHA256SUMS") | .size][0] // 0)] | @tsv')
-          [[ "$actual_size" == "$expected_size" && "$checksum_size" -gt 0 ]]
+          read -r x64_size arm64_size checksum_size < <(gh api "/repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" \
+            --jq '[([.assets[] | select(.name == "tx-linux-x64") | .size][0] // 0), ([.assets[] | select(.name == "tx-linux-arm64") | .size][0] // 0), ([.assets[] | select(.name == "SHA256SUMS") | .size][0] // 0)] | @tsv')
+          [[ "$x64_size" == "$(stat -c %s release/tx-linux-x64)" ]]
+          [[ "$arm64_size" == "$(stat -c %s release/tx-linux-arm64)" ]]
+          [[ "$checksum_size" == "$(stat -c %s release/SHA256SUMS)" ]]
