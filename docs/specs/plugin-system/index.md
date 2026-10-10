@@ -701,7 +701,7 @@ A marketplace's plugins are written against the plugin API of some range of `tx`
 #### Scenario: An incompatible marketplace is refused in isolation
 
 - **GIVEN** the running `tx` is `1.8.0`, an installed marketplace `tools` whose manifest declares `"tx": "^2.0.0"`, and a second installed marketplace declaring no `tx`
-- **WHEN** the user runs a command contributed by the second marketplace
+- **WHEN** the user runs a command contributed by the marketplace declaring no `tx`
 - **THEN** that command runs and its exit code is the process exit code, no entry of `tools` is imported, and standard error carries one diagnostic naming `tools`, `^2.0.0`, `1.8.0`, `tx update`, `tx marketplace pin tools <ref>`, and `TX_IGNORE_COMPATIBILITY`
 
 #### Scenario: A marketplace without a range loads everywhere
@@ -726,7 +726,7 @@ A marketplace's plugins are written against the plugin API of some range of `tx`
 
 - **GIVEN** the running `tx` is `2.0.0-rc.1`
 - **WHEN** it loads one marketplace declaring `"tx": "^2.0.0-rc.0"` and another declaring `"tx": ">=1.0.0"`
-- **THEN** the first loads and the second is refused
+- **THEN** the marketplace declaring `^2.0.0-rc.0` loads and the one declaring `>=1.0.0` is refused
 
 #### Scenario: Unknown keys are ignored
 
