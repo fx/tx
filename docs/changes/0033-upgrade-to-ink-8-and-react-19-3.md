@@ -19,7 +19,7 @@ Ink 8's breaking changes, as its release notes state them:
 - Ink 8 requires React 19.3 or newer.
 - `<Box>` `minWidth` and `maxWidth` accept numbers only.
 - The `stdin`, `stdout`, and `stderr` passed to `render()`, and the streams `useStdin`, `useStdout`, and `useStderr` return, are typed as generic Node streams. TTY-only members such as `stdout.columns` are gone from those types; `useWindowSize` reports the terminal size.
-- `useInput`, and Ink's internal input event, no longer receive control sequences that map to no key — mouse reports, focus in and out, cursor-position reports, and similar terminal replies are discarded.
+- `useInput` no longer receives control sequences that map to no key — mouse reports, focus in and out, cursor-position reports, and similar terminal replies are discarded.
 - Ink's development tools connect over the platform's native `WebSocket` instead of the `ws` package.
 
 The last of these is invisible to plugins. The first four are not.
@@ -59,7 +59,7 @@ Bump the four dependencies together — Ink 8 declares `react` and `@types/react
 
 `plugins/dialogs/index.ts` gives Ink `PassThrough` and `Writable` adapters around the injected streams. Ink 7 typed `render()`'s streams as TTY streams, so the adapters were cast through `unknown`; Ink 8 types them as generic Node streams, which the adapters already are, so the casts go.
 
-`plugins/dialogs/entry.ts` drops `unresolvedControlSequence`. Ink 8's `App` runs every complete `CSI` or `SS3` sequence through its key parser before emitting input and discards the ones that map to no key, while `useInput` reports the ones that do with empty input. A string matching the old pattern can therefore reach the handler only as typed or pasted text, which the dialogs spec now requires to append.
+`plugins/dialogs/entry.ts` drops `unresolvedControlSequence`. Ink 8 discards every complete `CSI` or `SS3` sequence that maps to no key before any input handler runs, while `useInput` reports the ones that do with empty input. A string matching the old pattern can therefore reach the handler only as typed or pasted text, which the dialogs spec now requires to append.
 
 ### Decisions
 
