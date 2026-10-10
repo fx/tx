@@ -80,8 +80,8 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 #### Scenario: Production React
 
 - **GIVEN** the production build has run
-- **WHEN** the standalone executable is inspected
-- **THEN** it carries React's production error decoder and none of React's development warnings
+- **WHEN** either standalone executable is inspected
+- **THEN** it carries React's production error decoder, none of React's development warnings, and `string-width` measuring with Bun's native string width
 
 #### Scenario: Version without plugins
 

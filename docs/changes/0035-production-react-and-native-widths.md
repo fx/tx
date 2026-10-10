@@ -27,7 +27,7 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 - Biome formatting and lint checks MUST pass.
 - TypeScript checking MUST pass with no errors.
 - Bun tests MUST pass with 100% statement, function, and line coverage across production source files.
-- The standalone build test MUST show that the executable carries React's production build and none of its development warnings.
+- The standalone build test MUST show, for both executables the production build creates, that each carries React's production build and none of its development warnings, and that each carries the native-width rewrite of `string-width`.
 - A test MUST bundle `string-width` through the build's rewrite and show that it agrees with `Bun.stringWidth` for the options Ink uses, keeps its own rules when ambiguous characters count as wide, and measures a screen of box-drawing rows within a bound the unrewritten module exceeds by an order of magnitude; and that the rewrite refuses a source whose shape it does not recognise.
 
 Skipping or weakening any of these rules to land the PR MUST be treated as a bug in the PR, not in the rule.
@@ -54,7 +54,7 @@ The rewrite follows the existing `disable-ink-development-mode` plugin: it chang
 
 ## Tasks
 
-- [x] Define `NODE_ENV=production` in the production build; test the executable carries React's production build
+- [x] Define `NODE_ENV=production` in the production build; test both executables carry React's production build and the native-width rewrite
 - [x] Rewrite `string-width` to Bun's native width for the default options as it is bundled; test agreement, the ambiguous-wide exception, speed, and refusal of an unrecognised source
 - [x] Architecture spec requirements and changelog; index entries
 

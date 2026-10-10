@@ -88,14 +88,19 @@ test("the production build is a standalone executable", async () => {
       magic: elfMagic,
       machine: aarch64,
     });
-    // React's development build carries its warnings as text and its
-    // production build only an error-decoder link; the executable, and every
-    // plugin rendering with the React it injects, must get the production one.
-    const executable = Buffer.from(await Bun.file(binaryPath).arrayBuffer());
-    expect(
-      executable.includes("Each child in a list should have a unique"),
-    ).toBe(false);
-    expect(executable.includes("Minified React error")).toBe(true);
+    // What the production build must do to every executable it ships:
+    // React's production build (its development build carries its warnings
+    // as text, its production build only an error-decoder link), and the
+    // native-width rewrite of string-width (the only source of this
+    // expression in the bundle; without the plugin it does not occur).
+    for (const path of [binaryPath, arm64BinaryPath]) {
+      const executable = Buffer.from(await Bun.file(path).arrayBuffer());
+      expect(
+        executable.includes("Each child in a list should have a unique"),
+      ).toBe(false);
+      expect(executable.includes("Minified React error")).toBe(true);
+      expect(executable.includes("globalThis.Bun?.stringWidth")).toBe(true);
+    }
     await Promise.all([
       rm(stagedSource, { recursive: true }),
       rm(stagedPlugins, { recursive: true }),
