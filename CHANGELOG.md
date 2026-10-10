@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0](https://github.com/fx/tx/compare/v1.8.0...v2.0.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** plugins render with the host's Ink 8 and React 19.3. Ink 8 requires React 19.3 or newer; <Box> minWidth and maxWidth accept numbers only; stdin, stdout and stderr in render() options and in useStdin, useStdout and useStderr are typed as generic Node streams, so TTY-only members such as stdout.columns are gone from those types (use useWindowSize); and useInput no longer receives control sequences that map to no key, such as mouse reports, focus in/out and cursor-position reports, which are now discarded.
+
+### Features
+
+* **deps:** upgrade to Ink 8 and React 19.3 ([#79](https://github.com/fx/tx/issues/79)) ([4774d42](https://github.com/fx/tx/commit/4774d42c8b2d1e284c5a08200f41636ac2eb7b1f))
+* **marketplace:** install the newest version compatible with the running tx ([#83](https://github.com/fx/tx/issues/83)) ([a46f01b](https://github.com/fx/tx/commit/a46f01bc73d213c984e958d7c106df8f27ceb2f0))
+* **marketplace:** refuse marketplaces whose tx range excludes the running tx ([#82](https://github.com/fx/tx/issues/82)) ([e3a872a](https://github.com/fx/tx/commit/e3a872ada76519ab56699bc9bb8248d5b8b14bd5))
+
+
+### Performance Improvements
+
+* build React for production and cache text widths ([#84](https://github.com/fx/tx/issues/84)) ([df48d7f](https://github.com/fx/tx/commit/df48d7f84adc14bbd2226bfb336ccadcf697799a))
+
 ## [1.8.0](https://github.com/fx/tx/compare/v1.7.0...v1.8.0) (2026-10-01)
 
 
