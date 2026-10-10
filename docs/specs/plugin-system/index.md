@@ -16,6 +16,8 @@ The second registry provider from [Change 0018](../../changes/0018-add-config-st
 
 [Minimal Clone Footprint](#minimal-clone-footprint) is implemented as specified in [Change 0019](../../changes/0019-reduce-marketplace-clone-footprint.md) for Git-sourced installs and updates, including the explicit complete-tree option, target-commit footprint re-derivation, complete-tree fallback, and transactional restoration.
 
+[Marketplace Compatibility](#marketplace-compatibility) is specified by [Change 0034](../../changes/0034-add-marketplace-tx-compatibility.md) and is not implemented yet: no manifest field it defines is validated or read, and loading refuses nothing on compatibility grounds.
+
 ## Requirements
 
 ### Generic Plugin Host
@@ -373,6 +375,7 @@ export interface CommandContext {
 - A marketplace installed through the SSH retry MUST report its SSH source in `marketplace list`, since that is the source it was cloned from.
 - For local directory sources, see [Local Marketplace Sources](#local-marketplace-sources). That section owns the requirement and states it in RFC 2119 terms; this bullet is a pointer to it, not a second statement of it.
 - The marketplace plugin MUST own the marketplace update participant, marketplace version labels, and marketplace version pins, including the `<source>@<ref>` suffix `marketplace add` accepts and the commands that change a pin. [Updates: Marketplace Updates](../updates/index.md#marketplace-updates) and [Updates: Marketplace Versions and Pins](../updates/index.md#marketplace-versions-and-pins) own those requirements and state them in RFC 2119 terms; these are pointers to them, not a second statement of them.
+- The marketplace plugin MUST own the manifest's compatibility and version-history fields, the refusal to load a marketplace the running `tx` does not support, and the override that forces loading one. [Marketplace Compatibility](#marketplace-compatibility) owns those requirements, and [Updates: Compatible Marketplace Versions](../updates/index.md#compatible-marketplace-versions) owns which commit adding and updating select from the history; these are pointers to them, not a second statement of them.
 - The non-interactive execution required of clone attempts above MUST apply to every network operation the marketplace plugin performs against a remote, fetching included, and MUST NOT extend to reading Git configuration, `marketplace list`, or dependency installation.
 - Automatically loading `.tx/config.json` from the current working repository is out of scope. A working repository is loaded by adding it as a local marketplace source.
 - The marketplace plugin MUST translate each configured plugin entry into a lazy generic child plugin definition with an immutable generic identity.
@@ -672,6 +675,65 @@ A user can seed the list of marketplaces they want installed before ever running
 - **WHEN** `marketplace install` installs that entry
 - **THEN** it installs the same pinned version `marketplace add` would install from that same source
 
+### Marketplace Compatibility
+
+A marketplace's plugins are written against the plugin API of some range of `tx` releases, and a `tx` release that breaks that API breaks them. This section lets a marketplace declare which `tx` releases it supports, which version of the marketplace a commit is, and which commit carried each of its released versions, and it makes `tx` refuse to run a marketplace's plugins under a `tx` that marketplace does not support. Which commit adding and updating select from that history is owned by [Updates: Compatible Marketplace Versions](../updates/index.md#compatible-marketplace-versions); this section owns the manifest fields, their validation, the range semantics, and what loading does with them. A marketplace remains one checkout that moves as one: compatibility is declared for the marketplace, never for an individual plugin in it.
+
+- A marketplace manifest MAY declare three top-level fields, each optional: `version`, the version of the marketplace this commit is; `tx`, the range of `tx` versions this commit supports; and `versions`, the marketplace's release history. They MUST be read from the manifest [Marketplace Plugin Ownership](#marketplace-plugin-ownership) selects — `.tx/config.json`, or the legacy root `tx.marketplace.json` when it is the only one present — and the other file, when both exist, MUST NOT be consulted for them.
+- A manifest that declares no `tx` MUST be treated as compatible with every `tx` version, pre-releases included. Every marketplace that predates this section therefore keeps loading, and keeps being installed and updated, exactly as it does.
+- `version`, when present, MUST be a string that is a semantic version as [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) defines one, written without a `v` prefix. Pre-release and build components are permitted.
+- `tx`, when present, MUST be a string that is a valid range under the range grammar below and is not empty or whitespace alone. The grammar reads an empty string as `*`; a manifest spells "every version" by omitting `tx` or writing `*`, never by leaving the value blank.
+- `versions`, when present, MUST be an array, which MAY be empty. Each element MUST be an object carrying `version`, a semantic version under the same rule as the top-level field; `ref`, the full object name of the commit that carried that version, written in lowercase hexadecimal — 40 characters, or 64 in a repository that uses SHA-256 object names; and `tx`, a range under the same rule as the top-level field. `tx` is required in an element even though it is optional at the top level: the top-level default exists to keep existing manifests valid, and a history entry has no existing manifests to keep valid.
+- No two elements of `versions` MAY carry versions of equal precedence. Build metadata does not contribute to precedence, so `1.4.0+a` and `1.4.0+b` are duplicates.
+- A manifest violating any rule above MUST be rejected as an invalid manifest whose message names the offending field, and the element's position for a field inside `versions`. It MUST be rejected wherever a manifest is validated — when a marketplace is added, when an update validates its target, and when a marketplace is loaded — exactly as an invalid `plugins` array is. Such a failure depends on content alone and never on which files are present, so [Minimal Clone Footprint](#minimal-clone-footprint) reports it without retrieving the complete tree.
+- Keys this section does not define MUST continue to be ignored, at the top level as [Marketplace Plugin Ownership](#marketplace-plugin-ownership) already permits and inside a `versions` element alike.
+- A range MUST be read by the range grammar npm documents for its `semver` package, in its default strict mode: comparator sets separated by `||`, each a whitespace-separated conjunction of comparators; the primitive operators `<`, `<=`, `>`, `>=`, and `=`; a bare version; X-ranges such as `*`, `1.x`, and `1.2`; tilde ranges; caret ranges; and hyphen ranges such as `1.2.0 - 1.9.0`. A string that grammar does not accept MUST be invalid. An invalid range MUST NOT be treated as matching every version, nor as matching none: it is a manifest error.
+- Whether a version satisfies a range MUST be decided exactly as that grammar's reference implementation decides it in its default mode. In particular, a version carrying a pre-release component satisfies a comparator set only when some comparator in that set names a pre-release of the same major, minor, and patch version, so `tx` `2.0.0-rc.1` satisfies `^2.0.0-rc.0` and satisfies neither `>=1.0.0` nor `^2.0.0`. Build metadata MUST NOT affect satisfaction.
+- The running `tx` version MUST be the version the host injects as tx version metadata under [Generic Context and Dependencies](#generic-context-and-dependencies). A running version that is not a semantic version MUST satisfy no declared range; a manifest declaring no `tx` is still compatible with it.
+- Loading a marketplace MUST compare the `tx` range its checkout's manifest declares with the running `tx` version before any of its plugin entries is imported. This applies to every installed marketplace — cloned, pinned, or a live local reference — because what loading reads is whatever the checkout or the referenced directory holds.
+- A marketplace whose declared range the running version does not satisfy MUST contribute no plugin: none of its entries is imported, none of its plugins initializes, and none of their dependencies is resolved. The refusal MUST be reported once for the marketplace as a plugin failure under [Generic Plugin Host](#generic-plugin-host)'s failure isolation, which owns what that means for the exit code, for other marketplaces, and for healthy plugins. The marketplace management commands and the marketplace update participant MUST remain available, as they do for every other marketplace failure.
+- The refusal's diagnostic MUST name the marketplace, the range it declares, and the running `tx` version. For a cloned marketplace it MUST name `tx update` and `tx marketplace pin <name> <ref>` as remedies; for every marketplace it MUST name the override below. It MUST NOT name `marketplace remove` as the remedy: nothing about the installation is broken, and removing it would lose a marketplace that a compatible `tx` runs.
+- Comparing at load time MUST NOT contact any remote. It reads only the manifest already on disk, as [Updates: Never Automatic](../updates/index.md#never-automatic) requires of every invocation that is not an update.
+- When the environment variable `TX_IGNORE_COMPATIBILITY` is exactly `1`, loading MUST load a marketplace its declared range would refuse, and MUST write one line to standard error for each such marketplace, naming the marketplace, the range it declares, the running `tx` version, and the variable. Any other value, including an empty one, and an unset variable MUST leave refusal in effect.
+- The override MUST NOT write anything for a marketplace whose declared range is satisfied, MUST NOT bypass manifest validation — an invalid `tx` is an invalid manifest whether or not the variable is set — and MUST NOT change which commit adding or updating selects, which [Updates: Compatible Marketplace Versions](../updates/index.md#compatible-marketplace-versions) owns.
+- The variable MUST be read from the environment the host exposes to plugins, like every other variable a plugin consults.
+
+#### Scenario: An incompatible marketplace is refused in isolation
+
+- **GIVEN** the running `tx` is `1.8.0`, an installed marketplace `tools` whose manifest declares `"tx": "^2.0.0"`, and a second installed marketplace declaring no `tx`
+- **WHEN** the user runs a command contributed by the marketplace declaring no `tx`
+- **THEN** that command runs and its exit code is the process exit code, no entry of `tools` is imported, and standard error carries one diagnostic naming `tools`, `^2.0.0`, `1.8.0`, `tx update`, `tx marketplace pin tools <ref>`, and `TX_IGNORE_COMPATIBILITY`
+
+#### Scenario: A marketplace without a range loads everywhere
+
+- **GIVEN** an installed marketplace whose manifest declares no `tx`
+- **WHEN** any `tx` version, a pre-release included, loads it
+- **THEN** its plugins load exactly as they did before this section existed
+
+#### Scenario: The override loads an incompatible marketplace
+
+- **GIVEN** the running `tx` is `1.8.0` and an installed marketplace `tools` declares `"tx": "^2.0.0"`
+- **WHEN** the user runs a command contributed by `tools` with `TX_IGNORE_COMPATIBILITY=1`
+- **THEN** the command runs and standard error carries one warning line naming `tools`, `^2.0.0`, `1.8.0`, and `TX_IGNORE_COMPATIBILITY`, while the same invocation with the variable set to `true`, `0`, or an empty value refuses the marketplace
+
+#### Scenario: A malformed range is a manifest error
+
+- **GIVEN** a marketplace whose manifest declares `"tx": "^1.0.0 garbage"`, or a `versions` element whose `ref` is an abbreviated hash, or two `versions` elements both carrying `1.4.0`
+- **WHEN** the marketplace is added, or loaded after being installed
+- **THEN** adding fails and publishes nothing, loading reports an invalid manifest naming the field, and neither outcome is treated as compatible or changed by `TX_IGNORE_COMPATIBILITY`
+
+#### Scenario: A pre-release tx is matched by the pre-release rule
+
+- **GIVEN** the running `tx` is `2.0.0-rc.1`
+- **WHEN** it loads one marketplace declaring `"tx": "^2.0.0-rc.0"` and another declaring `"tx": ">=1.0.0"`
+- **THEN** the marketplace declaring `^2.0.0-rc.0` loads and the one declaring `>=1.0.0` is refused
+
+#### Scenario: Unknown keys are ignored
+
+- **GIVEN** a manifest carrying a top-level key and a `versions` element key that this section does not define
+- **WHEN** the marketplace is validated
+- **THEN** both keys are ignored and validation succeeds when everything this section defines is valid
+
 ### Composition and Boundaries
 
 - The repository composition root outside `src/` MUST provide the ordered default plugin definitions to the generic host.
@@ -713,6 +775,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - Generic lifecycle hooks beyond initialization and command dispatch are out of scope.
 - A reduced clone footprint materializes only the directories entry and package resolution require; it does not guarantee a plugin's module graph — a static relative import or a nonliteral dynamic import alike — can reach a repository path outside them. [Marketplace Plugin Ownership](#marketplace-plugin-ownership)'s requirement that a plugin's dependency graph resolve by Node's rules to any depth is unaffected for files a reduced retrieval materialized; a plugin whose graph reaches further needs the explicit full-retrieval request this section requires `marketplace add` to accept.
 - A reduced clone footprint reduces file content transferred and materialized; it does not reduce the amount of commit history retrieved. Limiting history depth is out of scope, because the ancestry check [Updates](../updates/index.md) relies on to detect a rewritten upstream needs the marketplace's full commit history to be present.
+- [Marketplace Compatibility](#marketplace-compatibility) binds `tx` releases that implement it. A release predating it reads only a manifest's `plugins` array and ignores `version`, `tx`, and `versions`, as it ignores every key it does not define, so a marketplace adopting the fields keeps installing and loading there — and is neither refused nor resolved there. Nothing a marketplace declares can reach a release that was published before the declaration meant anything.
 
 ## Open Questions
 
@@ -740,10 +803,13 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0018: Add Config Store and Marketplace Installs](../../changes/0018-add-config-store-and-marketplace-installs.md)
 - [Change 0019: Reduce Marketplace Clone Footprint](../../changes/0019-reduce-marketplace-clone-footprint.md)
 - [Change 0033: Upgrade to Ink 8 and React 19.3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md)
+- [Change 0034: Add Marketplace tx Compatibility](../../changes/0034-add-marketplace-tx-compatibility.md)
 - [Dialogs](../dialogs/)
 - [Config](../config/)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
 - [Bun runtime modules](https://bun.sh/docs/runtime/modules)
+- [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html)
+- [npm `semver` range grammar](https://github.com/npm/node-semver#ranges)
 
 ## Changelog
 
@@ -770,3 +836,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-31 | Specified a manifest-driven reduced clone footprint for Git-sourced marketplace install and update, with a fallback to a complete retrieval | [0019-reduce-marketplace-clone-footprint](../../changes/0019-reduce-marketplace-clone-footprint.md) |
 | 2026-09-06 | Specified Published Capability Contracts: every bundled capability publishes its structural contract at the subpath its registry key names, as types alone, held to the same boundary rules as the public plugin contract | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
 | 2026-10-10 | Made the injected React and Ink public APIs part of the plugin contract, so changing either is a breaking release, and upgraded the host to Ink 8 and React 19.3 | [0033-upgrade-to-ink-8-and-react-19-3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md) |
+| 2026-10-10 | Specified marketplace compatibility: the manifest's `version`, `tx`, and `versions` fields and their validation, npm's range grammar and pre-release rule, load-time refusal of a marketplace the running `tx` does not support, and the `TX_IGNORE_COMPATIBILITY` override | [0034-add-marketplace-tx-compatibility](../../changes/0034-add-marketplace-tx-compatibility.md) |

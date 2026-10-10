@@ -6,7 +6,7 @@
 
 The command belongs to a bundled update plugin that knows nothing about marketplaces or executables. It drives *update participants* contributed by other plugins through the generic host contribution mechanism owned by [Plugin System: Update Participation](../plugin-system/index.md#update-participation). Two bundled plugins participate: the marketplace plugin, which owns installed marketplace checkouts, and the executable plugin, which owns the running `tx` binary and claims no namespace of its own.
 
-[Never Automatic](#never-automatic) and [The Update Command](#the-update-command) are implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md), which ships the driver, [Marketplace Updates](#marketplace-updates) in [Change 0013](../../changes/0013-update-installed-marketplaces.md), which contributes the first participant to it, and [Marketplace Versions and Pins](#marketplace-versions-and-pins) in [Change 0014](../../changes/0014-pin-marketplace-versions.md), which pins what that participant updates. The rest describes the desired state, and [Change 0015](../../changes/0015-update-the-tx-executable.md) supplies the executable.
+[Never Automatic](#never-automatic) and [The Update Command](#the-update-command) are implemented as specified in [Change 0012](../../changes/0012-add-generic-update-lifecycle.md), which ships the driver, [Marketplace Updates](#marketplace-updates) in [Change 0013](../../changes/0013-update-installed-marketplaces.md), which contributes the first participant to it, and [Marketplace Versions and Pins](#marketplace-versions-and-pins) in [Change 0014](../../changes/0014-pin-marketplace-versions.md), which pins what that participant updates. The rest describes the desired state, and [Change 0015](../../changes/0015-update-the-tx-executable.md) supplies the executable. [Compatible Marketplace Versions](#compatible-marketplace-versions) is specified by [Change 0034](../../changes/0034-add-marketplace-tx-compatibility.md) and is not implemented yet: adding and updating an unpinned marketplace still target its remote's default branch whatever its manifest declares.
 
 ## Requirements
 
@@ -77,13 +77,13 @@ The marketplace plugin contributes one participant covering every installed mark
 - A cloned marketplace's version label MUST identify the commit its checkout holds, and MUST prefer a tag reachable from that commit when one exists, so a user reads `v1.4.0` rather than a bare hash where the marketplace publishes tags.
 - A referenced local marketplace MUST be reported as live and MUST NOT be fetched, moved, or modified. Its contents are whatever its directory holds when `tx` runs, so it has no version to compare and nothing to apply.
 - Gathering a cloned marketplace MUST contact its recorded remote to learn what is available, and MUST NOT modify the checkout: after gathering, the working tree, the checked-out commit, and installed dependencies MUST be exactly as they were. Updating remote-tracking state is not a modification of the checkout.
-- Gathering MUST resolve what the marketplace tracks: the remote's current default branch when it is not pinned, and its pinned ref when it is, per [Marketplace Versions and Pins](#marketplace-versions-and-pins).
+- Gathering MUST resolve what the marketplace tracks: the remote's current default branch when it is not pinned, and its pinned ref when it is, per [Marketplace Versions and Pins](#marketplace-versions-and-pins). For an unpinned marketplace, [Compatible Marketplace Versions](#compatible-marketplace-versions) decides whether that branch's commit or one from its release history is the target.
 - Fetching is a network operation and is therefore non-interactive on the terms [Plugin System: Marketplace Plugin Ownership](../plugin-system/index.md#marketplace-plugin-ownership) requires of every operation against a remote, which that section owns and this bullet only points at. It matters more here than anywhere else: `tx update` walks every installed marketplace, so one credential or host-key prompt would stall the whole run over a transport the user was not asked about.
 - A fetch MUST use the remote recorded in the checkout, exactly as it stands. The SSH retry that [Plugin System: Marketplace Plugin Ownership](../plugin-system/index.md#marketplace-plugin-ownership) requires of `marketplace add` MUST NOT be applied to a fetch: the recorded remote is the source the marketplace was successfully cloned from, so there is no second spelling of it to try.
 - Applying MUST move the checkout to the resolved target commit and MUST NOT merge, rebase, or create a commit.
 - Applying MUST refuse a checkout carrying modifications to tracked files, and MUST report the marketplace as blocked rather than discarding them.
 - An untracked file MUST NOT block an update on its own, because dependency installation puts untracked files in every checkout. An untracked file occupying a path the target commit tracks MUST block it: the file cannot be kept and moved to, and it MUST NOT be discarded to make room. That collision MUST be reported as blocked, naming the path.
-- An unpinned marketplace MUST only move forward: applying MUST refuse when its current commit is not an ancestor of the target, which is what a force-pushed or rewritten upstream looks like, and MUST report it as blocked with the remedy. A pin MAY move a checkout to any commit, in either direction, because the user named it.
+- An unpinned marketplace MUST only move forward: applying MUST refuse when its current commit is not an ancestor of the target, which is what a force-pushed or rewritten upstream looks like, and MUST report it as blocked with the remedy. A pin MAY move a checkout to any commit, in either direction, because the user named it. The one exception for an unpinned marketplace is a target selected from its release history, which [Compatible Marketplace Versions](#compatible-marketplace-versions) owns.
 - After the checkout moves, the marketplace MUST be validated and its selected dependency manifests installed exactly as they are when it is added, since the new commit may declare different plugins or different dependencies.
 - If validation or installation fails after the checkout moved, the checkout MUST be restored to the commit it held before, and the marketplace MUST be reported as failed. Restoring the checkout does not restore installed dependencies: installation is trusted code that owns what it writes, and `tx` MUST NOT claim to have undone it.
 - A marketplace whose checkout did not move MUST NOT be revalidated or reinstalled. Applying nothing MUST cost nothing.
@@ -172,6 +172,96 @@ The marketplace plugin contributes one participant covering every installed mark
 - **WHEN** the user runs `tx marketplace unpin cc` and then `tx update`
 - **THEN** the marketplace moves to the remote's default branch commit
 
+### Compatible Marketplace Versions
+
+A marketplace that declares which `tx` releases it supports, and which commit carried each of its released versions, per [Plugin System: Marketplace Compatibility](../plugin-system/index.md#marketplace-compatibility), can be installed at the newest version that supports the running `tx` instead of at whatever its default branch holds now. This section owns which commit adding and updating select from that declaration. The fields, their validation, the range semantics, the running `tx` version, and the refusal to load an incompatible marketplace belong to that section and are not restated here.
+
+Three terms are used throughout:
+
+- The **tip** is the commit the remote's default branch points at, as [Marketplace Updates](#marketplace-updates) already resolves it for an unpinned marketplace: the commit `marketplace add` clones onto, and the commit gathering resolves after its fetch.
+- A commit is **compatible** when the manifest it carries declares no `tx` range, or declares one the running `tx` version satisfies.
+- The **candidate** is the element of the tip manifest's `versions` history with the highest precedence among those whose `version` carries no pre-release component and whose `tx` range the running `tx` version satisfies.
+
+Reports describe a commit by the `version` its manifest declares when it declares one, by the `version` of the history element that selected it when it was selected from the history, and by its version label otherwise.
+
+- Selection MUST apply to an unpinned marketplace cloned from Git, and only to one. A pinned marketplace targets what its pin resolves to, per [Marketplace Versions and Pins](#marketplace-versions-and-pins), and a live reference has no target, per [Marketplace Updates](#marketplace-updates); selection changes neither, and both remain subject to the load-time refusal [Plugin System: Marketplace Compatibility](../plugin-system/index.md#marketplace-compatibility) owns.
+- Selecting a target MUST read the tip's manifest. When the tip is compatible, the target MUST be the tip, exactly as it is for a marketplace that declares nothing.
+- When the tip is not compatible, the target MUST be the candidate's commit. Only the tip's history MUST be consulted: the history any other commit carries, the installed commit's included, plays no part, so a publisher corrects or withdraws an entry by changing the default branch.
+- An element whose `version` carries a pre-release component MUST NOT be a candidate. A pre-release is the version its publisher has not offered yet, exactly as [Marketplace Versions and Pins](#marketplace-versions-and-pins) treats one, and a user who wants one pins it.
+- When the candidate's commit is not present in the checkout after the fetch, selection MUST fetch that commit by its object name from the recorded remote, under the non-interactive terms every fetch runs under. A commit the remote does not serve MUST make the candidate unusable.
+- The candidate commit's own manifest is the authority on what that commit supports; the history element is a claim about it. When the commit's own manifest is not compatible, cannot be read, or is invalid, the candidate MUST be unusable, and every report of it MUST name the candidate's version, the range its history element declares, and the range the commit's manifest declares or why that manifest could not be read.
+- An unusable candidate MUST NOT be replaced by a lower element of the history. Selection then has no usable target, and everything below that applies when no candidate exists applies to it.
+- Selection MUST NOT record a pin, or anything else. A marketplace installed or held at a version from its history stays unpinned and is selected afresh on every update, so it returns to the tip once the running `tx` supports the tip.
+- When the tip's manifest cannot be read or is invalid, the target MUST be the tip, exactly as it is for a marketplace that declares nothing, and selection MUST add no report of its own. When the tip is not the installed commit, the manifest's failure is reported where an invalid target's failure is already reported: by validation when the marketplace is added, or when the update is applied, with the checkout restored. When the installed commit already is the tip, there is nothing to apply, so it MUST NOT be revalidated, as [Marketplace Updates](#marketplace-updates) requires of every checkout that does not move; its failure is the load-time diagnostic that commit already produces on every invocation, and is not repeated by the update.
+- `marketplace add` with a Git source carrying no ref MUST select a target before validating and publishing, and MUST validate, install, and publish the target rather than the tip.
+- When the target `marketplace add` installs is not the tip, it MUST report on standard output the version it installed and that the tip requires a `tx` range the running version does not satisfy, naming that range.
+- When selection has no usable target, `marketplace add` MUST fail and publish nothing. The failure MUST name the running `tx` version and the range the tip declares, MUST state why the candidate was unusable when there was one, and MUST name the `<source>@<ref>` suffix as the way to install a specific version anyway.
+- `marketplace add` with a ref, and with a local source, MUST NOT select. When the commit or directory it installs is not compatible, adding MUST still succeed and MUST warn on standard error that the marketplace's plugins will be refused under the running `tx`, naming the range it declares and the running version. The user named that version or that directory, and the override [Plugin System: Marketplace Compatibility](../plugin-system/index.md#marketplace-compatibility) provides is how they run it.
+- `marketplace pin` MUST warn the same way when the commit its ref resolves to is not compatible, and MUST record the pin regardless. When the manifest at that commit cannot be read, pinning MUST NOT warn; the manifest is validated when the update applies the pin.
+- Gathering an unpinned marketplace MUST select its target by the rules above, and applying MUST select again rather than trust what gathering reported, exactly as applying re-reads everything else.
+- When the target was selected from the history and the installed commit is not an ancestor of it, applying MUST move the checkout to the target only when the installed commit is not compatible. That is the case moving backwards exists for: the running `tx` refuses the installed commit, and the target is the newest version it does not refuse.
+- Whether the installed commit is compatible MUST be decided by the manifest it carries. A manifest that cannot be read or is invalid MUST count as not compatible, because that commit does not load either.
+- When the target was selected from the history, the installed commit is compatible, and it is not an ancestor of the target, the checkout MUST stay where it is and the marketplace MUST be reported as held. Moving would trade a commit that works for an older one. This MUST NOT be reported as blocked or as a rewritten upstream, because nothing is wrong with the remote.
+- A marketplace whose tip is not compatible and whose checkout stays where it is — because the target is the installed commit, by the rule above, or because selection has no usable target while the installed commit is compatible — is **held**. A held marketplace MUST be reported with nothing available and with detail of the form `held at <installed>: <tip> requires tx <range>`. Being held is not a failure.
+- A marketplace whose target was selected from the history and is applicable MUST report the target's version label as available, with detail of the form `<tip> requires tx <range>; <target> is the newest version supporting tx <running>`.
+- When selection has no usable target, a marketplace whose installed commit is compatible MUST be reported as held, with the reason the candidate was unusable when there was one. A marketplace whose installed commit is not compatible MUST instead be reported as a failed item naming the running `tx` version, the range the tip declares, and the remedies: a newer `tx`, `tx marketplace pin <name> <ref>`, and the override. Any of those three remedies resolves the failure. The two outcomes differ because a held marketplace runs and waits harmlessly for a newer `tx`, while a failed one is refused on every invocation until the user resolves it, which is why [The Update Command](#the-update-command) makes it exit non-zero.
+- Gathering a pinned marketplace whose pin resolves to a commit that is not compatible MUST add that to the pin's detail, naming the range the commit declares and the running version, and MUST NOT otherwise change what is reported or applied.
+- `marketplace list` MUST report, after each marketplace's source, the `version` its manifest declares, or a fixed non-empty placeholder when it declares none or its manifest cannot be read, so that column is never blank. The three columns [Marketplace Versions and Pins](#marketplace-versions-and-pins) requires keep their order and content. Listing stays offline.
+
+#### Scenario: Adding installs the newest compatible version
+
+- **GIVEN** the running `tx` is `1.8.0`, and the remote's default branch carries a manifest declaring `"version": "2.0.0"`, `"tx": "^2.0.0"`, and a `versions` history in which `1.5.0` at commit A declares `">=1.6.0 <2.0.0"` and `1.4.0` at commit B declares `">=1.0.0 <2.0.0"`
+- **WHEN** the user runs `tx marketplace add example/tools`
+- **THEN** `tools` is installed at commit A, no pin is recorded, and standard output reports that `1.5.0` was installed because `2.0.0` requires `tx` `^2.0.0`
+
+#### Scenario: Nothing compatible publishes nothing
+
+- **GIVEN** the running `tx` is `1.8.0`, and the remote's default branch declares `"tx": "^2.0.0"` with no history element `1.8.0` satisfies
+- **WHEN** the user runs `tx marketplace add example/tools`
+- **THEN** the addition fails naming `1.8.0`, `^2.0.0`, and the `@<ref>` suffix, and no marketplace is published
+
+#### Scenario: A compatible installation is held
+
+- **GIVEN** the running `tx` is `1.8.0`, an unpinned `tools` installed at a commit declaring `">=1.6.0 <2.0.0"`, and a remote default branch that advanced to a commit declaring `"version": "2.0.0"` and `"tx": "^2.0.0"` whose history's candidate is the installed commit or one of its ancestors
+- **WHEN** the user runs `tx update`
+- **THEN** `tools` is reported as held with nothing available and detail naming `2.0.0` and `^2.0.0`, the checkout does not move, and the command exits zero
+
+#### Scenario: A refused installation moves back to the last working version
+
+- **GIVEN** the running `tx` is `1.8.0`, an unpinned `tools` installed at a commit declaring `"tx": "^2.0.0"`, and a candidate `1.5.0` whose commit is not a descendant of the installed one
+- **WHEN** the user runs `tx update`
+- **THEN** the checkout moves to the candidate's commit, is validated and has its dependencies installed as any applied update does, the item reports the candidate's label with detail naming `^2.0.0` and `1.5.0`, and the next invocation loads its plugins
+
+#### Scenario: A dry run reports the selection without moving
+
+- **GIVEN** the installation from the previous scenario
+- **WHEN** the user runs `tx update --dry-run`
+- **THEN** the same target and detail are reported, the checkout, working tree, and installed dependencies are unchanged, and the command exits zero
+
+#### Scenario: A newer tx returns to the tip
+
+- **GIVEN** an unpinned `tools` installed at its `1.5.0` commit because its tip requires `tx` `^2.0.0`
+- **WHEN** the user runs `tx update` under `tx` `2.0.0`
+- **THEN** the tip is the target and the checkout moves forward to it
+
+#### Scenario: A history claim the commit contradicts is not installed
+
+- **GIVEN** the running `tx` is `1.8.0`, a tip whose history claims `1.5.0` at commit A supports `">=1.6.0 <2.0.0"` while commit A's own manifest declares `"^2.0.0"`, and a compatible `1.4.0` at commit B
+- **WHEN** the user runs `tx marketplace add example/tools`
+- **THEN** the addition fails naming `1.5.0`, `">=1.6.0 <2.0.0"`, and `"^2.0.0"`, and commit B is not installed in its place
+
+#### Scenario: A pin is never re-selected
+
+- **GIVEN** the running `tx` is `1.8.0` and `tools` pinned to `v2.0.0`, whose manifest declares `"tx": "^2.0.0"`
+- **WHEN** the user runs `tx update`
+- **THEN** the target is what the pin resolves to, nothing from the history is selected, and the pin's detail names `^2.0.0` and `1.8.0`
+
+#### Scenario: Listing shows the declared version
+
+- **GIVEN** one installed marketplace whose manifest declares `"version": "1.5.0"` and another that declares no `version`
+- **WHEN** the user runs `tx marketplace list`
+- **THEN** each line carries the name, version label, and source in their existing order, followed by `1.5.0` for the marketplace that declares it and the placeholder for the one that does not, and no remote is contacted
+
 ### Executable Updates
 
 The executable plugin contributes one participant covering the running `tx` binary. It defines no commands and therefore claims no namespace.
@@ -258,10 +348,19 @@ Participants run in the order the host committed them. For the default plugins t
 
 That is a statement about root definitions only. The host queues a plugin's child definitions behind everything already queued, so a participant contributed by a plugin installed *through* a marketplace commits after the executable's and may be applied after it. Nothing here needs that not to happen — replacing the executable does not disturb the running process, which keeps executing the file it started from — so the rule stated is the one the host actually produces, and an explicit ordering mechanism waits until something needs one.
 
+### Compatibility Is Declared at the Tip
+
+A marketplace's default branch is the one thing every installation of it already reads, so the release history lives there, in the manifest, rather than in tags or in a registry. One manifest read answers "what may this `tx` install" for every installation, the publisher corrects a mistaken entry by committing to the branch they already publish from, and a history element names a commit rather than a tag because a commit is the one Git name its publisher cannot move.
+
+The history is an index, not the authority. Each released commit still carries its own manifest, and the commit's own `tx` range decides whether that commit is compatible; an element that disagrees with it is reported rather than trusted, and selection never reaches past it to an older release the user did not ask for. A user who wants a particular version names it with a pin, which selection never touches.
+
+Moving an unpinned marketplace backwards is allowed for exactly one reason: the running `tx` refuses the commit it is on. A marketplace on a commit that works stays there, held, until the running `tx` supports something newer — the forward-only rule in [Marketplace Updates](#marketplace-updates) protects that commit for the same reason it always has.
+
 ## Constraints
 
 - Automatic checking is prohibited by [Never Automatic](#never-automatic), which owns the rule. It is not a feature left out, and adding one would require changing that requirement rather than writing code against it.
-- Rollback of a marketplace update, beyond restoring the previous commit when preparation fails, is out of scope. A user reaches an older version by pinning to it.
+- Rollback of a marketplace update, beyond restoring the previous commit when preparation fails, is out of scope. A user reaches an older version by pinning to it; the only older version `tx` selects on its own is the one [Compatible Marketplace Versions](#compatible-marketplace-versions) selects when the running `tx` refuses the installed commit.
+- `tx update` gathers every participant before applying any, and selects marketplace targets against the running `tx`. A run that also replaces the executable therefore selects marketplaces for the `tx` it started as, and the next run selects them for the `tx` it installed. This is tracked in [Open Questions](#open-questions) rather than solved.
 - Signing and provenance verification remain out of scope for marketplaces, unchanged by this spec. The executable's published checksum is an integrity check on a download, not a signature.
 - Updating one plugin inside a marketplace independently of the rest is out of scope. A marketplace is one Git checkout and moves as one.
 - The published executable exists for the platforms [Architecture: Runtime and Distribution](../architecture/index.md#runtime-and-distribution) names, and self-update reaches no further than those.
@@ -271,7 +370,9 @@ That is a statement about root definitions only. The host queues a plugin's chil
 - Should `tx update` offer machine-readable output? Line-oriented output greps well enough for now, and a format is worth defining once something is consuming it.
 - Should a participant be able to report progress while applying, rather than only a result? Nothing here needs it yet; a long dependency installation may change that.
 - Should participant order be settable, rather than falling out of the host's initialization order? It would matter the first time a participant contributed by an installed plugin has to run before or after another one.
-- Should a marketplace pinned to a tag be able to follow tags matching a range, rather than an exact ref? That is a dependency-resolution feature and wants a version policy the manifest does not have.
+- Should a marketplace pinned to a tag be able to follow tags matching a range, rather than an exact ref? That is a dependency-resolution feature and wants a version policy; [Compatible Marketplace Versions](#compatible-marketplace-versions) gives the manifest a release history, but selects from it only by `tx` compatibility.
+- Should a run of `tx update` that replaces the executable select marketplaces for the `tx` it is installing rather than the one running? It would let one run finish what currently takes two, at the cost of the marketplace participant learning a version from another participant, which the driver deliberately does not broker.
+- Should `marketplace add <source>@<version>` resolve a version through the manifest's history when the remote publishes no tag for it? It would let a publisher who does not tag releases still be pinned by version, and it would make one suffix mean two lookups.
 - Should `tx update` be able to update a marketplace that is blocked by local modifications, given an explicit flag? The remedy today is to resolve them in the checkout, which is what a user editing an installed clone should be doing anyway.
 
 ## References
@@ -283,6 +384,7 @@ That is a statement about root definitions only. The host queues a plugin's chil
 - [Change 0014: Pin Marketplace Versions](../../changes/0014-pin-marketplace-versions.md)
 - [Change 0015: Update the tx Executable](../../changes/0015-update-the-tx-executable.md)
 - [Change 0022: Exempt and Verify the tx Self-Update](../../changes/0022-exempt-and-verify-the-tx-self-update.md)
+- [Change 0034: Add Marketplace tx Compatibility](../../changes/0034-add-marketplace-tx-compatibility.md)
 - [Git fast-forward merges](https://git-scm.com/docs/git-merge#_fast_forward_merge)
 - [GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
 
@@ -296,3 +398,4 @@ That is a statement about root definitions only. The host queues a plugin's chil
 | 2026-08-07 | Specified executable self-update: release lookup, availability gating, manager delegation, download verification, and atomic replacement | [0015-update-the-tx-executable](../../changes/0015-update-the-tx-executable.md) |
 | 2026-09-02 | Specified that a delegated upgrade runs without the manager's minimum-release-age deferral and counts as applied only against an observed newer installed version | [0022-exempt-and-verify-the-tx-self-update](../../changes/0022-exempt-and-verify-the-tx-self-update.md) |
 | 2026-10-01 | Self-update reaches Linux arm64 now that [Architecture: Runtime and Distribution](../architecture/index.md#runtime-and-distribution) publishes an executable for it; no requirement here changed | [0032-publish-a-linux-arm64-executable](../../changes/0032-publish-a-linux-arm64-executable.md) |
+| 2026-10-10 | Specified compatible marketplace versions: selecting the newest release whose declared `tx` range the running `tx` satisfies on add and update, the commit's own manifest as authority, the backwards move for a refused installation, held reporting, pin and local-source warnings, and the declared-version list column | [0034-add-marketplace-tx-compatibility](../../changes/0034-add-marketplace-tx-compatibility.md) |
