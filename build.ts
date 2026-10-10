@@ -1,4 +1,4 @@
-import { nativeStringWidth } from "./build-plugins.ts";
+import { cachedStringWidth } from "./build-plugins.ts";
 
 const inkDevExpression = "process.env['DEV']";
 
@@ -40,7 +40,7 @@ for (const compile of executables) {
     // executable — and every plugin rendering with the React it injects —
     // would run React's much slower development build.
     define: { "process.env.NODE_ENV": '"production"' },
-    plugins: [disableInkDevelopmentMode, nativeStringWidth],
+    plugins: [disableInkDevelopmentMode, cachedStringWidth],
   });
 
   if (!build.success) {

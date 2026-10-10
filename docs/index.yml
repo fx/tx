@@ -305,9 +305,9 @@ changes:
       - "0014"
       - "0019"
   - id: "0035"
-    name: production-react-and-native-widths
-    path: changes/0035-production-react-and-native-widths.md
-    description: Build the executables with NODE_ENV=production so tx and every plugin run React's production build, and rewrite string-width as it is bundled so Ink measures text with Bun's native width.
+    name: production-react-and-cached-widths
+    path: changes/0035-production-react-and-cached-widths.md
+    description: Build the executables with NODE_ENV=production so tx and every plugin run React's production build, and rewrite string-width as it is bundled so it measures each distinct grapheme cluster once, with unchanged results.
     spec: architecture
     status: complete
     depends_on:
