@@ -241,7 +241,7 @@ test("the production build is a standalone executable", async () => {
     const list = runStandalone(["marketplace", "list"]);
     expect(list).toEqual({
       exitCode: 0,
-      stdout: `fixture\tlive\t${marketplace}\n`,
+      stdout: `fixture\tlive\t${marketplace}\t-\n`,
       stderr: "",
     });
 

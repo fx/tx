@@ -326,7 +326,7 @@ describe("main", () => {
       expect(await main(["marketplace", "list"], defaultPlugins, context)).toBe(
         0,
       );
-      expect(context.stdoutText()).toBe(`personal\t<unknown>\t<unknown>\n`);
+      expect(context.stdoutText()).toBe(`personal\t<unknown>\t<unknown>\t-\n`);
       expect(context.stderrText()).toContain(
         'Error loading plugin marketplace/installed/personal/marketplace: Namespace "marketplace" is already claimed by marketplace; cannot claim it for marketplace/installed/personal/marketplace',
       );

@@ -166,16 +166,16 @@ The second implementation pull request adds selection. Both `MarketplaceUpdater#
   - [x] Point the forward-only and target-resolution bullets of [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) at the new section, and add the design note, the same-run constraint, and the open questions (PR #81)
   - [x] Update both specs' overviews, references, and changelogs, and both documentation indexes (PR #81)
 
-- [ ] Declare compatibility and refuse incompatible marketplaces
-  - [ ] Add a module under `plugins/marketplace/` parsing strict SemVer 2.0.0 versions, parsing npm's range grammar in its default mode, and deciding satisfaction including the pre-release rule and ignored build metadata, with no new dependency and no use of `Bun.semver`
-  - [ ] Validate `version`, `tx`, and `versions` in `parseMarketplaceManifestDocument`, as content failures naming the field and element position, and return them with the manifest plan and the resolved manifest
-  - [ ] Pass `dependencies.tx.version` and the override's state from `createMarketplacePlugin` into discovery and `marketplaceDefinition`
-  - [ ] Refuse an incompatible marketplace in `marketplaceDefinition` after reading its manifest and before contributing any entry definition, with the diagnostic the spec requires and without the removal remedy
-  - [ ] Load it instead when `TX_IGNORE_COMPATIBILITY` is exactly `1`, writing one warning line per such marketplace to standard error
-  - [ ] Add the declared-version column to `marketplace list`, with a fixed placeholder, read from the checkout without Git
-  - [ ] Cover the new behavior: the table-driven validation and range tests from Testing Requirements; refusal before import; exit-code and sibling isolation; management commands and the participant still available; override values; a live reference and a pinned clone both refused; the list column for a clone, a reference, an undeclared version, and an unreadable manifest
-  - [ ] Document declaring compatibility in `docs/manual/plugins.md` — the three fields with an example, the range grammar and pre-release rule, what a refusal looks like, and the override — and the new list column, in the pull request that implements them
-  - [ ] Verify 100% coverage and `bun run check`
+- [x] Declare compatibility and refuse incompatible marketplaces
+  - [x] Add a module under `plugins/marketplace/` parsing strict SemVer 2.0.0 versions, parsing npm's range grammar in its default mode, and deciding satisfaction including the pre-release rule and ignored build metadata, with no new dependency and no use of `Bun.semver`
+  - [x] Validate `version`, `tx`, and `versions` in `parseMarketplaceManifestDocument`, as content failures naming the field and element position, and return them with the manifest plan and the resolved manifest
+  - [x] Pass `dependencies.tx.version` and the override's state from `createMarketplacePlugin` into discovery and `marketplaceDefinition`
+  - [x] Refuse an incompatible marketplace in `marketplaceDefinition` after reading its manifest and before contributing any entry definition, with the diagnostic the spec requires and without the removal remedy
+  - [x] Load it instead when `TX_IGNORE_COMPATIBILITY` is exactly `1`, writing one warning line per such marketplace to standard error
+  - [x] Add the declared-version column to `marketplace list`, with a fixed placeholder, read from the checkout without Git
+  - [x] Cover the new behavior: the table-driven validation and range tests from Testing Requirements; refusal before import; exit-code and sibling isolation; management commands and the participant still available; override values; a live reference and a pinned clone both refused; the list column for a clone, a reference, an undeclared version, and an unreadable manifest
+  - [x] Document declaring compatibility in `docs/manual/plugins.md` — the three fields with an example, the range grammar and pre-release rule, what a refusal looks like, and the override — and the new list column, in the pull request that implements them
+  - [x] Verify 100% coverage and `bun run check`
 
 - [ ] Select compatible versions when adding and updating
   - [ ] Add one selection function under `plugins/marketplace/` that reads the tip's manifest at its revision, returns the tip when it is compatible or unreadable, otherwise picks the candidate from the tip's history excluding pre-releases, fetches its commit by object name non-interactively when absent, and checks the candidate's own manifest at its revision, returning the target with what reports need
