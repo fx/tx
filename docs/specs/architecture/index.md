@@ -68,12 +68,20 @@ The generic core and fully plugin-owned marketplace boundary approved in [Change
 - The public GitHub Packages package MUST be named `@fx/tx`, expose the `tx` command from `dist/tx`, and use a strict file allowlist. It MUST declare Linux x64 as its only CPU and MUST NOT contain the arm64 executable.
 - GitHub Releases MUST provide the Linux x64 executable as `tx-linux-x64`, the Linux arm64 executable as `tx-linux-arm64`, and one SHA-256 checksum file, `SHA256SUMS`, covering both, suitable for mise's GitHub backend. Those assets are also what an executable no version manager owns replaces itself from; where one does own it, self-update delegates to that manager instead. [Updates: Executable Updates](../updates/index.md#executable-updates) owns both paths and the platforms they reach.
 - `package.json`, Release Please output, the `v` tag, GitHub Release, compiled `tx --version`, packed package, and published package MUST use one identical version.
+- The executables MUST embed the production builds of the libraries they bundle: React, its reconciler, and its scheduler MUST NOT run their development builds, in tx or in a plugin rendering with the React tx injects.
+- Text measurement by the bundled Ink MUST use Bun's native string width wherever that agrees with `string-width` — its default options — so that measuring every visible row on every frame stays cheap.
 
 #### Scenario: Standalone host
 
 - **GIVEN** a compiled `tx` executable
 - **WHEN** the user runs it on supported Linux x64 or arm64 glibc
 - **THEN** the generic host starts without a separately installed Node.js or Bun runtime
+
+#### Scenario: Production React
+
+- **GIVEN** the production build has run
+- **WHEN** the standalone executable is inspected
+- **THEN** it carries React's production error decoder and none of React's development warnings
 
 #### Scenario: Version without plugins
 
@@ -300,3 +308,4 @@ Because a plugin's commands, options, and help are declared rather than hand-par
 | 2026-09-05 | Every first-party executable file must be linted, type checked and covered; the demonstration became a documented script | [0024-relocate-and-cover-the-demo](../../changes/0024-relocate-and-cover-the-demo.md) |
 | 2026-09-06 | Widened the plugin dependency boundary to include the published capability contracts a plugin consumes, alongside the public plugin contract | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
 | 2026-10-01 | Added Linux arm64 glibc as a supported platform: both executables built every run, `tx-linux-arm64` published beside `tx-linux-x64` under one `SHA256SUMS`, the package kept x64-only, and publication gated on a native arm64 smoke test | [0032-publish-a-linux-arm64-executable](../../changes/0032-publish-a-linux-arm64-executable.md) |
+| 2026-10-10 | Required production library builds and native text measurement in the executable | [0035-production-react-and-native-widths](../../changes/0035-production-react-and-native-widths.md) |

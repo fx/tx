@@ -50,3 +50,4 @@
 | 0032 | [Publish a Linux arm64 Executable](changes/0032-publish-a-linux-arm64-executable.md) | [Architecture](specs/architecture/) | complete | 0004, 0015 |
 | 0033 | [Upgrade to Ink 8 and React 19.3](changes/0033-upgrade-to-ink-8-and-react-19-3.md) | [Plugin System](specs/plugin-system/) | complete | 0003, 0017 |
 | 0034 | [Add Marketplace tx Compatibility](changes/0034-add-marketplace-tx-compatibility.md) | [Updates](specs/updates/) | complete | 0013, 0014, 0019 |
+| 0035 | [Production React and Native Text Widths](changes/0035-production-react-and-native-widths.md) | [Architecture](specs/architecture/) | complete | 0033 |
