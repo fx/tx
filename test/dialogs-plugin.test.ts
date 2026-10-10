@@ -2689,10 +2689,21 @@ describe("bundled text input dialog", () => {
       `${ESCAPE}[25~`,
       `${ESCAPE}[I`,
       `${ESCAPE}[12;3H`,
+      `${ESCAPE}OZ`,
       CARRIAGE_RETURN,
     ]);
 
     expect(result.value).toBe("ok");
+  });
+
+  test("appends text shaped like a control sequence's payload", async () => {
+    const result = await runEntry({ message: "Literal" }, [
+      "[25~",
+      "OZ",
+      CARRIAGE_RETURN,
+    ]);
+
+    expect(result.value).toBe("[25~OZ");
   });
 
   test("keeps Enter, Escape, and Backspace meaning the same under a modifier", async () => {

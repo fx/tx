@@ -38,21 +38,12 @@ const entryHints = {
  */
 type EntryEscape = keyof typeof entryHints;
 
-/** A control sequence Ink did not resolve to a key, as it reaches a handler:
- * Ink strips the leading escape, leaving the introducer, any parameter and
- * intermediate bytes, and the final byte. Ink reports the sequences it knows
- * as an empty entry, so anything still shaped like one is an unrecognized key
- * rather than typed text. Shape is all there is to go on — see REVIEW.md — so
- * this covers the CSI form only, and a paste that is exactly a CSI body enters
- * nothing. */
-const unresolvedControlSequence = /^\[\[?[\x20-\x3f]*[\x40-\x7e]$/;
-
 /** Everything a chunk carries that a terminal would display, in order. Control
  * characters drop out, so a pasted line survives while the newline ending it
- * does not, and an unrecognized control sequence contributes nothing at all
- * rather than leaking its payload. */
+ * does not. A complete control sequence never gets this far as text: Ink
+ * reports the ones it resolves as an empty entry and discards the rest before
+ * any handler runs, so text shaped like a sequence's payload was typed. */
 function printableText(entry: string): string {
-  if (unresolvedControlSequence.test(entry)) return "";
   let printable = "";
   for (const character of entry) {
     const code = character.codePointAt(0) as number;
@@ -72,8 +63,8 @@ type EditingKey = {
 /**
  * The one editing step behind every text a dialog collects: a standalone
  * `input`, a field under collection, and the select filter. Keeping it in one
- * place is what makes the control-sequence shape test above hold once rather
- * than once per place text is typed. Backspace is answered before the modifier
+ * place is what makes the printable-text rule above hold once rather than once
+ * per place text is typed. Backspace is answered before the modifier
  * test, so a modifier never changes what Backspace itself means. Returns
  * `current` unchanged when the input edits nothing, which is also how a caller
  * tells an edit from an ignored key.
