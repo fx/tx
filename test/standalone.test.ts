@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { clusterKeyPrefix } from "../build-plugins.ts";
 import { createGitRepository, initializeGitRepository } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
@@ -68,6 +69,10 @@ test("the production build is a standalone executable", async () => {
         join(repositoryRoot, "build.ts"),
         join(stagedProject, "build.ts"),
       ),
+      copyFile(
+        join(repositoryRoot, "build-plugins.ts"),
+        join(stagedProject, "build-plugins.ts"),
+      ),
       symlink(join(repositoryRoot, "node_modules"), stagedNodeModules, "dir"),
     ]);
 
@@ -84,6 +89,19 @@ test("the production build is a standalone executable", async () => {
       magic: elfMagic,
       machine: aarch64,
     });
+    // What the production build must do to every executable it ships:
+    // React's production build (its development build carries its warnings
+    // as text, its production build only an error-decoder link), and the
+    // cached-width rewrite of string-width (its cache keys carry this
+    // literal; without the plugin it does not occur).
+    for (const path of [binaryPath, arm64BinaryPath]) {
+      const executable = Buffer.from(await Bun.file(path).arrayBuffer());
+      expect(
+        executable.includes("Each child in a list should have a unique"),
+      ).toBe(false);
+      expect(executable.includes("Minified React error")).toBe(true);
+      expect(executable.includes(clusterKeyPrefix)).toBe(true);
+    }
     await Promise.all([
       rm(stagedSource, { recursive: true }),
       rm(stagedPlugins, { recursive: true }),
