@@ -13,9 +13,12 @@ import {
   type MarketplaceOperations,
 } from "./manager.ts";
 import { importPluginEntry } from "./module.ts";
+import { admitsVersion } from "./semver.ts";
 import {
   discoverInstalledMarketplaces,
+  isMarketplaceReference,
   type MarketplaceCheckout,
+  type MarketplaceManifest,
   readMarketplaceManifest,
   resolveMarketplaceDirectory,
   validateMarketplaceName,
@@ -34,6 +37,16 @@ export interface MarketplacePluginOptions {
 
 interface PluginModule {
   readonly default?: unknown;
+}
+
+/** The variable that loads a marketplace its declared tx range refuses. */
+const ignoreCompatibilityVariable = "TX_IGNORE_COMPATIBILITY";
+
+/** What loading compares each marketplace's declared tx range with. */
+interface LoadCompatibility {
+  readonly txVersion: string;
+  /** Whether a refused marketplace is loaded anyway, with a warning. */
+  readonly ignored: boolean;
 }
 
 function childIdentity(name: string, parent: PluginIdentity): PluginIdentity {
@@ -60,6 +73,26 @@ function recoveryError(
     : `Marketplace "${marketplace}"`;
   return new Error(
     `${subject} failed: ${errorMessage(error)}. Run "tx marketplace remove ${marketplace}" to remove it.`,
+  );
+}
+
+/**
+ * Why a marketplace was refused. Nothing about the installation is broken, so
+ * the remedies are the ones that reach a compatible pairing — never removal.
+ * A reference has no version tx could move or pin; it holds whatever its
+ * directory does.
+ */
+function compatibilityError(
+  marketplace: string,
+  range: string,
+  txVersion: string,
+  reference: boolean,
+): Error {
+  const remedies = reference
+    ? `Set ${ignoreCompatibilityVariable}=1 to load it anyway.`
+    : `Run "tx update" to update tx and its marketplaces, pin a version that supports tx ${txVersion} with "tx marketplace pin ${marketplace} <ref>", or set ${ignoreCompatibilityVariable}=1 to load it anyway.`;
+  return new Error(
+    `Marketplace "${marketplace}" supports tx ${range}, not tx ${txVersion}. ${remedies}`,
   );
 }
 
@@ -96,23 +129,41 @@ function marketplaceDefinition(
   name: string,
   checkout: string,
   parent: PluginIdentity,
+  compatibility: LoadCompatibility,
 ): PluginDefinition {
   const identity = childIdentity(name, parent);
   return Object.freeze({
     identity,
     async load(): Promise<Plugin> {
+      let manifest: MarketplaceManifest;
       try {
-        const manifest = await readMarketplaceManifest(checkout);
-        return ({ plugin }) => {
-          for (const entry of manifest.plugins) {
-            plugin(
-              entryDefinition(name, entry.name, entry.entryPath, identity),
-            );
-          }
-        };
+        manifest = await readMarketplaceManifest(checkout);
       } catch (error) {
         throw recoveryError(name, undefined, error);
       }
+      // Compared before any entry definition is contributed, so a refused
+      // marketplace imports nothing: importing an entry runs its code.
+      const { txVersion, ignored } = compatibility;
+      const range = manifest.tx;
+      const refused = range !== undefined && !admitsVersion(range, txVersion);
+      if (refused && !ignored) {
+        throw compatibilityError(
+          name,
+          range,
+          txVersion,
+          await isMarketplaceReference(checkout),
+        );
+      }
+      return ({ context, plugin }) => {
+        if (refused) {
+          context.stderr.write(
+            `Warning: loading marketplace "${name}", which supports tx ${range}, under tx ${txVersion} because ${ignoreCompatibilityVariable}=1.\n`,
+          );
+        }
+        for (const entry of manifest.plugins) {
+          plugin(entryDefinition(name, entry.name, entry.entryPath, identity));
+        }
+      };
     },
   });
 }
@@ -120,6 +171,7 @@ function marketplaceDefinition(
 function discoveryDefinition(
   root: string,
   parent: PluginIdentity,
+  compatibility: LoadCompatibility,
 ): PluginDefinition {
   const identity = childIdentity("installed", parent);
   return Object.freeze({
@@ -138,6 +190,7 @@ function discoveryDefinition(
               marketplace.name,
               marketplace.checkout,
               identity,
+              compatibility,
             ),
           );
         }
@@ -153,7 +206,15 @@ export function createMarketplacePlugin(
   return Object.freeze({
     identity,
     load(): Plugin {
-      return ({ command, context, env, plugin, registrations, update }) => {
+      return ({
+        command,
+        context,
+        dependencies,
+        env,
+        plugin,
+        registrations,
+        update,
+      }) => {
         const root = options.root ?? resolveMarketplaceDirectory({ env });
         const manager =
           options.manager ??
@@ -254,12 +315,12 @@ export function createMarketplacePlugin(
           namespace
             .command("list")
             .description(
-              "List installed marketplaces, their versions, and their sources",
+              "List installed marketplaces, their versions, their sources, and the versions they declare",
             )
             .action(async () => {
               for (const marketplace of await manager.list()) {
                 context.stdout.write(
-                  `${marketplace.name}\t${marketplace.version}\t${marketplace.source}\n`,
+                  `${marketplace.name}\t${marketplace.version}\t${marketplace.source}\t${marketplace.declaredVersion}\n`,
                 );
               }
             });
@@ -321,7 +382,12 @@ export function createMarketplacePlugin(
         // the one an update fixes — is still gathered and still applied.
         update(new MarketplaceUpdater(root, { env }));
 
-        plugin(discoveryDefinition(root, identity));
+        plugin(
+          discoveryDefinition(root, identity, {
+            txVersion: dependencies.tx.version,
+            ignored: env[ignoreCompatibilityVariable] === "1",
+          }),
+        );
       };
     },
   });

@@ -14,6 +14,13 @@ import {
 } from "node:path";
 import { promisify } from "node:util";
 
+import {
+  compareSemanticVersions,
+  parseSemanticVersion,
+  parseVersionRange,
+  type SemanticVersion,
+} from "./semver.ts";
+
 const executeFile = promisify(execFile);
 
 export interface UserDataDirectoryOptions {
@@ -34,7 +41,26 @@ export interface MarketplacePluginEntry {
   readonly package?: string;
 }
 
-export interface MarketplaceManifest {
+/** One released version in a marketplace's history: the commit that carried
+ * it and the tx range that commit supports. */
+export interface MarketplaceRelease {
+  readonly version: string;
+  readonly ref: string;
+  readonly tx: string;
+}
+
+/**
+ * What a manifest declares about its own version and the tx releases it
+ * supports. Each field is present only when the manifest declares it; an
+ * absent `tx` supports every tx version.
+ */
+export interface MarketplaceCompatibility {
+  readonly version?: string;
+  readonly tx?: string;
+  readonly versions?: readonly MarketplaceRelease[];
+}
+
+export interface MarketplaceManifest extends MarketplaceCompatibility {
   readonly plugins: readonly MarketplacePluginEntry[];
 }
 
@@ -44,7 +70,7 @@ export interface MarketplaceManifestPlanEntry {
   readonly package?: string;
 }
 
-export interface MarketplaceManifestPlan {
+export interface MarketplaceManifestPlan extends MarketplaceCompatibility {
   readonly plugins: readonly MarketplaceManifestPlanEntry[];
 }
 
@@ -394,7 +420,143 @@ function resolvePackageCandidate(
 
 interface MarketplaceManifestSyntax {
   readonly checkoutPath: string;
-  readonly candidates: readonly MarketplaceManifestPlanEntry[];
+  readonly plan: MarketplaceManifestPlan;
+}
+
+const commitObjectNamePattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+function validateDeclaredVersion(
+  label: string,
+  value: unknown,
+): SemanticVersion {
+  if (typeof value !== "string") {
+    throw new MarketplaceManifestContentError(`${label} must be a string`);
+  }
+  const version = parseSemanticVersion(value);
+  if (version === undefined) {
+    throw new MarketplaceManifestContentError(
+      `${label} "${value}" must be a semantic version, such as 1.4.0, without a "v" prefix`,
+    );
+  }
+  return version;
+}
+
+function validateDeclaredRange(label: string, value: unknown): string {
+  if (typeof value !== "string") {
+    throw new MarketplaceManifestContentError(`${label} must be a string`);
+  }
+  if (value.trim() === "") {
+    throw new MarketplaceManifestContentError(
+      `${label} must not be empty; write "*" to support every tx version`,
+    );
+  }
+  if (parseVersionRange(value) === undefined) {
+    throw new MarketplaceManifestContentError(
+      `${label} "${value}" is not a valid version range`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Validates the release history. Only `version`, `ref`, and `tx` are read
+ * from an element, so a key a later release defines is ignored here exactly
+ * as an unknown top-level key is.
+ */
+function validateReleaseHistory(
+  selectedManifestFilename: string,
+  value: unknown,
+): readonly MarketplaceRelease[] {
+  if (!Array.isArray(value)) {
+    throw new MarketplaceManifestContentError(
+      `${selectedManifestFilename} versions must be an array`,
+    );
+  }
+  const seen: SemanticVersion[] = [];
+  const releases = value.map((element: unknown, index) => {
+    const label = `${selectedManifestFilename} versions element ${index + 1}`;
+    if (!isRecord(element)) {
+      throw new MarketplaceManifestContentError(`${label} must be an object`);
+    }
+    const release = element as {
+      version?: unknown;
+      ref?: unknown;
+      tx?: unknown;
+    };
+    for (const key of ["version", "ref", "tx"]) {
+      if (!Object.hasOwn(element, key)) {
+        throw new MarketplaceManifestContentError(
+          `${label} ${key} is required`,
+        );
+      }
+    }
+    const version = validateDeclaredVersion(
+      `${label} version`,
+      release.version,
+    );
+    if (
+      typeof release.ref !== "string" ||
+      !commitObjectNamePattern.test(release.ref)
+    ) {
+      throw new MarketplaceManifestContentError(
+        `${label} ref must be a commit's full object name in lowercase hexadecimal, 40 or 64 characters long`,
+      );
+    }
+    const tx = validateDeclaredRange(`${label} tx`, release.tx);
+    const duplicate = seen.findIndex(
+      (earlier) => compareSemanticVersions(earlier, version) === 0,
+    );
+    if (duplicate !== -1) {
+      throw new MarketplaceManifestContentError(
+        `${label} version "${release.version}" duplicates the version of element ${duplicate + 1}`,
+      );
+    }
+    seen.push(version);
+    return Object.freeze({
+      version: release.version as string,
+      ref: release.ref,
+      tx,
+    });
+  });
+  return Object.freeze(releases);
+}
+
+/** Validates the fields a manifest declares about its version and the tx
+ * releases it supports, returning only those it declares. */
+function validateCompatibility(
+  selectedManifestFilename: string,
+  document: Record<string, unknown>,
+): MarketplaceCompatibility {
+  const declared = document as {
+    version?: unknown;
+    tx?: unknown;
+    versions?: unknown;
+  };
+  const compatibility: {
+    version?: string;
+    tx?: string;
+    versions?: readonly MarketplaceRelease[];
+  } = {};
+  if (Object.hasOwn(document, "version")) {
+    validateDeclaredVersion(
+      `${selectedManifestFilename} version`,
+      declared.version,
+    );
+    compatibility.version = declared.version as string;
+  }
+  if (Object.hasOwn(document, "tx")) {
+    compatibility.tx = validateDeclaredRange(
+      `${selectedManifestFilename} tx`,
+      declared.tx,
+    );
+  }
+  if (Object.hasOwn(document, "versions")) {
+    compatibility.versions = validateReleaseHistory(
+      selectedManifestFilename,
+      declared.versions,
+    );
+  }
+  return compatibility;
 }
 
 /**
@@ -496,7 +658,10 @@ export function parseMarketplaceManifestDocument(
     });
   });
 
-  return Object.freeze({ plugins: Object.freeze(candidates) });
+  return Object.freeze({
+    plugins: Object.freeze(candidates),
+    ...validateCompatibility(selectedManifestFilename, document),
+  });
 }
 
 async function readMarketplaceManifestSyntax(
@@ -551,16 +716,13 @@ async function readMarketplaceManifestSyntax(
     throw error;
   }
 
-  const { plugins: candidates } = parseMarketplaceManifestDocument(
+  const plan = parseMarketplaceManifestDocument(
     checkoutPath,
     selectedManifestFilename,
     contents,
   );
 
-  return Object.freeze({
-    checkoutPath,
-    candidates: Object.freeze(candidates),
-  });
+  return Object.freeze({ checkoutPath, plan });
 }
 
 /**
@@ -571,16 +733,15 @@ async function readMarketplaceManifestSyntax(
 export async function planMarketplaceManifest(
   checkout: string,
 ): Promise<MarketplaceManifestPlan> {
-  const { candidates } = await readMarketplaceManifestSyntax(checkout);
-  return Object.freeze({ plugins: candidates });
+  return (await readMarketplaceManifestSyntax(checkout)).plan;
 }
 
 async function resolveMarketplaceManifest(
   checkout: string,
   resolvePackages: boolean,
 ): Promise<ResolvedMarketplaceManifest> {
-  const { checkoutPath, candidates } =
-    await readMarketplaceManifestSyntax(checkout);
+  const { checkoutPath, plan } = await readMarketplaceManifestSyntax(checkout);
+  const { plugins: candidates, ...compatibility } = plan;
 
   const resolvedPlugins = await Promise.all(
     candidates.map(async (candidate) => ({
@@ -649,7 +810,10 @@ async function resolveMarketplaceManifest(
   });
 
   return Object.freeze({
-    manifest: Object.freeze({ plugins: Object.freeze(plugins) }),
+    manifest: Object.freeze({
+      plugins: Object.freeze(plugins),
+      ...compatibility,
+    }),
     packagePaths: Object.freeze(packagePaths),
   });
 }

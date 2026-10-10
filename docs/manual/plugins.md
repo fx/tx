@@ -20,7 +20,7 @@ tx marketplace unpin tools
 tx marketplace remove tools
 ```
 
-`list` prints one tab-separated line per marketplace: its name, its version label, and its source. `add` accepts any Git clone source, optionally with the `@<ref>` version described in [Marketplace versions](#marketplace-versions). Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
+`list` prints one tab-separated line per marketplace: its name, its version label, its source, and the version its manifest declares — `-` when it declares none or its manifest cannot be read (see [Declare tx compatibility](#declare-tx-compatibility)). `add` accepts any Git clone source, optionally with the `@<ref>` version described in [Marketplace versions](#marketplace-versions). Bare `owner/repository` input expands to an HTTPS GitHub clone URL, and an HTTP(S) clone that fails is retried once over the SSH source derived from it, so a private repository installs from the shorthand. The installed name is derived from the source unless `--name` supplies one. The current repository is not auto-loaded; add it as a marketplace if you want `tx` to load its configuration.
 
 Every successful `marketplace add` records the installed marketplace in the
 `marketplace` property of the [bundled config document](#use-the-bundled-config-capability),
@@ -134,7 +134,7 @@ Results go to standard output and failures to standard error, so you can pipe on
 
 ### Updating marketplaces
 
-Every installed marketplace is one item in `tx update`, named as it is installed. A cloned one reports the commit its checkout holds — a tag reachable from that commit where the repository publishes tags, an abbreviated hash where it does not — and what its remote's default branch now offers. A marketplace referenced from a local directory reports `live` and has nothing to apply: its contents are whatever the directory holds when you run `tx`, so nothing is fetched, moved, or modified. `marketplace list` reports the same label as its middle column, without contacting anything.
+Every installed marketplace is one item in `tx update`, named as it is installed. A cloned one reports the commit its checkout holds — a tag reachable from that commit where the repository publishes tags, an abbreviated hash where it does not — and what its remote's default branch now offers. A marketplace referenced from a local directory reports `live` and has nothing to apply: its contents are whatever the directory holds when you run `tx`, so nothing is fetched, moved, or modified. `marketplace list` reports the same label as its second column, without contacting anything.
 
 ```
 $ tx update --dry-run
@@ -205,6 +205,54 @@ Imports in your plugin resolve exactly as they do in any other Bun or Node progr
 That applies to specifiers written literally, which is how a package is normally named. A specifier assembled at runtime — `await import(somePath)` — is left as a runtime import and behaves as it always has: a computed path to a file works, a computed package name does not. Write package names literally and you get the resolution above.
 
 A plugin whose graph cannot be resolved does not load, and says which specifier it could not resolve. That is the whole plugin rather than the one import, so a missing dependency is reported when `tx` starts rather than when the command that needs it runs. Other plugins are unaffected.
+
+### Declare tx compatibility
+
+`tx` hands every plugin its own React, Ink, and command parser, so a `tx` release that upgrades any of them can change the API your plugins are written against. A manifest can say which `tx` releases it supports, which version of the marketplace this commit is, and which commit carried each released version. All three top-level fields are optional:
+
+```json
+{
+  "version": "1.5.0",
+  "tx": "^2.0.0",
+  "versions": [
+    {
+      "version": "1.4.0",
+      "ref": "4f1c0b8e2d9a7c6b5e4d3c2b1a0f9e8d7c6b5a49",
+      "tx": "^1.8.0"
+    },
+    {
+      "version": "1.5.0",
+      "ref": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b",
+      "tx": "^2.0.0"
+    }
+  ],
+  "plugins": [{ "name": "notes", "entry": "plugins/notes.ts" }]
+}
+```
+
+- `version` is the version of the marketplace this commit is: a [semantic version](https://semver.org/spec/v2.0.0.html) written without a `v` prefix, such as `1.5.0` or `2.0.0-rc.1`. `tx marketplace list` reports it as its last column.
+- `tx` is the range of `tx` versions this commit supports. Leave it out and the marketplace loads under every `tx`, pre-releases included — which is how every marketplace that predates the field keeps working. Write `*` to say so explicitly; an empty or blank value is an error rather than a second spelling of "everything".
+- `versions` is the marketplace's release history. Each element names a released `version`, the full object name of the commit that carried it as `ref` — 40 lowercase hexadecimal characters, or 64 in a SHA-256 repository; never a tag, an abbreviation, or uppercase — and the `tx` range that release supports, which is required here. No two elements may carry the same version, and build metadata does not make them different: `1.4.0+a` and `1.4.0+b` are duplicates.
+
+Ranges use npm's range grammar exactly as its `semver` package reads it by default: comparators (`<`, `<=`, `>`, `>=`, `=`, or a bare version), X-ranges (`*`, `1.x`, `1.2`), tilde (`~1.2.3`), caret (`^1.2.3`, where `^0.2.3` stays below `0.3.0` and `^0.0.3` below `0.0.4`), hyphen ranges (`1.2.0 - 1.9.0`), whitespace for "and", and `||` for "or". Build metadata never affects a match. A pre-release `tx` matches only a range that names a pre-release of the same major, minor, and patch version: `2.0.0-rc.1` satisfies `^2.0.0-rc.0`, but neither `>=1.0.0` nor `^2.0.0` — a major release's pre-releases are where its breaking changes land, so a marketplace opts into them by writing the pre-release down.
+
+A field that breaks any of these rules makes the manifest invalid, wherever it is read: `marketplace add` fails and installs nothing, `tx update` fails to move to that commit and leaves the marketplace where it was, and loading reports an invalid manifest that names the field and, inside `versions`, the element's position. A typo is never read as "compatible". Keys `tx` does not define are ignored, at the top level and inside a `versions` element, so a later field never breaks an older `tx`. A `tx` release that predates these fields ignores them entirely.
+
+When the running `tx` falls outside a marketplace's declared `tx` range, none of its plugins load — none of its entries is even imported — and `tx` reports one diagnostic for the marketplace on every invocation:
+
+```
+Error loading plugin marketplace/installed/tools: Marketplace "tools" supports tx ^2.0.0, not tx 1.8.0. Run "tx update" to update tx and its marketplaces, pin a version that supports tx 1.8.0 with "tx marketplace pin tools <ref>", or set TX_IGNORE_COMPATIBILITY=1 to load it anyway.
+```
+
+A refusal is an isolated plugin failure like any other: every other plugin loads, the command you ran keeps its own exit code, and `tx marketplace` and `tx update` keep working. It applies to pinned marketplaces and to local references alike, since what loads is whatever the checkout or the directory holds; a reference's diagnostic names only the override, because there is nothing to update or pin. Nothing about the installation is broken, so removing it is not the remedy.
+
+To load a refused marketplace anyway, set `TX_IGNORE_COMPATIBILITY` to exactly `1`:
+
+```sh
+TX_IGNORE_COMPATIBILITY=1 tx notes
+```
+
+Each marketplace it forces prints one warning line on standard error, so a variable left in a shell profile never goes unnoticed; a compatible marketplace prints nothing. Any other value — `true`, `0`, or an empty one — leaves refusal in effect. The override changes loading only: it does not make an invalid manifest valid.
 
 ## Write a plugin
 

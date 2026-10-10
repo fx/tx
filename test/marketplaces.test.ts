@@ -1086,6 +1086,7 @@ describe("MarketplaceManager", () => {
           name: "source",
           source,
           version: expect.stringMatching(/^[0-9a-f]+$/),
+          declaredVersion: "-",
         },
       ]);
       await expect(
@@ -1484,9 +1485,24 @@ describe("MarketplaceManager", () => {
       });
 
       expect(await manager.list()).toEqual([
-        { name: "alpha", source: "ssh://example/alpha.git", version: "v2.0.0" },
-        { name: "linked", source: join(root, "alpha"), version: "live" },
-        { name: "zeta", source: "<unknown>", version: "<unknown>" },
+        {
+          name: "alpha",
+          source: "ssh://example/alpha.git",
+          version: "v2.0.0",
+          declaredVersion: "-",
+        },
+        {
+          name: "linked",
+          source: join(root, "alpha"),
+          version: "live",
+          declaredVersion: "-",
+        },
+        {
+          name: "zeta",
+          source: "<unknown>",
+          version: "<unknown>",
+          declaredVersion: "-",
+        },
       ]);
       // A reference reaches Git not at all, and no read here contacts a
       // remote: the version comes out of the checkout. Compared as a set,
@@ -1524,7 +1540,12 @@ describe("MarketplaceManager", () => {
       // Each column is read on its own, so an unanswerable source does not
       // take the version down with it.
       expect(await manager.list()).toEqual([
-        { name: "orphaned", source: "<unknown>", version: "v1.4.0" },
+        {
+          name: "orphaned",
+          source: "<unknown>",
+          version: "v1.4.0",
+          declaredVersion: "-",
+        },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -1541,7 +1562,12 @@ describe("MarketplaceManager", () => {
       expect(await manager.list()).toEqual([]);
       await mkdir(join(root, "blank"), { recursive: true });
       expect(await manager.list()).toEqual([
-        { name: "blank", source: "<unknown>", version: "<unknown>" },
+        {
+          name: "blank",
+          source: "<unknown>",
+          version: "<unknown>",
+          declaredVersion: "-",
+        },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -2259,7 +2285,12 @@ describe("marketplace clone transports", () => {
       };
       expect(cloneEnv).toEqual([batched, batched]);
       expect(await manager.list()).toEqual([
-        { name: "tx", source: "git@github.com:fx/tx.git", version: "v1.0.0" },
+        {
+          name: "tx",
+          source: "git@github.com:fx/tx.git",
+          version: "v1.0.0",
+          declaredVersion: "-",
+        },
       ]);
       expect(await readdir(root)).toEqual(["tx"]);
     } finally {
@@ -3254,7 +3285,7 @@ describe("local marketplace sources", () => {
       expect((await lstat(target)).isSymbolicLink()).toBe(true);
       expect(await readlink(target)).toBe(source);
       expect(await manager.list()).toEqual([
-        { name: "tools", source, version: "live" },
+        { name: "tools", source, version: "live", declaredVersion: "-" },
       ]);
       expect((await readMarketplaceManifest(target)).plugins[0]?.name).toBe(
         "tools",
@@ -3472,7 +3503,12 @@ describe("local marketplace sources", () => {
         "first",
       );
       expect(await manager.list()).toEqual([
-        { name: "pinned", source: first, version: "live" },
+        {
+          name: "pinned",
+          source: first,
+          version: "live",
+          declaredVersion: "-",
+        },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
@@ -3628,10 +3664,21 @@ describe("referenced marketplaces", () => {
           name: "cloned",
           source: "ssh://example/cloned.git",
           version: "v3.1.0",
+          declaredVersion: "-",
         },
-        { name: "dangling", source: missing, version: "live" },
-        { name: "linked", source, version: "live" },
-        { name: "replaced", source: replacement, version: "live" },
+        {
+          name: "dangling",
+          source: missing,
+          version: "live",
+          declaredVersion: "-",
+        },
+        { name: "linked", source, version: "live", declaredVersion: "-" },
+        {
+          name: "replaced",
+          source: replacement,
+          version: "live",
+          declaredVersion: "-",
+        },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

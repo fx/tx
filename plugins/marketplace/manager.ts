@@ -39,6 +39,9 @@ export interface MarketplaceListing {
   readonly name: string;
   readonly source: string;
   readonly version: string;
+  /** The version the manifest declares, which names a release rather than a
+   * commit, so it is reported beside the label rather than instead of it. */
+  readonly declaredVersion: string;
 }
 
 export interface ResolvedMarketplace {
@@ -123,6 +126,9 @@ export const unknownMarketplaceVersion = "<unknown>";
 /** What a referenced local marketplace reports instead of a version: its
  * contents are whatever its directory holds, so there is nothing to compare. */
 export const liveMarketplaceVersion = "live";
+/** What a marketplace whose manifest declares no version, or cannot be read,
+ * reports as its declared version. */
+export const undeclaredMarketplaceVersion = "-";
 const originRemote = "origin";
 const remoteHeadRef = "refs/remotes/origin/HEAD";
 const manifestFilename = ".tx/config.json";
@@ -1911,6 +1917,12 @@ export class MarketplaceManager implements MarketplaceOperations {
           version: await listedColumn(
             () => this.#listedVersion(checkout),
             unknownMarketplaceVersion,
+          ),
+          // Read from the manifest on disk, without Git, so a reference
+          // reports what its directory declares right now.
+          declaredVersion: await listedColumn(
+            async () => (await planMarketplaceManifest(checkout)).version ?? "",
+            undeclaredMarketplaceVersion,
           ),
         }),
       ),

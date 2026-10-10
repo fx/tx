@@ -210,6 +210,7 @@ describe("adding a pinned marketplace", () => {
           name: "tools",
           source: pathToFileURL(remote).href,
           version: "v1.0.0",
+          declaredVersion: "-",
         },
       ]);
     } finally {
@@ -441,7 +442,7 @@ describe("adding a pinned marketplace", () => {
       });
       expect((await lstat(join(root, "tools@2"))).isSymbolicLink()).toBe(true);
       expect(await rejecting.list()).toEqual([
-        { name: "tools@2", source, version: "live" },
+        { name: "tools@2", source, version: "live", declaredVersion: "-" },
       ]);
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });

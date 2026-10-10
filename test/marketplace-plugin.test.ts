@@ -56,8 +56,18 @@ class RecordingManager implements MarketplaceOperations {
   readonly addFailures = new Map<string, unknown>();
   readonly resolvedNames = new Map<string, string>();
   listings = [
-    { name: "alpha", version: "v1.4.0", source: "ssh://example/alpha.git" },
-    { name: "broken", version: "<unknown>", source: "<unknown>" },
+    {
+      name: "alpha",
+      version: "v1.4.0",
+      source: "ssh://example/alpha.git",
+      declaredVersion: "1.4.0",
+    },
+    {
+      name: "broken",
+      version: "<unknown>",
+      source: "<unknown>",
+      declaredVersion: "-",
+    },
   ];
 
   async resolve(source: string, name?: string) {
@@ -256,7 +266,7 @@ describe("first-party marketplace plugin", () => {
     });
     expect(manager.calls).toEqual([["list"]]);
     expect(context.stdoutText()).toBe(
-      "alpha\tv1.4.0\tssh://example/alpha.git\nbroken\t<unknown>\t<unknown>\n",
+      "alpha\tv1.4.0\tssh://example/alpha.git\t1.4.0\nbroken\t<unknown>\t<unknown>\t-\n",
     );
     expect(context.stderrText()).toBe("");
     expect(config.calls).toEqual([]);
@@ -606,7 +616,7 @@ describe("first-party marketplace plugin", () => {
         ),
       ).toEqual({ exitCode: EXIT_SUCCESS });
       expect(context.stdoutText()).toBe(
-        "alpha\tv1.4.0\tssh://example/alpha.git\nbroken\t<unknown>\t<unknown>\n",
+        "alpha\tv1.4.0\tssh://example/alpha.git\t1.4.0\nbroken\t<unknown>\t<unknown>\t-\n",
       );
       expect(context.stderrText()).toBe("");
     } finally {
