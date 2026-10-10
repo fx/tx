@@ -468,10 +468,12 @@ describe("loading an incompatible marketplace", () => {
     try {
       const installed = await install(temporaryRoot, { tools: "^2.0.0" });
 
+      // The participant still gathers it. With nothing in its history to move
+      // to, the refused installation is an outstanding failure.
       expect(await run(installed, ["update", "--dry-run"])).toEqual({
-        exitCode: EXIT_SUCCESS,
-        stdout: "tools\tv1.0.0\tup to date\n",
-        stderr: clonedRefusal,
+        exitCode: EXIT_FAILURE,
+        stdout: "",
+        stderr: `${clonedRefusal}Error: tools\tv1.0.0\tfailed: no version supporting tx 1.8.0: v1.0.0 requires tx ^2.0.0. Update tx to a version it supports, pin a version with "tx marketplace pin tools <ref>", or set TX_IGNORE_COMPATIBILITY=1 to load it anyway.\nError: Update completed with failures\n`,
       });
       const listed = await run(installed, ["marketplace", "list"]);
       expect(listed.exitCode).toBe(EXIT_SUCCESS);

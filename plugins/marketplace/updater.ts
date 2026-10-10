@@ -10,6 +10,7 @@ import {
   disableMarketplaceSparseCheckout,
   fetchCheckoutRemote,
   type GitExecution,
+  ignoreCompatibilityVariable,
   isCommitAncestor,
   isCommitPublished,
   liveMarketplaceVersion,
@@ -17,6 +18,7 @@ import {
   type MarketplaceSparseCheckoutState,
   moveCheckout,
   moveLazyCheckout,
+  noCompatibleVersion,
   planMarketplaceManifestAtRevision,
   type ResolvedRef,
   type RunGit,
@@ -35,9 +37,12 @@ import {
   restoreMarketplaceSparseCheckoutState,
   revisionRepositoryPathsPresent,
   runGit,
+  selectedVersionDetail,
+  selectMarketplaceTarget,
   unknownMarketplaceVersion,
   withoutCredentials,
 } from "./manager.ts";
+import { admitsVersion } from "./semver.ts";
 import {
   containedMarketplacePath,
   discoverInstalledMarketplaces,
@@ -52,6 +57,9 @@ export interface MarketplaceUpdaterOptions {
   readonly runGit?: RunGit;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly prepare?: (checkout: string) => Promise<void>;
+  /** The running tx version, which only the host knows. Without one an
+   * unpinned marketplace targets its tip whatever its manifest declares. */
+  readonly txVersion?: string;
 }
 
 function errorMessage(error: unknown): string {
@@ -106,6 +114,28 @@ class UnresolvableMarketplacePinError extends Error {
   }
 }
 
+/** An unpinned marketplace the running tx refuses, with nothing it supports
+ * to move to. */
+class IncompatibleMarketplaceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IncompatibleMarketplaceError";
+  }
+}
+
+/**
+ * Where a marketplace is going. `detail` says why an unpinned marketplace's
+ * target came from its release history, and `held` why one whose tip the
+ * running tx refuses stays where it is; `backwards` allows a move to a commit
+ * the installed one is not an ancestor of, which only a refused installation
+ * may make.
+ */
+interface MarketplaceTarget extends ResolvedRef {
+  readonly detail?: string;
+  readonly held?: string;
+  readonly backwards?: boolean;
+}
+
 /** The one line of detail an item may carry, joined from whatever the pin and
  * the blocking check had to say, or nothing when neither had anything. */
 function reportedDetail(...parts: readonly (string | undefined)[]): {
@@ -126,6 +156,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
   readonly #root: string;
   readonly #execution: GitExecution;
   readonly #prepare: (checkout: string) => Promise<void>;
+  readonly #txVersion: string | undefined;
 
   constructor(root: string, options: MarketplaceUpdaterOptions = {}) {
     const env = options.env ?? process.env;
@@ -133,6 +164,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
     this.#execution = { runGit: options.runGit ?? runGit, env };
     this.#prepare =
       options.prepare ?? ((checkout) => prepareMarketplace(checkout, { env }));
+    this.#txVersion = options.txVersion;
   }
 
   async gather(): Promise<readonly UpdateItem[]> {
@@ -162,15 +194,20 @@ export class MarketplaceUpdater implements UpdateParticipant {
 
     const current = await readCheckoutCommit(checkout, this.#execution);
     const pin = await readMarketplacePin(checkout, this.#execution);
-    const { commit: target } = await this.#target(item.name, checkout, pin);
-    if (target === current) return { applied: false };
+    // Selected again rather than taken from the item, exactly as everything
+    // else is re-read: the remote's history is as likely to have changed.
+    const selected = await this.#target(item.name, checkout, current, pin);
+    const target = selected.commit;
+    if (target === current) {
+      return { applied: false, ...reportedDetail(selected.held) };
+    }
 
     const blocked = await this.#blockingCondition(
       item.name,
       checkout,
       current,
       target,
-      pin,
+      pin === undefined && selected.backwards !== true,
     );
     if (blocked !== undefined) throw new Error(blocked);
 
@@ -275,7 +312,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
       // Version resolution is transactional too: a label failure must not
       // strand the checkout on an update tx cannot report.
       const version = await readCommitLabel(checkout, target, this.#execution);
-      return { applied: true, version };
+      return { applied: true, version, ...reportedDetail(selected.detail) };
     } catch (error) {
       return await this.#rollbackApply(
         checkout,
@@ -419,14 +456,20 @@ export class MarketplaceUpdater implements UpdateParticipant {
       label = await readCommitLabel(checkout, current, this.#execution);
 
       const pin = await readMarketplacePin(checkout, this.#execution);
-      let target: ResolvedRef;
+      let target: MarketplaceTarget;
       try {
-        target = await this.#target(name, checkout, pin);
+        target = await this.#target(name, checkout, current, pin);
       } catch (error) {
-        // A pin the remote stopped publishing is this marketplace's own
-        // failure and arrives carrying its remedy; anything else came from a
-        // checkout tx cannot read, which the outer handler reports as that.
-        if (!(error instanceof UnresolvableMarketplacePinError)) throw error;
+        // A pin the remote stopped publishing, and an installation the
+        // running tx refuses with nothing to move to, are this marketplace's
+        // own failures and arrive carrying their remedies; anything else came
+        // from a checkout tx cannot read, which the outer handler reports.
+        if (
+          !(error instanceof UnresolvableMarketplacePinError) &&
+          !(error instanceof IncompatibleMarketplaceError)
+        ) {
+          throw error;
+        }
         return { name, current: label, failure: errorMessage(error) };
       }
       // The pin is reported whether or not anything moves: a marketplace held
@@ -436,9 +479,9 @@ export class MarketplaceUpdater implements UpdateParticipant {
       const pinned =
         pin === undefined
           ? undefined
-          : await this.#pinDetail(checkout, pin, target.tag);
+          : await this.#pinDetail(checkout, pin, target);
       if (target.commit === current) {
-        return { name, current: label, ...reportedDetail(pinned) };
+        return { name, current: label, ...reportedDetail(pinned, target.held) };
       }
 
       // Reported as detail rather than withheld: a user asking what is
@@ -449,7 +492,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
         checkout,
         current,
         target.commit,
-        pin,
+        pin === undefined && target.backwards !== true,
       );
       return {
         name,
@@ -459,7 +502,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
           target.commit,
           this.#execution,
         ),
-        ...reportedDetail(pinned, blocked),
+        ...reportedDetail(pinned, target.detail, blocked),
       };
     } catch (error) {
       return {
@@ -495,13 +538,12 @@ export class MarketplaceUpdater implements UpdateParticipant {
   async #target(
     name: string,
     checkout: string,
+    current: string,
     pin: string | undefined,
-  ): Promise<ResolvedRef> {
+  ): Promise<MarketplaceTarget> {
     if (pin === undefined) {
-      return {
-        commit: await readRemoteDefaultCommit(checkout, this.#execution),
-        tag: false,
-      };
+      const tip = await readRemoteDefaultCommit(checkout, this.#execution);
+      return this.#selectedTarget(name, checkout, current, tip);
     }
     try {
       return await resolveMarketplaceRef(checkout, pin, this.#execution);
@@ -514,25 +556,146 @@ export class MarketplaceUpdater implements UpdateParticipant {
   }
 
   /**
-   * What a pinned marketplace reports about its pin, and about a release the
-   * remote has published above it that nothing here proposes to apply.
+   * The target of an unpinned marketplace under the running tx: its tip when
+   * the tip is compatible, and otherwise what selection found in the tip's
+   * history, weighed against the commit already installed.
+   *
+   * A selected release the installed commit is not an ancestor of is moved to
+   * only when the running tx refuses the installed commit — the one
+   * installation worth moving backwards is one that does not load. A working
+   * installation stays where it is, held, until tx supports something newer;
+   * so does one with nothing usable to move to, while one the running tx
+   * refuses with nothing to move to is a failure that is outstanding until
+   * the user resolves it.
+   */
+  async #selectedTarget(
+    name: string,
+    checkout: string,
+    current: string,
+    tip: string,
+  ): Promise<MarketplaceTarget> {
+    const txVersion = this.#txVersion;
+    if (txVersion === undefined) return { commit: tip, tag: false };
+    const selection = await selectMarketplaceTarget(
+      checkout,
+      tip,
+      txVersion,
+      this.#execution,
+    );
+    if (selection.kind === "tip") return { commit: tip, tag: false };
+    const requires = `${selection.tip.version} requires tx ${selection.tip.range}`;
+    const stay = (installed: string, reason?: string): MarketplaceTarget => ({
+      commit: current,
+      tag: false,
+      held: `held at ${installed}: ${requires}${reason === undefined ? "" : `; ${reason}`}`,
+    });
+
+    if (selection.kind === "history") {
+      // The installed commit is the selected one, so it is described as the
+      // selection describes it.
+      if (selection.commit === current) return stay(selection.version);
+      const target = {
+        commit: selection.commit,
+        tag: false,
+        detail: selectedVersionDetail(selection, txVersion),
+      };
+      if (
+        await isCommitAncestor(
+          checkout,
+          current,
+          selection.commit,
+          this.#execution,
+        )
+      ) {
+        return target;
+      }
+      const installed = await this.#installed(checkout, current, txVersion);
+      return installed.compatible
+        ? stay(installed.version)
+        : { ...target, backwards: true };
+    }
+
+    const installed = await this.#installed(checkout, current, txVersion);
+    if (installed.compatible) {
+      return stay(installed.version, selection.unusable);
+    }
+    throw new IncompatibleMarketplaceError(
+      `${noCompatibleVersion(selection, txVersion)}. Update tx to a version it supports, pin a version with "tx marketplace pin ${name} <ref>", or set ${ignoreCompatibilityVariable}=1 to load it anyway.`,
+    );
+  }
+
+  /**
+   * Whether the running tx supports the installed commit, decided by the
+   * manifest that commit carries, and how reports describe it. A manifest
+   * that cannot be read or is invalid counts as not compatible, because that
+   * commit does not load either.
+   */
+  async #installed(
+    checkout: string,
+    current: string,
+    txVersion: string,
+  ): Promise<{ readonly compatible: boolean; readonly version: string }> {
+    let plan: MarketplaceManifestPlan | undefined;
+    try {
+      plan = await planMarketplaceManifestAtRevision(
+        checkout,
+        current,
+        this.#execution,
+      );
+    } catch {
+      // Unreadable or invalid: this commit does not load either.
+    }
+    return {
+      compatible: plan !== undefined && admitsVersion(plan.tx, txVersion),
+      version:
+        plan?.version ??
+        (await readCommitLabel(checkout, current, this.#execution)),
+    };
+  }
+
+  /**
+   * What a pinned marketplace reports about its pin, about a release the
+   * remote has published above it that nothing here proposes to apply, and
+   * about a pinned commit the running tx refuses.
    *
    * Only a pin that resolved as a tag is compared. A release above a pin is
    * what a user tracking releases wants to hear about; a branch is not a
    * release, however version-like whoever named it made it look, and there is
-   * nothing above a branch to move to.
+   * nothing above a branch to move to. A pin is never re-selected — the user
+   * named it — so an incompatible one is only said to be, and a manifest that
+   * cannot be read is left to the validation an applied pin runs.
    */
   async #pinDetail(
     checkout: string,
     pin: string,
-    tag: boolean,
+    target: ResolvedRef,
   ): Promise<string> {
-    const higher = tag
+    const higher = target.tag
       ? await readHigherReleaseTag(checkout, pin, this.#execution)
       : undefined;
-    return higher === undefined
-      ? `pinned to ${pin}`
-      : `pinned to ${pin}; the remote publishes ${higher}`;
+    const notes = [
+      `pinned to ${pin}`,
+      ...(higher === undefined ? [] : [`the remote publishes ${higher}`]),
+    ];
+    const txVersion = this.#txVersion;
+    if (txVersion !== undefined) {
+      let range: string | undefined;
+      try {
+        range = (
+          await planMarketplaceManifestAtRevision(
+            checkout,
+            target.commit,
+            this.#execution,
+          )
+        ).tx;
+      } catch {
+        // Validated when the update applies the pin.
+      }
+      if (range !== undefined && !admitsVersion(range, txVersion)) {
+        notes.push(`${pin} supports tx ${range}, not tx ${txVersion}`);
+      }
+    }
+    return notes.join("; ");
   }
 
   /** Why this marketplace cannot move, in one line, or nothing. */
@@ -541,7 +704,7 @@ export class MarketplaceUpdater implements UpdateParticipant {
     checkout: string,
     current: string,
     target: string,
-    pin: string | undefined,
+    forwardOnly: boolean,
   ): Promise<string | undefined> {
     const modified = await readModifiedTrackedFiles(checkout, this.#execution);
     if (modified.length > 0) {
@@ -550,9 +713,10 @@ export class MarketplaceUpdater implements UpdateParticipant {
     // Only an unpinned marketplace is held to moving forward. It says "keep me
     // current", so a target its commit is no part of has to be refused; a pin
     // says "put me at this", and going back to the last good version is the
-    // whole point of setting one.
+    // whole point of setting one. A release selected for a refused
+    // installation is exempt too, which `#selectedTarget` decides.
     if (
-      pin === undefined &&
+      forwardOnly &&
       !(await isCommitAncestor(checkout, current, target, this.#execution))
     ) {
       // Which refusal it is depends on whether the remote still has the

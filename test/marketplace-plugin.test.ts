@@ -102,9 +102,9 @@ class RecordingManager implements MarketplaceOperations {
     return this.listings;
   }
 
-  async pin(name: string, ref: string): Promise<string> {
+  async pin(name: string, ref: string) {
     this.calls.push(["pin", name, ref]);
-    return "v1.4.0";
+    return { version: "v1.4.0" };
   }
 
   async remove(name: string): Promise<void> {

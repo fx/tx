@@ -14,6 +14,12 @@ import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  admitsVersion,
+  compareSemanticVersions,
+  parseSemanticVersion,
+  type SemanticVersion,
+} from "./semver.ts";
+import {
   carriesGitSyntax,
   parseGitSourceVersion,
   windowsDrivePattern,
@@ -25,6 +31,7 @@ import {
   MarketplaceManifestContentError,
   type MarketplaceManifestPlan,
   MarketplaceManifestRepositoryPathError,
+  type MarketplaceRelease,
   parseMarketplaceManifestDocument,
   pathExists,
   planMarketplaceManifest,
@@ -55,15 +62,32 @@ export interface MarketplaceOperations {
     source: string,
     requestedName?: string,
     options?: MarketplaceAddOptions,
-  ): Promise<ResolvedMarketplace>;
+  ): Promise<MarketplaceAddition>;
   list(): Promise<readonly MarketplaceListing[]>;
-  pin(name: string, ref: string): Promise<string>;
+  pin(name: string, ref: string): Promise<MarketplacePinning>;
   remove(name: string): Promise<void>;
   unpin(name: string): Promise<void>;
 }
 
 export interface MarketplaceAddOptions {
   readonly full?: boolean;
+}
+
+/** What an addition installed, and what `add` reports about it beyond its
+ * name: a version selected from the history, or a commit or directory the
+ * running tx will refuse. */
+export interface MarketplaceAddition extends ResolvedMarketplace {
+  /** One line for standard output. */
+  readonly notice?: string;
+  /** One line for standard error. */
+  readonly warning?: string;
+}
+
+/** The version label a pin's next update applies, and a warning when the
+ * running tx will refuse the commit it names. */
+export interface MarketplacePinning {
+  readonly version: string;
+  readonly warning?: string;
 }
 
 export interface GitResult {
@@ -117,6 +141,9 @@ export interface MarketplaceManagerOptions {
   readonly prepare?: (checkout: string) => Promise<void>;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly cwd?: string;
+  /** The running tx version, which only the host knows. Without one nothing
+   * is selected from a release history and nothing is warned about. */
+  readonly txVersion?: string;
 }
 
 const githubRepositoryPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/;
@@ -129,6 +156,8 @@ export const liveMarketplaceVersion = "live";
 /** What a marketplace whose manifest declares no version, or cannot be read,
  * reports as its declared version. */
 export const undeclaredMarketplaceVersion = "-";
+/** The variable that loads a marketplace its declared tx range refuses. */
+export const ignoreCompatibilityVariable = "TX_IGNORE_COMPATIBILITY";
 const originRemote = "origin";
 const remoteHeadRef = "refs/remotes/origin/HEAD";
 const manifestFilename = ".tx/config.json";
@@ -1347,6 +1376,205 @@ export async function planMarketplaceManifestAtRevision(
   );
 }
 
+/** A tip the running tx does not support, as reports describe it. */
+export interface IncompatibleTip {
+  /** The version the tip's manifest declares, or its version label. */
+  readonly version: string;
+  /** The tx range the tip's manifest declares. */
+  readonly range: string;
+}
+
+/**
+ * Which commit an unpinned marketplace targets under the running tx: the tip,
+ * a release from the tip's history, or none at all — in which case `unusable`
+ * says why the candidate could not be used when there was one.
+ */
+export type MarketplaceSelection =
+  | { readonly kind: "tip"; readonly commit: string }
+  | {
+      readonly kind: "history";
+      readonly commit: string;
+      /** How reports describe the selected commit. */
+      readonly version: string;
+      readonly tip: IncompatibleTip;
+    }
+  | {
+      readonly kind: "none";
+      readonly tip: IncompatibleTip;
+      readonly unusable?: string;
+    };
+
+/**
+ * The newest release whose range the running tx satisfies. A pre-release is
+ * never one: it is the version its publisher has not offered yet, and a user
+ * who wants one pins it.
+ */
+function newestCompatibleRelease(
+  releases: readonly MarketplaceRelease[],
+  txVersion: string,
+): MarketplaceRelease | undefined {
+  let newest:
+    | { release: MarketplaceRelease; version: SemanticVersion }
+    | undefined;
+  for (const release of releases) {
+    // Validated with the manifest, so every history version parses.
+    const version = parseSemanticVersion(release.version) as SemanticVersion;
+    if (version.prerelease.length > 0) continue;
+    if (!admitsVersion(release.tx, txVersion)) continue;
+    if (
+      newest === undefined ||
+      compareSemanticVersions(version, newest.version) > 0
+    ) {
+      newest = { release, version };
+    }
+  }
+  return newest?.release;
+}
+
+/**
+ * Makes a commit the checkout may lack present, by its object name, and
+ * answers why the remote would not serve it, or nothing. A partial clone
+ * fetches a missing object lazily when it is asked about it, and a complete
+ * one fetches exactly that commit from the recorded remote; either way only
+ * objects are written, and both reach the remote non-interactively.
+ */
+async function fetchCommitByName(
+  checkout: string,
+  commit: string,
+  execution: GitExecution,
+): Promise<string | undefined> {
+  try {
+    await runLazyCheckoutGit(
+      checkout,
+      ["cat-file", "-e", `${commit}^{commit}`],
+      execution,
+    );
+    return undefined;
+  } catch {
+    // Absent after the last fetch, which is what the fetch below is for.
+  }
+  try {
+    await runLazyCheckoutGit(
+      checkout,
+      ["fetch", "--no-tags", originRemote, commit],
+      execution,
+    );
+    return undefined;
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
+/**
+ * Selects what an unpinned marketplace installs under the running tx, reading
+ * manifests at revisions and never through the working tree, so selecting
+ * changes nothing installed.
+ *
+ * The tip is the target whenever it is compatible — or when its manifest
+ * cannot be read, which validating the target reports exactly as it reports
+ * any invalid one. Otherwise the candidate is the newest release in the tip's
+ * history the running tx satisfies, and its own manifest is the authority on
+ * that: a commit whose manifest contradicts its history element would install
+ * the very marketplace loading refuses. An unusable candidate is never
+ * replaced by a lower release, because silently installing an even older
+ * version would hide the publisher's mistake behind one nobody expected.
+ * Nothing is recorded; the next selection answers afresh.
+ */
+export async function selectMarketplaceTarget(
+  checkout: string,
+  tip: string,
+  txVersion: string,
+  execution: GitExecution,
+): Promise<MarketplaceSelection> {
+  let manifest: MarketplaceManifestPlan;
+  try {
+    manifest = await planMarketplaceManifestAtRevision(
+      checkout,
+      tip,
+      execution,
+    );
+  } catch {
+    return { kind: "tip", commit: tip };
+  }
+  const range = manifest.tx;
+  if (range === undefined || admitsVersion(range, txVersion)) {
+    return { kind: "tip", commit: tip };
+  }
+  const described: IncompatibleTip = {
+    version:
+      manifest.version ?? (await readCommitLabel(checkout, tip, execution)),
+    range,
+  };
+
+  const candidate = newestCompatibleRelease(manifest.versions ?? [], txVersion);
+  if (candidate === undefined) return { kind: "none", tip: described };
+  const claim = `${candidate.version} is listed as supporting tx ${candidate.tx}`;
+  const unserved = await fetchCommitByName(checkout, candidate.ref, execution);
+  if (unserved !== undefined) {
+    return {
+      kind: "none",
+      tip: described,
+      unusable: `${claim}, but the remote does not serve its commit ${candidate.ref}: ${unserved}`,
+    };
+  }
+  let own: MarketplaceManifestPlan;
+  try {
+    own = await planMarketplaceManifestAtRevision(
+      checkout,
+      candidate.ref,
+      execution,
+    );
+  } catch (error) {
+    return {
+      kind: "none",
+      tip: described,
+      unusable: `${claim}, but its commit's manifest cannot be read: ${(error as Error).message}`,
+    };
+  }
+  if (!admitsVersion(own.tx, txVersion)) {
+    return {
+      kind: "none",
+      tip: described,
+      unusable: `${claim}, but its commit declares tx ${own.tx}`,
+    };
+  }
+  return {
+    kind: "history",
+    commit: candidate.ref,
+    version: own.version ?? candidate.version,
+    tip: described,
+  };
+}
+
+/** What a selection from the history reports: why the tip was passed over,
+ * and that the selected version is the newest the running tx supports. */
+export function selectedVersionDetail(
+  selection: Extract<MarketplaceSelection, { kind: "history" }>,
+  txVersion: string,
+): string {
+  return `${selection.tip.version} requires tx ${selection.tip.range}; ${selection.version} is the newest version supporting tx ${txVersion}`;
+}
+
+/** Why nothing the running tx supports could be selected, without the
+ * remedy, which depends on what was being done. */
+export function noCompatibleVersion(
+  selection: Extract<MarketplaceSelection, { kind: "none" }>,
+  txVersion: string,
+): string {
+  const reason =
+    selection.unusable === undefined ? "" : `; ${selection.unusable}`;
+  return `no version supporting tx ${txVersion}: ${selection.tip.version} requires tx ${selection.tip.range}${reason}`;
+}
+
+/** The warning for installing or pinning what the running tx will refuse. */
+function incompatibilityWarning(
+  subject: string,
+  range: string,
+  txVersion: string,
+): string {
+  return `${subject} supports tx ${range}, not tx ${txVersion}, so its plugins will be refused under this tx; set ${ignoreCompatibilityVariable}=1 to load them anyway.`;
+}
+
 /** Whether a revision contains a failed leaf or a symlinked proper ancestor. */
 export async function revisionRepositoryPathsPresent(
   checkout: string,
@@ -1484,6 +1712,7 @@ export class MarketplaceManager implements MarketplaceOperations {
   readonly #cwd: string;
   /** How this manager drives Git, for the shared operations above. */
   readonly #execution: GitExecution;
+  readonly #txVersion: string | undefined;
 
   constructor(root: string, options: MarketplaceManagerOptions = {}) {
     this.#root = root;
@@ -1492,6 +1721,7 @@ export class MarketplaceManager implements MarketplaceOperations {
     this.#env = options.env ?? process.env;
     this.#cwd = options.cwd ?? process.cwd();
     this.#execution = { runGit: this.#runGit, env: this.#env };
+    this.#txVersion = options.txVersion;
   }
 
   async resolve(
@@ -1506,24 +1736,56 @@ export class MarketplaceManager implements MarketplaceOperations {
     source: string,
     requestedName?: string,
     options: MarketplaceAddOptions = {},
-  ): Promise<ResolvedMarketplace> {
+  ): Promise<MarketplaceAddition> {
     const resolved = await this.#resolve(source, requestedName);
     const target = containedMarketplacePath(this.#root, resolved.name);
     await mkdir(this.#root, { recursive: true });
     await this.#requireAvailable(resolved.name, target);
 
+    const added = { name: resolved.name, source: resolved.source };
     if (resolved.local !== undefined) {
       await this.#reference(resolved.local, resolved.name, target);
     } else {
-      await this.#clone(
+      const notice = await this.#clone(
         resolved.repository,
         resolved.name,
         target,
         resolved.ref,
         options.full === true,
       );
+      if (notice !== undefined) return { ...added, notice };
     }
-    return { name: resolved.name, source: resolved.source };
+    if (resolved.local === undefined && resolved.ref === undefined) {
+      return added;
+    }
+    // The user named this version or this directory, so nothing was selected;
+    // what the running tx will make of it is said rather than refused.
+    const warning = await this.#incompatibility(
+      `Marketplace "${resolved.name}"`,
+      () => planMarketplaceManifest(target),
+    );
+    return warning === undefined ? added : { ...added, warning };
+  }
+
+  /**
+   * The warning for a manifest the running tx refuses, or nothing — also when
+   * the manifest cannot be read, which whatever reads it next reports.
+   */
+  async #incompatibility(
+    subject: string,
+    plan: () => Promise<MarketplaceManifestPlan>,
+  ): Promise<string | undefined> {
+    const txVersion = this.#txVersion;
+    if (txVersion === undefined) return undefined;
+    let range: string | undefined;
+    try {
+      range = (await plan()).tx;
+    } catch {
+      return undefined;
+    }
+    return range === undefined || admitsVersion(range, txVersion)
+      ? undefined
+      : incompatibilityWarning(subject, range, txVersion);
   }
 
   async #resolve(
@@ -1657,7 +1919,7 @@ export class MarketplaceManager implements MarketplaceOperations {
     parent: string,
     ref: string | undefined,
     full: boolean,
-  ): Promise<string> {
+  ): Promise<{ readonly staging: string; readonly notice?: string }> {
     const repository = normalizeMarketplaceRepository(source);
     const derived = deriveMarketplaceSshRepository(repository);
     const attempts =
@@ -1703,11 +1965,13 @@ export class MarketplaceManager implements MarketplaceOperations {
         }
 
         if (reducedCloned) {
-          // A requested ref selects which manifest is planned. Resolving and
-          // staging it is not a transport retry boundary: once the clone
-          // succeeded, a bad ref is the answer for this repository.
+          // A requested ref, or the version selected for the running tx,
+          // decides which manifest is planned. Resolving and staging it is not
+          // a transport retry boundary: once the clone succeeded, a bad ref or
+          // a missing compatible version is the answer for this repository.
+          let notice: string | undefined;
           try {
-            if (ref !== undefined) await this.#stageVersion(staging, ref, env);
+            notice = await this.#stage(staging, name, source, ref, env);
           } catch (error) {
             await discardStaging(staging);
             throw error;
@@ -1728,7 +1992,7 @@ export class MarketplaceManager implements MarketplaceOperations {
               { env },
             );
             await this.#validateReducedCheckout(staging, env);
-            return staging;
+            return notice === undefined ? { staging } : { staging, notice };
           } catch (error) {
             await discardStaging(staging);
             if (
@@ -1753,8 +2017,8 @@ export class MarketplaceManager implements MarketplaceOperations {
         continue;
       }
       try {
-        if (ref !== undefined) await this.#stageVersion(staging, ref, env);
-        return staging;
+        const notice = await this.#stage(staging, name, source, ref, env);
+        return notice === undefined ? { staging } : { staging, notice };
       } catch (error) {
         await discardStaging(staging);
         throw error;
@@ -1853,8 +2117,8 @@ export class MarketplaceManager implements MarketplaceOperations {
     target: string,
     ref?: string,
     full = false,
-  ): Promise<void> {
-    const staging = await this.#cloneStaging(
+  ): Promise<string | undefined> {
+    const { staging, notice } = await this.#cloneStaging(
       source,
       name,
       dirname(target),
@@ -1864,12 +2128,64 @@ export class MarketplaceManager implements MarketplaceOperations {
     try {
       await this.#prepareCheckout(staging);
       await publishStaging(staging, target, name);
+      return notice;
     } finally {
       // Through the helper rather than `rm` directly: preparation and the name
       // check both throw failures the user needs to read, and a removal the
       // filesystem refuses would replace them from inside this `finally`.
       await discardStaging(staging);
     }
+  }
+
+  /**
+   * Puts a staged clone on the commit the addition installs, before anything
+   * is validated or published, and answers what the addition reports about
+   * it: the ref the user named, or else the version selected for the running
+   * tx.
+   */
+  async #stage(
+    staging: string,
+    name: string,
+    source: string,
+    ref: string | undefined,
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<string | undefined> {
+    if (ref === undefined)
+      return this.#stageSelection(staging, name, source, env);
+    await this.#stageVersion(staging, ref, env);
+    return undefined;
+  }
+
+  /**
+   * Moves a staged clone of the tip onto the version selected for the running
+   * tx, through the same move `#stageVersion` makes and without its pin: a
+   * selected version is not a choice anyone made, and leaving the marketplace
+   * unpinned is what returns it to the tip once tx supports the tip. With no
+   * usable target the addition fails, so nothing is published.
+   */
+  async #stageSelection(
+    staging: string,
+    name: string,
+    source: string,
+    env: Readonly<Record<string, string | undefined>>,
+  ): Promise<string | undefined> {
+    const txVersion = this.#txVersion;
+    if (txVersion === undefined) return undefined;
+    const execution = { runGit: this.#runGit, env };
+    const selection = await selectMarketplaceTarget(
+      staging,
+      await readCheckoutCommit(staging, execution),
+      txVersion,
+      execution,
+    );
+    if (selection.kind === "tip") return undefined;
+    if (selection.kind === "none") {
+      throw new Error(
+        `Marketplace "${name}" has ${noCompatibleVersion(selection, txVersion)}. Install a specific version with "tx marketplace add ${credentialFreeSource(source)}@<ref>".`,
+      );
+    }
+    await moveCheckout(staging, selection.commit, execution);
+    return `Installed ${selection.version} because ${selection.tip.version} requires tx ${selection.tip.range}, which tx ${txVersion} does not satisfy.`;
   }
 
   /**
@@ -1962,7 +2278,7 @@ export class MarketplaceManager implements MarketplaceOperations {
    * failure handling, and a pin command that quietly did all that would be an
    * update with a different name.
    */
-  async pin(name: string, ref: string): Promise<string> {
+  async pin(name: string, ref: string): Promise<MarketplacePinning> {
     const checkout = await this.#pinnableCheckout(name);
     await this.#fetchCheckout(checkout);
     const { commit } = await resolveMarketplaceRef(
@@ -1971,7 +2287,15 @@ export class MarketplaceManager implements MarketplaceOperations {
       this.#execution,
     );
     await writeMarketplacePin(checkout, ref, this.#execution);
-    return readCommitLabel(checkout, commit, this.#execution);
+    const version = await readCommitLabel(checkout, commit, this.#execution);
+    // The pin is recorded regardless: the user named this version. A manifest
+    // that cannot be read is validated when the update applies the pin.
+    const warning = await this.#incompatibility(
+      `Marketplace "${name}" at ${ref}`,
+      () =>
+        planMarketplaceManifestAtRevision(checkout, commit, this.#execution),
+    );
+    return warning === undefined ? { version } : { version, warning };
   }
 
   /**

@@ -116,6 +116,22 @@ tx marketplace unpin cc
 
 `pin` fetches first and refuses a ref the remote does not publish, leaving the previous pin exactly as it was, so a mistyped ref never silently unpins anything. It records without checking anything out, because moving a checkout runs validation and a trusted dependency installation — that is `tx update`'s job, and it carries `tx update`'s failure handling. `unpin` clears the pin and the marketplace tracks its remote's default branch again.
 
+### Versions that support your tx
+
+Without a version, `add` installs what the remote's default branch holds — unless that commit's manifest [declares a `tx` range](#declare-tx-compatibility) the running `tx` does not satisfy. Then `add` installs the newest release from that manifest's `versions` history whose range the running `tx` does satisfy, and says so:
+
+```
+$ tx marketplace add example/tools
+Added marketplace "tools".
+Installed 1.5.0 because 2.0.0 requires tx ^2.0.0, which tx 1.8.0 does not satisfy.
+```
+
+A pre-release in the history is never chosen this way; pin one if you want it. The release's own commit has the last word: `tx` fetches that commit by its object name when the clone does not already have it, and reads the manifest it carries. A commit the remote does not serve, or whose manifest does not support the running `tx` after all, is not installed — and `tx` does not quietly fall back to an even older release in its place. When nothing qualifies, the addition fails and installs nothing, naming the running `tx`, the range the default branch declares, why the newest compatible release could not be used, and `tx marketplace add <source>@<ref>` as the way to install a particular version anyway.
+
+No pin is recorded. The marketplace stays unpinned and is selected afresh by every `tx update`, so it returns to the default branch as soon as you run a `tx` that branch supports.
+
+A version you name — `add <source>@<ref>`, a local directory, `marketplace pin` — is never second-guessed. When what it names does not support the running `tx`, the command still succeeds and warns on standard error that the marketplace's plugins will be refused, naming the range and the running version; `TX_IGNORE_COMPATIBILITY=1` is how you run them anyway. A pinned commit whose manifest cannot be read is not warned about: the update that applies the pin validates it.
+
 ## Update what is installed
 
 `tx update` updates everything `tx` has installed. `tx update --dry-run` reports exactly the same thing and applies nothing, and positional names limit a run to the items you name.
@@ -163,6 +179,22 @@ Two situations stop an update, and both are reported as detail on a dry run befo
 
 - **A tracked file you edited.** The edit is yours and is never discarded. Resolve it in the checkout and run the update again. Untracked files are ignored, because `bun install` writes them into every checkout — except one occupying a path the new commit tracks, which cannot be kept and moved onto: that collision is reported with the path, and the file survives.
 - **A commit that is not an ancestor of the target.** Moving anyway would silently discard the history the checkout was validated against, so an unpinned marketplace is refused — and which refusal you get says what happened. If the remote no longer has that commit anywhere, the branch was force-pushed or rebuilt, and `tx marketplace remove` and add it again is the remedy. If the remote still publishes it, on a side branch or at a tag, nothing is broken: that is where a pin left the checkout, so `tx marketplace pin` names it as the remedy first. A pinned marketplace is never refused for this — you named the commit.
+
+An unpinned marketplace whose default branch declares a `tx` range the running `tx` does not satisfy is updated to the newest compatible release instead, chosen exactly as [`add` chooses one](#versions-that-support-your-tx) and chosen again when the update applies, never taken on trust from what the dry run printed:
+
+```
+$ tx update --dry-run
+tools	v1.4.0	-> v1.5.0	2.0.0 requires tx ^2.0.0; 1.5.0 is the newest version supporting tx 1.8.0
+```
+
+That move may even go backwards, but only for an installation the running `tx` refuses — one whose own manifest excludes it, or cannot be read at all. That is the installation that gains from it: it moves back to the last version that loads. A marketplace whose installed commit works is never moved to an older release; it is reported as held, with nothing to apply, and the command still exits `0`, because nothing is wrong:
+
+```
+$ tx update --dry-run
+tools	v1.5.0	up to date	held at 1.5.0: 2.0.0 requires tx ^2.0.0
+```
+
+A refused installation with no usable release to move to is different: it is refused on every invocation, so it is reported as a failed item — naming the running `tx`, the range the default branch declares, and the three ways out: a newer `tx`, `tx marketplace pin <name> <ref>`, and `TX_IGNORE_COMPATIBILITY=1` — and the run exits `1`, dry run included. A pinned marketplace is never re-selected; when the commit its pin resolves to does not support the running `tx`, its detail says so, and nothing else changes. A default branch whose manifest cannot be read is targeted as it always was, and validating it is what reports the problem.
 
 A marketplace whose plugins fail to load updates like any other — the participant reads storage rather than depending on a marketplace having loaded, which is what makes `tx update` the way out of a broken commit. A checkout `tx` cannot read at all is reported as one failed item naming its `marketplace remove` remedy, while the marketplaces around it still report and still update.
 
@@ -252,7 +284,24 @@ To load a refused marketplace anyway, set `TX_IGNORE_COMPATIBILITY` to exactly `
 TX_IGNORE_COMPATIBILITY=1 tx notes
 ```
 
-Each marketplace it forces prints one warning line on standard error, so a variable left in a shell profile never goes unnoticed; a compatible marketplace prints nothing. Any other value — `true`, `0`, or an empty one — leaves refusal in effect. The override changes loading only: it does not make an invalid manifest valid.
+Each marketplace it forces prints one warning line on standard error, so a variable left in a shell profile never goes unnoticed; a compatible marketplace prints nothing. Any other value — `true`, `0`, or an empty one — leaves refusal in effect. The override changes loading only: it does not make an invalid manifest valid, and it never changes which version `add` or `tx update` installs.
+
+### Keep releases installable for older tx
+
+A user's `tx` reads the release history from your default branch, and only from there: when its newest commit does not support their `tx`, it installs the newest release in that history that does (see [Versions that support your tx](#versions-that-support-your-tx)). The history is an index, and each release's own commit is the authority — a release whose commit declares a range the history contradicts is reported, not installed. To keep it accurate, release like this:
+
+1. **Set `version` and `tx` in the release commit**, to what that commit is and supports, and tag it if you publish tags.
+2. **Record it in a later commit.** A commit cannot contain its own object name, so once the release commit exists, append a `versions` element carrying its full object name and the same range, and commit that to the default branch:
+
+   ```sh
+   git rev-parse 'v1.5.0^{commit}'   # the release commit's full object name
+   # add { "version": "1.5.0", "ref": "<that name>", "tx": "^2.0.0" } to versions
+   git commit -am "Record 1.5.0 in the release history"
+   ```
+
+3. **Before the default branch raises `tx`**, make sure the last release supporting the previous range is in the history. Raising the range is what makes the default branch incompatible with every older `tx`; that release is what those users install instead, and without it they have nothing to install.
+
+Every element stays in the history for as long as some `tx` might need it. To correct or withdraw one, change the default branch — the history any other commit carries is never consulted. Keep each release commit reachable from a branch or tag you publish: `tx` asks for it by object name, and a remote that no longer has the commit cannot serve it.
 
 ## Write a plugin
 
