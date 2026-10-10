@@ -299,7 +299,7 @@ changes:
     path: changes/0034-add-marketplace-tx-compatibility.md
     description: Let a marketplace declare its version, the tx range it supports, and a release history of immutable commits; refuse to load an incompatible marketplace unless TX_IGNORE_COMPATIBILITY=1; and install the newest compatible release on add and update.
     spec: updates
-    status: draft
+    status: complete
     depends_on:
       - "0013"
       - "0014"

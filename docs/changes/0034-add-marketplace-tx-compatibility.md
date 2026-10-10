@@ -5,7 +5,7 @@
 Let a marketplace say which `tx` releases it supports and which commit carried each of its own versions, and act on it. The manifest gains three optional top-level fields — `version`, `tx`, and a `versions` release history mapping each released version to an immutable commit and its supported `tx` range. Loading refuses a marketplace whose checkout the running `tx` does not support, as an isolated plugin failure with a diagnostic, unless `TX_IGNORE_COMPATIBILITY=1` forces it. Adding and updating an unpinned marketplace install the newest version that supports the running `tx` rather than whatever its default branch holds.
 
 **Spec:** [Updates](../specs/updates/), [Plugin System](../specs/plugin-system/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0013, 0014, 0019
 
 ## Motivation
@@ -177,16 +177,16 @@ The second implementation pull request adds selection. Both `MarketplaceUpdater#
   - [x] Document declaring compatibility in `docs/manual/plugins.md` — the three fields with an example, the range grammar and pre-release rule, what a refusal looks like, and the override — and the new list column, in the pull request that implements them (PR #82)
   - [x] Verify 100% coverage and `bun run check` (PR #82)
 
-- [ ] Select compatible versions when adding and updating
-  - [ ] Add one selection function under `plugins/marketplace/` that reads the tip's manifest at its revision, returns the tip when it is compatible or unreadable, otherwise picks the candidate from the tip's history excluding pre-releases, fetches its commit by object name non-interactively when absent, and checks the candidate's own manifest at its revision, returning the target with what reports need
-  - [ ] Use it in `MarketplaceManager` for an unpinned Git `add`, moving staging onto a history-selected commit through the path `#stageVersion` uses without writing a pin, reporting the selected version, and failing with nothing published when there is no usable target
-  - [ ] Warn on a pinned or local `add`, and on `marketplace pin`, when the installed or pinned commit is not compatible
-  - [ ] Use it in `MarketplaceUpdater#target` for unpinned marketplaces, in both gathering and applying
-  - [ ] Decide the installed commit's compatibility from its own manifest, counting an unreadable or invalid one as not compatible, and apply the backwards move and the held outcome in `#blockingCondition` and gathering
-  - [ ] Report held, moved-back, unusable-candidate, and no-target outcomes with the detail and failure the spec requires, and add the compatibility note to a pinned marketplace's detail
-  - [ ] Cover the new behavior: every [Updates: Compatible Marketplace Versions](../specs/updates/index.md#compatible-marketplace-versions) scenario; no fallback past an unusable candidate; no pin recorded; a compatible installation never moved backwards; a candidate fetched by object name and one the remote does not serve; an unreadable tip manifest targeting the tip, reported by validation when the tip is a new commit and not revalidated when it is the installed commit; dry-run invariance including the candidate fetch; `marketplace install` selecting as `add` does
-  - [ ] Document selection in `docs/manual/plugins.md`, with a release recipe for authors: set `version` and `tx` in the release commit; once that commit exists, append a `versions` element carrying its full object name and range in a later commit on the default branch, since a commit cannot contain its own object name; and make sure the last release supporting the previous `tx` range is in the history before the default branch raises `tx`
-  - [ ] Verify 100% coverage and `bun run check`, and mark this change complete
+- [x] Select compatible versions when adding and updating
+  - [x] Add one selection function under `plugins/marketplace/` that reads the tip's manifest at its revision, returns the tip when it is compatible or unreadable, otherwise picks the candidate from the tip's history excluding pre-releases, fetches its commit by object name non-interactively when absent, and checks the candidate's own manifest at its revision, returning the target with what reports need
+  - [x] Use it in `MarketplaceManager` for an unpinned Git `add`, moving staging onto a history-selected commit through the path `#stageVersion` uses without writing a pin, reporting the selected version, and failing with nothing published when there is no usable target
+  - [x] Warn on a pinned or local `add`, and on `marketplace pin`, when the installed or pinned commit is not compatible
+  - [x] Use it in `MarketplaceUpdater#target` for unpinned marketplaces, in both gathering and applying
+  - [x] Decide the installed commit's compatibility from its own manifest, counting an unreadable or invalid one as not compatible, and apply the backwards move and the held outcome in `#blockingCondition` and gathering
+  - [x] Report held, moved-back, unusable-candidate, and no-target outcomes with the detail and failure the spec requires, and add the compatibility note to a pinned marketplace's detail
+  - [x] Cover the new behavior: every [Updates: Compatible Marketplace Versions](../specs/updates/index.md#compatible-marketplace-versions) scenario; no fallback past an unusable candidate; no pin recorded; a compatible installation never moved backwards; a candidate fetched by object name and one the remote does not serve; an unreadable tip manifest targeting the tip, reported by validation when the tip is a new commit and not revalidated when it is the installed commit; dry-run invariance including the candidate fetch; `marketplace install` selecting as `add` does
+  - [x] Document selection in `docs/manual/plugins.md`, with a release recipe for authors: set `version` and `tx` in the release commit; once that commit exists, append a `versions` element carrying its full object name and range in a later commit on the default branch, since a commit cannot contain its own object name; and make sure the last release supporting the previous `tx` range is in the history before the default branch raises `tx`
+  - [x] Verify 100% coverage and `bun run check`, and mark this change complete
 
 ## Open Questions
 

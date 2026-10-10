@@ -16,7 +16,7 @@ The second registry provider from [Change 0018](../../changes/0018-add-config-st
 
 [Minimal Clone Footprint](#minimal-clone-footprint) is implemented as specified in [Change 0019](../../changes/0019-reduce-marketplace-clone-footprint.md) for Git-sourced installs and updates, including the explicit complete-tree option, target-commit footprint re-derivation, complete-tree fallback, and transactional restoration.
 
-[Marketplace Compatibility](#marketplace-compatibility) is specified by [Change 0034](../../changes/0034-add-marketplace-tx-compatibility.md) and is not implemented yet: no manifest field it defines is validated or read, and loading refuses nothing on compatibility grounds.
+[Marketplace Compatibility](#marketplace-compatibility) is implemented as specified in [Change 0034](../../changes/0034-add-marketplace-tx-compatibility.md).
 
 ## Requirements
 
@@ -837,3 +837,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-09-06 | Specified Published Capability Contracts: every bundled capability publishes its structural contract at the subpath its registry key names, as types alone, held to the same boundary rules as the public plugin contract | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
 | 2026-10-10 | Made the injected React and Ink public APIs part of the plugin contract, so changing either is a breaking release, and upgraded the host to Ink 8 and React 19.3 | [0033-upgrade-to-ink-8-and-react-19-3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md) |
 | 2026-10-10 | Specified marketplace compatibility: the manifest's `version`, `tx`, and `versions` fields and their validation, npm's range grammar and pre-release rule, load-time refusal of a marketplace the running `tx` does not support, and the `TX_IGNORE_COMPATIBILITY` override | [0034-add-marketplace-tx-compatibility](../../changes/0034-add-marketplace-tx-compatibility.md) |
+| 2026-10-10 | Marketplace Compatibility is implemented; the overview no longer describes it as planned, and no requirement changed | [0034-add-marketplace-tx-compatibility](../../changes/0034-add-marketplace-tx-compatibility.md) |
