@@ -198,6 +198,6 @@ The second adds selection. Both `MarketplaceUpdater#target` and the add path in 
 ## References
 
 - Spec: [Updates](../specs/updates/), specifically [Compatible Marketplace Versions](../specs/updates/index.md#compatible-marketplace-versions); [Plugin System](../specs/plugin-system/), specifically [Marketplace Compatibility](../specs/plugin-system/index.md#marketplace-compatibility)
-- Related changes: [0013-update-installed-marketplaces](./0013-update-installed-marketplaces.md), [0014-pin-marketplace-versions](./0014-pin-marketplace-versions.md), [0019-reduce-marketplace-clone-footprint](./0019-reduce-marketplace-clone-footprint.md), [0006-isolate-plugin-failure-exit-codes](./0006-isolate-plugin-failure-exit-codes.md)
+- Related changes: [0033-upgrade-to-ink-8-and-react-19-3](./0033-upgrade-to-ink-8-and-react-19-3.md), [0013-update-installed-marketplaces](./0013-update-installed-marketplaces.md), [0014-pin-marketplace-versions](./0014-pin-marketplace-versions.md), [0019-reduce-marketplace-clone-footprint](./0019-reduce-marketplace-clone-footprint.md), [0006-isolate-plugin-failure-exit-codes](./0006-isolate-plugin-failure-exit-codes.md)
 - Manual: [Plugins](../manual/plugins.md)
 - External: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html), [npm `semver` ranges](https://github.com/npm/node-semver#ranges), [`git fetch`](https://git-scm.com/docs/git-fetch), [`git cat-file`](https://git-scm.com/docs/git-cat-file)
