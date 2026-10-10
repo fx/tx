@@ -159,12 +159,12 @@ The second adds selection. Both `MarketplaceUpdater#target` and the add path in 
 
 ## Tasks
 
-- [x] Specify marketplace tx compatibility and version history
-  - [x] Add [Plugin System: Marketplace Compatibility](../specs/plugin-system/index.md#marketplace-compatibility) covering the `version`, `tx`, and `versions` fields and their validation, ignored unknown keys, npm's range grammar and pre-release rule, the running `tx` version, load-time refusal and its diagnostic, and the `TX_IGNORE_COMPATIBILITY` override, with scenarios
-  - [x] Add the pointer bullet to [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) and the constraint about `tx` releases that predate the fields
-  - [x] Add [Updates: Compatible Marketplace Versions](../specs/updates/index.md#compatible-marketplace-versions) covering selection, candidate fetching, the commit's own manifest as authority, no fallback, no recorded pin, add reporting and failure, pin and local-source warnings, the backwards move, held and failed reporting, pinned detail, and the list column, with scenarios
-  - [x] Point the forward-only and target-resolution bullets of [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) at the new section, and add the design note, the same-run constraint, and the open questions
-  - [x] Update both specs' overviews, references, and changelogs, and both documentation indexes
+- [x] Specify marketplace tx compatibility and version history (PR #81)
+  - [x] Add [Plugin System: Marketplace Compatibility](../specs/plugin-system/index.md#marketplace-compatibility) covering the `version`, `tx`, and `versions` fields and their validation, ignored unknown keys, npm's range grammar and pre-release rule, the running `tx` version, load-time refusal and its diagnostic, and the `TX_IGNORE_COMPATIBILITY` override, with scenarios (PR #81)
+  - [x] Add the pointer bullet to [Plugin System: Marketplace Plugin Ownership](../specs/plugin-system/index.md#marketplace-plugin-ownership) and the constraint about `tx` releases that predate the fields (PR #81)
+  - [x] Add [Updates: Compatible Marketplace Versions](../specs/updates/index.md#compatible-marketplace-versions) covering selection, candidate fetching, the commit's own manifest as authority, no fallback, no recorded pin, add reporting and failure, pin and local-source warnings, the backwards move, held and failed reporting, pinned detail, and the list column, with scenarios (PR #81)
+  - [x] Point the forward-only and target-resolution bullets of [Updates: Marketplace Updates](../specs/updates/index.md#marketplace-updates) at the new section, and add the design note, the same-run constraint, and the open questions (PR #81)
+  - [x] Update both specs' overviews, references, and changelogs, and both documentation indexes (PR #81)
 
 - [ ] Declare compatibility and refuse incompatible marketplaces
   - [ ] Add a module under `plugins/marketplace/` parsing strict SemVer 2.0.0 versions, parsing npm's range grammar in its default mode, and deciding satisfaction including the pre-release rule and ignored build metadata, with no new dependency and no use of `Bun.semver`
