@@ -48,3 +48,4 @@
 | 0030 | [Publish Bundled Capability Contracts](changes/0030-publish-bundled-capability-contracts.md) | [Plugin System](specs/plugin-system/) | complete | 0026, 0028 |
 | 0031 | [Publish the Dialogs and Config Contracts](changes/0031-publish-the-dialogs-and-config-contracts.md) | [Dialogs](specs/dialogs/) | complete | 0030 |
 | 0032 | [Publish a Linux arm64 Executable](changes/0032-publish-a-linux-arm64-executable.md) | [Architecture](specs/architecture/) | complete | 0004, 0015 |
+| 0033 | [Upgrade to Ink 8 and React 19.3](changes/0033-upgrade-to-ink-8-and-react-19-3.md) | [Plugin System](specs/plugin-system/) | complete | 0003, 0017 |

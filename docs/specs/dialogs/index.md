@@ -305,7 +305,7 @@ Every option is visible while the filter text is blank; [Filtering](#filtering) 
 - `input` MUST render the request message and the current value.
 - `input` MUST begin with the request's initial value when one is supplied and MUST begin with an empty value otherwise.
 - Printable character input MUST append to the current value in typed order.
-- Input MAY arrive as more than one character at once, as a paste does; every printable character it carries MUST append in order, so a pasted chunk is appended whole. Control characters are never printable input, and neither is an escape sequence the host's input layer resolves to a key or leaves recognizable by its `CSI` introducer and final byte. A sequence that is neither MAY have its payload appended, because the leading escape is consumed before the dialog observes the input.
+- Input MAY arrive as more than one character at once, as a paste does; every printable character it carries MUST append in order, so a pasted chunk is appended whole. Control characters are never printable input, and neither is a complete escape sequence, whether the host's input layer resolves it to a key or discards it as one no key represents. Text that merely looks like a sequence's payload, such as `[25~` typed or pasted on its own, is printable input and MUST append. A sequence that arrives incomplete MAY have its payload appended, because the leading escape is consumed before the dialog observes the input.
 - Backspace MUST remove the last character of the current value and MUST do nothing when the value is empty.
 - Any other input MUST leave the value unchanged.
 - Enter MUST resolve with the current value exactly as entered, including the empty string; whether an empty value is acceptable belongs to the consuming command.
@@ -593,6 +593,7 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - [Change 0020: Add Select Filter and Viewport](../../changes/0020-add-select-filter-and-viewport.md)
 - [Change 0021: Restyle Dialogs as Norton Commander](../../changes/0021-restyle-dialogs-as-norton-commander.md)
 - [Change 0023: Render Sub-Dialogs as Columns](../../changes/0023-render-sub-dialogs-as-columns.md)
+- [Change 0033: Upgrade to Ink 8 and React 19.3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md)
 - [Ink](https://github.com/vadimdemedes/ink)
 
 ## Changelog
@@ -617,3 +618,4 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-05 | Options may declare aligned cells and a column may declare headers | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |
 | 2026-09-05 | Implemented aligned cells and headers: the two display shapes with the validations that settle a column's, matching within one cell rather than across the join, fields measured over the whole visible list, the header row drawn as chrome at the top of its band at the cost of one option row, and the sub-dialog marker drawn as its own `marker` piece of the row | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |
 | 2026-09-06 | Required the dialogs contract to be published at `@fx/tx/dialogs` as a types-only import, and resolved the deferred public-export open question | [0031-publish-the-dialogs-and-config-contracts](../../changes/0031-publish-the-dialogs-and-config-contracts.md) |
+| 2026-10-10 | Text input stopped recognizing control sequences by shape: Ink 8 resolves or discards every complete sequence before the dialog sees it, so text shaped like a sequence's payload appends | [0033-upgrade-to-ink-8-and-react-19-3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md) |

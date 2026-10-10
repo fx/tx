@@ -342,6 +342,7 @@ export interface CommandContext {
 
 - The core MUST expose React, Ink, the command parser, tx version metadata, and dependency version metadata through injected dependencies.
 - Plugins using React, Ink, or the command parser MUST obtain the host instances from injected dependencies rather than importing separate runtime copies.
+- Because every plugin renders with the host's React and Ink instances, those libraries' public APIs are part of the plugin contract: a host upgrade that removes or changes anything a plugin could rely on in either library, or raises the React version Ink requires, is a breaking change to the plugin contract and MUST be released as one.
 - Core MUST NOT publicly inject marketplace storage, paths, Git, manifests, discovery, installation, or recovery services.
 - The context and dependencies MAY gain backward-compatible generic fields later.
 
@@ -738,6 +739,7 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 - [Change 0016: Add Plugin Capabilities and Dialogs](../../changes/0016-add-plugin-capabilities-and-dialogs.md)
 - [Change 0018: Add Config Store and Marketplace Installs](../../changes/0018-add-config-store-and-marketplace-installs.md)
 - [Change 0019: Reduce Marketplace Clone Footprint](../../changes/0019-reduce-marketplace-clone-footprint.md)
+- [Change 0033: Upgrade to Ink 8 and React 19.3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md)
 - [Dialogs](../dialogs/)
 - [Config](../config/)
 - [Bun package manager](https://bun.sh/docs/pm/cli/install)
@@ -767,3 +769,4 @@ The parser is deliberately exposed twice. A plugin that only wants a subcommand 
 | 2026-08-31 | Specified the persisted list of configured marketplaces, its `marketplace install` command, and its write-back from `marketplace add` and `marketplace remove` | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
 | 2026-08-31 | Specified a manifest-driven reduced clone footprint for Git-sourced marketplace install and update, with a fallback to a complete retrieval | [0019-reduce-marketplace-clone-footprint](../../changes/0019-reduce-marketplace-clone-footprint.md) |
 | 2026-09-06 | Specified Published Capability Contracts: every bundled capability publishes its structural contract at the subpath its registry key names, as types alone, held to the same boundary rules as the public plugin contract | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
+| 2026-10-10 | Made the injected React and Ink public APIs part of the plugin contract, so changing either is a breaking release, and upgraded the host to Ink 8 and React 19.3 | [0033-upgrade-to-ink-8-and-react-19-3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md) |

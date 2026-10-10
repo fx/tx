@@ -285,3 +285,12 @@ changes:
     depends_on:
       - "0004"
       - "0015"
+  - id: "0033"
+    name: upgrade-to-ink-8-and-react-19-3
+    path: changes/0033-upgrade-to-ink-8-and-react-19-3.md
+    description: Upgrade the runtime to Ink 8 and React 19.3, record that changing the injected React or Ink is a breaking change to the plugin contract, and drop the text entry's control-sequence shape test that Ink 8 makes dead.
+    spec: plugin-system
+    status: complete
+    depends_on:
+      - "0003"
+      - "0017"
