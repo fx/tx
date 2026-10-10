@@ -402,9 +402,9 @@ async function runDialog<T>(
   let outcome: Outcome<T> | undefined;
   try {
     renderer = ink.render(react.createElement(ink.Text, null, ""), {
-      stdout: output as unknown as NodeJS.WriteStream,
-      stdin: input as unknown as NodeJS.ReadStream,
-      stderr: output as unknown as NodeJS.WriteStream,
+      stdout: output,
+      stdin: input,
+      stderr: output,
       exitOnCtrlC: false,
       interactive: true,
       patchConsole: false,
