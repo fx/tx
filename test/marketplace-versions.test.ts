@@ -464,7 +464,9 @@ describe("marketplace pin and unpin", () => {
       await commitFixtureFiles(remote, { "README.txt": "third\n" }, "third");
       fixtureGit(remote, ["tag", "v3.0.0"]);
 
-      expect(await installed.pin("tools", "v3.0.0")).toBe("v3.0.0");
+      expect(await installed.pin("tools", "v3.0.0")).toEqual({
+        version: "v3.0.0",
+      });
 
       expect(pinOf(checkout)).toBe("v3.0.0");
       // Pinning states an intention; `tx update` is where intentions become
@@ -489,7 +491,9 @@ describe("marketplace pin and unpin", () => {
       // outside the authority, which lands inside the name — so `pin` taking
       // the ref as an argument of its own is what keeps it reachable.
       // Reported by the label Git gives that commit, which is now this tag.
-      expect(await installed.pin("tools", "release@beta")).toBe("release@beta");
+      expect(await installed.pin("tools", "release@beta")).toEqual({
+        version: "release@beta",
+      });
       expect(pinOf(checkout)).toBe("release@beta");
 
       const participant = new MarketplaceUpdater(root, {

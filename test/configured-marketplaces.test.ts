@@ -67,8 +67,8 @@ class ResolvingManager implements MarketplaceOperations {
     return [];
   }
 
-  async pin(): Promise<string> {
-    return "unused";
+  async pin() {
+    return { version: "unused" };
   }
 
   async remove(): Promise<void> {}

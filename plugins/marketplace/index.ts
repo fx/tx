@@ -1,4 +1,9 @@
-import type { Plugin, PluginDefinition, PluginIdentity } from "@fx/tx/plugin";
+import type {
+  CommandContext,
+  Plugin,
+  PluginDefinition,
+  PluginIdentity,
+} from "@fx/tx/plugin";
 
 import {
   forgetConfiguredMarketplace,
@@ -8,6 +13,8 @@ import {
   resolveConfiguredMarketplaces,
 } from "./configured.ts";
 import {
+  ignoreCompatibilityVariable,
+  type MarketplaceAddition,
   MarketplaceAlreadyInstalledError,
   MarketplaceManager,
   type MarketplaceOperations,
@@ -26,8 +33,10 @@ import {
 import { MarketplaceUpdater } from "./updater.ts";
 
 export type {
+  MarketplaceAddition,
   MarketplaceAddOptions,
   MarketplaceOperations,
+  MarketplacePinning,
 } from "./manager.ts";
 
 export interface MarketplacePluginOptions {
@@ -38,9 +47,6 @@ export interface MarketplacePluginOptions {
 interface PluginModule {
   readonly default?: unknown;
 }
-
-/** The variable that loads a marketplace its declared tx range refuses. */
-const ignoreCompatibilityVariable = "TX_IGNORE_COMPATIBILITY";
 
 /** What loading compares each marketplace's declared tx range with. */
 interface LoadCompatibility {
@@ -199,6 +205,20 @@ function discoveryDefinition(
   });
 }
 
+/** Reports what an addition said about itself beyond its name: a version
+ * selected for the running tx on standard output, and a commit or directory
+ * that tx will refuse on standard error. */
+function reportAddition(
+  context: CommandContext,
+  added: MarketplaceAddition,
+): void {
+  context.stdout.write(`Added marketplace "${added.name}".\n`);
+  if (added.notice !== undefined) context.stdout.write(`${added.notice}\n`);
+  if (added.warning !== undefined) {
+    context.stderr.write(`Warning: ${added.warning}\n`);
+  }
+}
+
 export function createMarketplacePlugin(
   options: MarketplacePluginOptions = {},
 ): PluginDefinition {
@@ -216,9 +236,10 @@ export function createMarketplacePlugin(
         update,
       }) => {
         const root = options.root ?? resolveMarketplaceDirectory({ env });
+        const txVersion = dependencies.tx.version;
         const manager =
           options.manager ??
-          new MarketplaceManager(root, { env, cwd: context.cwd });
+          new MarketplaceManager(root, { env, cwd: context.cwd, txVersion });
 
         command((namespace) => {
           namespace.description("Manage installed plugin marketplaces");
@@ -254,12 +275,14 @@ export function createMarketplacePlugin(
                   requested,
                   flags.full ? { full: true } : undefined,
                 );
-                context.stdout.write(`Added marketplace "${added.name}".\n`);
+                reportAddition(context, added);
                 try {
+                  // Only what identifies the marketplace is recorded; what
+                  // the addition reported belongs to this invocation.
                   await recordConfiguredMarketplace(
                     requireConfigCapability(registrations),
                     manager,
-                    added,
+                    { name: added.name, source: added.source },
                   );
                 } catch (error) {
                   context.stderr.write(
@@ -293,8 +316,10 @@ export function createMarketplacePlugin(
                 if (installed.has(marketplace.name)) continue;
                 const entry = configured[index] as (typeof configured)[number];
                 try {
-                  const added = await manager.add(entry.source, entry.name);
-                  context.stdout.write(`Added marketplace "${added.name}".\n`);
+                  reportAddition(
+                    context,
+                    await manager.add(entry.source, entry.name),
+                  );
                 } catch (error) {
                   if (error instanceof MarketplaceAlreadyInstalledError) {
                     continue;
@@ -333,13 +358,16 @@ export function createMarketplacePlugin(
             .argument("<name>", "Local marketplace name")
             .argument("<ref>", "Tag, branch, or commit the remote publishes")
             .action(async (name: string, ref: string) => {
-              const version = await manager.pin(
+              const { version, warning } = await manager.pin(
                 validateMarketplaceName(name),
                 ref,
               );
               context.stdout.write(
                 `Pinned marketplace "${name}" to "${ref}"; the next "tx update" applies ${version}.\n`,
               );
+              if (warning !== undefined) {
+                context.stderr.write(`Warning: ${warning}\n`);
+              }
             });
 
           namespace
@@ -380,11 +408,11 @@ export function createMarketplacePlugin(
         // Contributed by the root plugin and reading storage directly, so a
         // marketplace whose current commit fails to load — which is exactly
         // the one an update fixes — is still gathered and still applied.
-        update(new MarketplaceUpdater(root, { env }));
+        update(new MarketplaceUpdater(root, { env, txVersion }));
 
         plugin(
           discoveryDefinition(root, identity, {
-            txVersion: dependencies.tx.version,
+            txVersion,
             ignored: env[ignoreCompatibilityVariable] === "1",
           }),
         );
