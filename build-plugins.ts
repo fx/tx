@@ -6,11 +6,20 @@
 
 const stringWidthDeclaration =
   "export default function stringWidth(input, options = {}) {";
-const stringWidthAnchors = [
-  stringWidthDeclaration,
-  "import stripAnsi from 'strip-ansi';",
-  "const segmenter = new Intl.Segmenter();",
-];
+
+/**
+ * The `string-width` sources the rewrite has been verified against, by the
+ * SHA-256 of `index.js`. The rewrite repeats the module's preparation (ANSI
+ * stripping, the printable-ASCII fast path) and relies on its width being a
+ * sum of independent per-cluster widths; a release can change either while
+ * keeping every literal the rewrite edits. So any other source fails the
+ * build until test/build-plugins.test.ts has shown the rewrite exact for it
+ * and its hash is added here.
+ */
+export const verifiedStringWidthSources: ReadonlyMap<string, string> = new Map([
+  ["60c197f20cc966a2ede2dfec1ad4b764aa4095a43d225792b2652bca6afeb21b", "8.2.2"],
+  ["abc20775da6b552188b098688ebec671e29f5416d6339d3534bb7b016174003e", "8.3.0"],
+]);
 
 /**
  * Cache keys start with this, one per `ambiguousIsNarrow` value. It is also
@@ -32,15 +41,10 @@ export const clusterKeyPrefix = "tx-string-width-cluster";
  * has not measured yet. The results are the module's own; only repeated work
  * is skipped. The cache is bounded and starts over when full.
  *
- * Throws when the source no longer has the shape this relies on, so a
- * dependency update cannot silently drop the rewrite.
+ * Applies to any source with the declaration it renames; the production build
+ * uses {@link cachedStringWidthSource}, which accepts only verified sources.
  */
-export function cachedStringWidthSource(source: string): string {
-  if (!stringWidthAnchors.every((anchor) => source.includes(anchor))) {
-    throw new Error(
-      "string-width no longer has the shape the cached-width rewrite expects",
-    );
-  }
+export function rewriteStringWidthSource(source: string): string {
   return `${source.replace(
     stringWidthDeclaration,
     "function stringWidthOfCluster(input, options = {}) {",
@@ -92,6 +96,21 @@ export default function stringWidth(input, options = {}) {
 	return width;
 }
 `;
+}
+
+/**
+ * {@link rewriteStringWidthSource} for a source in
+ * {@link verifiedStringWidthSources} only, so a dependency update cannot
+ * silently change what the rewrite relies on.
+ */
+export function cachedStringWidthSource(source: string): string {
+  const hash = new Bun.CryptoHasher("sha256").update(source).digest("hex");
+  if (!verifiedStringWidthSources.has(hash)) {
+    throw new Error(
+      `string-width source ${hash} is not one the cached-width rewrite was verified against; verify it with test/build-plugins.test.ts and add its hash to verifiedStringWidthSources`,
+    );
+  }
+  return rewriteStringWidthSource(source);
 }
 
 /** Bundle every `string-width` copy with {@link cachedStringWidthSource}. */

@@ -30,7 +30,7 @@ This change MUST satisfy the project's standing testing rules in [Architecture: 
 - TypeScript checking MUST pass with no errors.
 - Bun tests MUST pass with 100% statement, function, and line coverage across production source files.
 - The standalone build test MUST show, for both executables the production build creates, that each carries React's production build and none of its development warnings, and that each carries the cached-width rewrite of `string-width`.
-- A test MUST bundle every `string-width` copy the dependency graph resolves through the build's rewrite and show that it returns exactly the unrewritten module's widths across a broad corpus under every option combination, that it measures a screen of box-drawing rows within a bound the unrewritten module exceeds by an order of magnitude, and that the rewrite refuses a source whose shape it does not recognise.
+- A test MUST bundle every `string-width` copy the dependency graph resolves through the build's rewrite and show that it returns exactly the unrewritten module's widths across a broad corpus under every option combination, that it measures a screen of box-drawing rows within a bound the unrewritten module exceeds by an order of magnitude, that every resolved copy is a verified source, and that the rewrite refuses any other source, including a verified one changed by a single character.
 
 Skipping or weakening any of these rules to land the PR MUST be treated as a bug in the PR, not in the rule.
 
@@ -39,13 +39,13 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 [Architecture: Runtime and Distribution](../specs/architecture/index.md#runtime-and-distribution) owns the behavior and is this change's acceptance criteria. What implementing it requires of this change:
 
 - `build.ts` defines `process.env.NODE_ENV` as `"production"` for both executables.
-- A bundler plugin (`build-plugins.ts`, used by `build.ts`) rewrites every bundled `string-width` copy: the module's own function is kept, renamed, and a new default export performs the same preparation (ANSI stripping, the printable-ASCII fast path) and sums a width per grapheme cluster, asking the module's own function about each cluster it has not measured yet and caching the answer per `ambiguousIsNarrow` value. The cache is bounded (4096 entries) and starts over when full. The rewrite throws, failing the build, when the source no longer has the shape it relies on.
+- A bundler plugin (`build-plugins.ts`, used by `build.ts`) rewrites every bundled `string-width` copy: the module's own function is kept, renamed, and a new default export performs the same preparation (ANSI stripping, the printable-ASCII fast path) and sums a width per grapheme cluster, asking the module's own function about each cluster it has not measured yet and caching the answer per `ambiguousIsNarrow` value. The cache is bounded (4096 entries) and starts over when full. The rewrite accepts only the `string-width` sources it has been verified against, by the SHA-256 of `index.js` (currently 8.2.2 and 8.3.0); any other source fails the build until the differential test has shown the rewrite exact for it and its hash is recorded. A shape check on a few literals would not do: a release can change the preparation the rewrite repeats, or the per-cluster sum it relies on, while keeping every literal.
 
 ## Design
 
 ### Approach
 
-The rewrite is exact by construction: `string-width` sums independent per-cluster widths, and each depends only on the cluster and `ambiguousIsNarrow`, so caching per cluster changes no result. It follows the existing `disable-ink-development-mode` plugin, changing the dependency only where it is bundled into the executables. Its loader filter matches every `string-width/index.js`, so all three resolved copies are rewritten; the shape check holds for 8.2.2 and 8.3.0 alike.
+The rewrite is exact by construction: `string-width` sums independent per-cluster widths, and each depends only on the cluster and `ambiguousIsNarrow`, so caching per cluster changes no result. It follows the existing `disable-ink-development-mode` plugin, changing the dependency only where it is bundled into the executables. Its loader filter matches every `string-width/index.js`, so all three resolved copies are rewritten; both resolved versions are verified sources.
 
 Two alternatives were rejected:
 
@@ -62,7 +62,7 @@ Running tx from source keeps the unmodified modules; the requirement is about th
 ## Tasks
 
 - [x] Define `NODE_ENV=production` in the production build; test both executables carry React's production build and the cached-width rewrite
-- [x] Rewrite every bundled `string-width` to cache per-cluster widths; test exactness against each resolved copy, speed, and refusal of an unrecognised source
+- [x] Rewrite every bundled `string-width` to cache per-cluster widths; test exactness against each resolved copy, speed, and refusal of any unverified source
 - [x] Architecture spec requirements and changelog; index entries
 
 ## References

@@ -1,8 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   cachedStringWidth,
   cachedStringWidthSource,
+  rewriteStringWidthSource,
+  verifiedStringWidthSources,
 } from "../build-plugins.ts";
 
 type StringWidth = (
@@ -19,16 +22,36 @@ const copies = [
 ].sort();
 
 /**
- * One copy exactly as the executables bundle it. The bundle is evaluated from
- * its text rather than written and imported, so it is not reported as a
- * source file of this repository's coverage.
+ * The rewrite without the verified-source check, so this test can show it
+ * exact for a source before that source's hash is recorded.
  */
-async function bundled(path: string): Promise<StringWidth> {
+const unchecked: Bun.BunPlugin = {
+  name: "rewrite-string-width-unchecked",
+  setup(builder) {
+    builder.onLoad(
+      { filter: /[/\\]string-width[/\\]index\.js$/ },
+      async ({ path }) => ({
+        contents: rewriteStringWidthSource(await Bun.file(path).text()),
+        loader: "js",
+      }),
+    );
+  },
+};
+
+/**
+ * One copy bundled through a rewrite plugin. The bundle is evaluated from its
+ * text rather than written and imported, so it is not reported as a source
+ * file of this repository's coverage.
+ */
+async function bundled(
+  path: string,
+  plugin: Bun.BunPlugin,
+): Promise<StringWidth> {
   const build = await Bun.build({
     entrypoints: [path],
     target: "bun",
     format: "cjs",
-    plugins: [cachedStringWidth],
+    plugins: [plugin],
   });
   // Bun's CommonJS output is a comment line, then one function expression
   // taking (exports, require, module, __filename, __dirname).
@@ -107,7 +130,7 @@ describe.each(copies)("string-width at %s", (path) => {
 
   beforeAll(async () => {
     original = (await import(path)).default as StringWidth;
-    rewritten = await bundled(path);
+    rewritten = await bundled(path, unchecked);
   });
 
   test("returns exactly the module's own widths, for every option", () => {
@@ -128,14 +151,18 @@ describe.each(copies)("string-width at %s", (path) => {
     expect(rewritten(undefined as unknown as string)).toBe(0);
     // The module itself is slow on Bun; measuring the corpus with it takes a while.
   }, 60_000);
+});
 
-  test("measures a screen of box-drawing rows quickly", () => {
-    // Unrewritten, this takes seconds on Bun; cached, tens of milliseconds.
-    const row = `│ ${"─".repeat(120)} ╭ • ▸ ∴ text with words │`;
-    const started = performance.now();
-    for (let index = 0; index < 2000; index += 1) rewritten(`${row}${index}`);
-    expect(performance.now() - started).toBeLessThan(500);
-  });
+test("the production plugin measures a screen of box-drawing rows quickly", async () => {
+  // Unrewritten, this takes seconds on Bun; cached, tens of milliseconds.
+  const measure = await bundled(
+    new URL("../node_modules/string-width/index.js", import.meta.url).pathname,
+    cachedStringWidth,
+  );
+  const row = `│ ${"─".repeat(120)} ╭ • ▸ ∴ text with words │`;
+  const started = performance.now();
+  for (let index = 0; index < 2000; index += 1) measure(`${row}${index}`);
+  expect(performance.now() - started).toBeLessThan(500);
 });
 
 test("every resolved string-width copy is covered", () => {
@@ -146,13 +173,25 @@ test("every resolved string-width copy is covered", () => {
   );
 });
 
-test("the rewrite refuses a string-width it does not recognise", () => {
+test("the rewrite refuses a string-width it was not verified against", () => {
   expect(() => cachedStringWidthSource("export default () => 0;")).toThrow(
-    "string-width no longer has the shape the cached-width rewrite expects",
+    "is not one the cached-width rewrite was verified against",
   );
-  expect(() =>
-    cachedStringWidthSource(
-      "export default function stringWidth(input, options = {}) {}",
-    ),
-  ).toThrow("cached-width rewrite");
+  // A verified source with one character changed is refused too.
+  const verified = readFileSync(
+    new URL("../node_modules/string-width/index.js", import.meta.url),
+    "utf8",
+  );
+  expect(() => cachedStringWidthSource(`${verified} `)).toThrow(
+    "verifiedStringWidthSources",
+  );
+});
+
+test("every resolved string-width copy is one the rewrite was verified against", () => {
+  for (const path of copies) {
+    const hash = new Bun.CryptoHasher("sha256")
+      .update(readFileSync(path, "utf8"))
+      .digest("hex");
+    expect(verifiedStringWidthSources.has(hash)).toBe(true);
+  }
 });
