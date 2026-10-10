@@ -208,7 +208,7 @@ A plugin whose graph cannot be resolved does not load, and says which specifier 
 
 ### Declare tx compatibility
 
-`tx` hands every plugin its own React, Ink, and command parser, so a `tx` release that changes those changes the API your plugins are written against. A manifest can say which `tx` releases it supports, which version of the marketplace this commit is, and which commit carried each released version. All three top-level fields are optional:
+`tx` hands every plugin its own React, Ink, and command parser, so a `tx` release that upgrades any of them can change the API your plugins are written against. A manifest can say which `tx` releases it supports, which version of the marketplace this commit is, and which commit carried each released version. All three top-level fields are optional:
 
 ```json
 {
