@@ -10,8 +10,10 @@ import type {
 import { animationInterval, onPhase } from "./animation.ts";
 import type {
   Dialogs,
+  InputProps,
   InputRequest,
   SelectOption,
+  SelectProps,
   SelectRequest,
   SelectResult,
 } from "./contract.ts";
@@ -373,6 +375,16 @@ function requireAlignedCells<T>(
   }
 }
 
+/** Every rejection a select request can earn before anything is drawn, in the
+ * order `select` has always raised them. The embedded `Select` runs the same
+ * function on its first render, so the two forms cannot disagree about what is
+ * rejected. */
+function requireSelectableRequest<T>(request: SelectRequest<T>): void {
+  requireNonEmptyOptions(request.options);
+  requireCollectableFields(request.options);
+  requireAlignedCells(request);
+}
+
 type DialogSession = {
   readonly context: CommandContext;
   readonly dependencies: CoreDependencies;
@@ -472,10 +484,10 @@ const definition: PluginDefinition = Object.freeze({
       const session: DialogSession = { context, dependencies };
 
       /**
-       * The components for one dialog, built around the theme resolved for the
-       * stream that dialog draws to.
+       * The components for one mount, built around the theme resolved for the
+       * stream the provider draws to.
        *
-       * Resolved while the dialog runs rather than while this plugin
+       * Resolved while a dialog is mounted rather than while this plugin
        * initializes, for two reasons the registry fixes: a plugin reading
        * during its own initialization sees only what committed before it, and
        * the theme provider is composed ahead of its consumers. Reading here
@@ -489,62 +501,143 @@ const definition: PluginDefinition = Object.freeze({
         return { Frame, Entry: createEntry(react, ink, Frame) };
       };
 
+      const SelectView = createSelectView(react, ink);
+
+      /**
+       * The embeddable select, created once here so every read of the
+       * capability yields the same function and a host rendering it again keeps
+       * its state rather than remounting it.
+       *
+       * Its first render validates the request it was mounted with and
+       * resolves its theme, both once per mount: a request `select` would
+       * reject throws there, before anything of the component's own is drawn.
+       * The request is held from then on — a component presents the question it
+       * was mounted with, and a host asking another one mounts another.
+       */
+      function Select<T>({
+        request,
+        width,
+        height,
+        isActive,
+        onSubmit,
+        onCancel,
+      }: SelectProps<T>) {
+        const [mounted] = react.useState(() => {
+          requireSelectableRequest(request);
+          return {
+            components: components(),
+            request: {
+              message: request.message,
+              options: request.options,
+              headers: request.headers ?? [],
+              filter: request.filter ?? "typed",
+              expandKey: request.expand ?? "enter",
+            },
+          };
+        });
+        return react.createElement(SelectView<T>, {
+          ...mounted,
+          width,
+          height,
+          isActive,
+          onSubmit,
+          onCancel,
+        });
+      }
+
+      /**
+       * The embeddable input, created once for the same reason as `Select`.
+       * It holds the dialog's one animation subscription, which runs only while
+       * the input is active: an active input always has its caret on screen, so
+       * it needs no other activity test, and an inactive one draws no caret and
+       * so has nothing to animate.
+       */
+      function Input({
+        request,
+        width,
+        isActive,
+        onSubmit,
+        onCancel,
+      }: InputProps) {
+        const [mounted] = react.useState(() => ({
+          ...components(),
+          message: request.message,
+          initialValue: request.initialValue,
+        }));
+        /** Read through a ref, so a host passing fresh callbacks on every
+         * render hands the entry nothing new to answer with. */
+        const callbacks = react.useRef({ onSubmit, onCancel });
+        callbacks.current = { onSubmit, onCancel };
+        const { time, reset } = ink.useAnimation({
+          interval: animationInterval,
+          isActive,
+        });
+        return react.createElement(mounted.Entry, {
+          message: mounted.message,
+          width,
+          isActive,
+          initialValue: mounted.initialValue,
+          caret: isActive && onPhase(time, animationInterval),
+          onEdit: reset,
+          onSubmit: (value: string) => callbacks.current.onSubmit(value),
+          onCancel: () => callbacks.current.onCancel(),
+        });
+      }
+
       const dialogs: Dialogs = {
-        async input({ message, initialValue }: InputRequest) {
+        async input(request: InputRequest) {
           requireInteractiveStreams(context, "An input dialog");
-          const { Entry } = components();
+          // Resolved ahead of the session as well as by the mount, so a `tx`
+          // composed without exactly one theme rejects before any terminal
+          // state changes rather than inside a renderer it then has to restore.
+          requireThemeCapability(registrations);
 
           return runDialog<string>(session, "Input", (settle) => {
-            const Input = () => {
-              // The dialog's one animation subscription. A standalone input
-              // always has its caret on screen, so it never idles and needs no
-              // activity test of its own.
-              const { time, reset } = ink.useAnimation({
-                interval: animationInterval,
-              });
-              return react.createElement(Entry, {
-                message,
-                initialValue,
-                caret: onPhase(time, animationInterval),
-                onEdit: reset,
+            // Measured here rather than by the component, so a resize
+            // re-renders the root and the input lays itself out again against
+            // the terminal's new width.
+            const Root = () => {
+              const { columns } = ink.useWindowSize();
+              return react.createElement(Input, {
+                request,
+                width: columns,
+                isActive: true,
                 onSubmit: (value: string) =>
                   settle({ type: "completed", value }),
                 onCancel: () => settle({ type: "cancelled" }),
               });
             };
-            return Input;
+            return Root;
           });
         },
 
-        async select<T>({
-          message,
-          options,
-          headers,
-          filter,
-          expand,
-        }: SelectRequest<T>) {
-          requireNonEmptyOptions(options);
-          requireCollectableFields(options);
-          requireAlignedCells({ options, headers });
+        async select<T>(request: SelectRequest<T>) {
+          requireSelectableRequest(request);
           requireInteractiveStreams(context, "A select dialog");
-          const { Entry, Frame } = components();
+          requireThemeCapability(registrations);
 
-          return runDialog<SelectResult<T>>(session, "Select", (settle) =>
-            createSelectView(
-              react,
-              ink,
-              { Entry, Frame },
-              {
-                message,
-                options,
-                headers: headers ?? [],
-                filter: filter ?? "typed",
-                expandKey: expand ?? "enter",
-              },
-              settle,
-            ),
-          );
+          return runDialog<SelectResult<T>>(session, "Select", (settle) => {
+            /** The terminal's rows less one: the row that keeps the dialog
+             * strictly shorter than the terminal, so Ink never reads it as
+             * full-screen and clears what was on screen before it opened. */
+            const Root = () => {
+              const { columns, rows } = ink.useWindowSize();
+              return react.createElement(Select<T>, {
+                request,
+                width: columns,
+                height: rows - 1,
+                isActive: true,
+                onSubmit: (value: SelectResult<T>) =>
+                  settle({ type: "completed", value }),
+                onCancel: () => settle({ type: "cancelled" }),
+              });
+            };
+            return Root;
+          });
         },
+
+        Input,
+        Select,
       };
 
       register<Dialogs>(dialogsKey, dialogs);

@@ -39,7 +39,7 @@ import {
   panelWidth,
   segmentsWidth,
 } from "./frame.ts";
-import type { DialogElement, DialogView, Outcome } from "./types.ts";
+import type { DialogElement, Outcome } from "./types.ts";
 import { affordsBandRows, optionRowCount, optionWindow } from "./viewport.ts";
 
 /** The prompt the filter row carries, so the row the user types into is
@@ -114,7 +114,8 @@ type NavigationKey = {
  * Where a navigation key puts the active position within the visible list,
  * clamped to it so a key at a boundary settles on the boundary rather than
  * running past it. Page Up and Page Down move by the window's own height, which
- * is why they read the terminal alongside the list.
+ * is why they read the rows the select is measured against alongside the
+ * list.
  *
  * `undefined` means the key does not navigate — which is what lets typed text
  * reach the filter — or that nothing is visible to move over.
@@ -273,7 +274,7 @@ function measureColumn<T>(
   };
 }
 
-type SelectViewRequest<T> = {
+export type SelectViewRequest<T> = {
   readonly message: string;
   readonly options: readonly SelectOption<T>[];
   readonly headers: readonly string[];
@@ -283,27 +284,106 @@ type SelectViewRequest<T> = {
   readonly expandKey: ExpandKey;
 };
 
+/** What the select view is rendered with: the components drawn from the
+ * theme its mount resolved, the request it was mounted with, and the embedded
+ * props its host gave it. */
+export type SelectViewProps<T> = {
+  readonly components: {
+    readonly Entry: EntryComponent;
+    readonly Frame: FrameComponent;
+  };
+  readonly request: SelectViewRequest<T>;
+  /** The terminal columns the select may draw in. */
+  readonly width: number;
+  /** The terminal rows the select may draw in, everything it draws included. */
+  readonly height: number;
+  readonly isActive: boolean;
+  readonly onSubmit: (result: SelectResult<T>) => void;
+  readonly onCancel: () => void;
+};
+
 /**
  * The select view: the filter, the option list, and the fields of a chosen
  * user-provided option, in one component with one input handler, so the whole
- * interaction is a single render session.
+ * interaction is a single render session — the provider's own for `select`,
+ * or its host's for an embedded `Select`.
+ *
+ * It measures itself against the `width` and `height` it is given and never
+ * against the terminal, answers keys only while `isActive`, and calls exactly
+ * one of `onSubmit` and `onCancel`, once.
  *
  * The active position, the rendered window, and every key that moves either are
  * expressed over the visible options rather than over the supplied list, so
  * navigation and the viewport compose with the filter and the settled value is
  * still looked up by its original index.
  */
-export function createSelectView<T>(
+export function createSelectView(
   react: CoreDependencies["react"],
   ink: CoreDependencies["ink"],
-  { Entry, Frame }: { Entry: EntryComponent; Frame: FrameComponent },
-  { message, options, headers, filter, expandKey }: SelectViewRequest<T>,
-  settle: (outcome: Outcome<SelectResult<T>>) => void,
-): DialogView {
-  const cancel = () => settle({ type: "cancelled" });
+) {
+  /**
+   * The select's own key handler, subscribed from a child rendered ahead of
+   * every panel rather than from the select itself.
+   *
+   * The order the handlers run in for one key is the order they subscribed in,
+   * and the select's has to run before an entry drawn under it: Escape on a
+   * field collected in an opened column pops that column here, and the entry's
+   * own Escape then finds nothing left to cancel. Ink subscribes in an effect,
+   * and React runs a child's effects before its parent's — so when `isActive`
+   * comes back on with an entry on screen and both subscribe again in one
+   * commit, a handler subscribed by the select itself would land behind the
+   * entry's and the entry would cancel the whole dialog. A first child's
+   * effects run ahead of every later sibling's subtree, which keeps the order
+   * the dialog relies on however often focus comes and goes.
+   */
+  function Keys({
+    onInput,
+    isActive,
+  }: {
+    readonly onInput: Parameters<CoreDependencies["ink"]["useInput"]>[0];
+    readonly isActive: boolean;
+  }) {
+    ink.useInput(onInput, { isActive });
+    return null;
+  }
 
-  return function Select() {
-    const { columns, rows } = ink.useWindowSize();
+  return function SelectView<T>({
+    components: { Entry, Frame },
+    request: { message, options, headers, filter, expandKey },
+    width: columns,
+    height,
+    isActive,
+    onSubmit,
+    onCancel,
+  }: SelectViewProps<T>) {
+    /** What the viewport measures against: the rows the dialog must stay
+     * strictly shorter than, which is one more than the rows it may draw in.
+     * The viewport keeps the one-row margin it has always kept against the
+     * terminal, so `select`, handing its view the terminal's rows less one,
+     * lays out exactly as it did, and a host's `height` is the most rows the
+     * select ever draws. */
+    const rows = height + 1;
+    /** The host's callbacks, read through a ref so a host passing fresh ones on
+     * every render never re-runs an effect or re-subscribes a handler. */
+    const callbacks = react.useRef({ onSubmit, onCancel });
+    callbacks.current = { onSubmit, onCancel };
+    /** Set by the first callback, after which every key is ignored: the select
+     * is one-shot, and a host keeping it mounted keeps its last frame on
+     * screen rather than a dialog that can answer twice. */
+    const finished = react.useRef(false);
+    const settle = react.useCallback(
+      (outcome: Outcome<SelectResult<T>>): void => {
+        if (finished.current) return;
+        finished.current = true;
+        if (outcome.type === "completed") {
+          callbacks.current.onSubmit(outcome.value);
+        } else {
+          callbacks.current.onCancel();
+        }
+      },
+      [],
+    );
+    const cancel = () => settle({ type: "cancelled" });
     /** The stack of open levels inside the single render session: the root is
      * the caller's request, Tab pushes the active option's sub-dialog
      * over it, and Escape pops one level above the root. It lives in a ref so
@@ -504,9 +584,13 @@ export function createSelectView<T>(
     // no flash running runs no timer and writes nothing while it idles. A
     // second subscription would keep its own start time, drift out of phase
     // with this one, and wake the renderer's shared timer twice an interval.
+    // An inactive select animates nothing — except a flash already running,
+    // which runs out whatever focus does, because the choice is already made.
     const { time, reset } = ink.useAnimation({
       interval: flashing ? flashInterval : animationInterval,
-      isActive: filterShown || collectingField || flashing || hidden > 0,
+      isActive:
+        flashing ||
+        (isActive && (filterShown || collectingField || hidden > 0)),
     });
     /** The flash ends on elapsed time reaching its duration, never on a frame
      * number: a tick landing inside the renderer's render throttle is dropped
@@ -624,11 +708,15 @@ export function createSelectView<T>(
       setFlashing(true);
     };
 
-    ink.useInput((value, key) => {
+    const handleInput: Parameters<CoreDependencies["ink"]["useInput"]>[0] = (
+      value,
+      key,
+    ) => {
       // The choice is made and the flash is running it out. Every key is too
       // late to change it, Escape and Ctrl-C included: cancelling a choice
-      // already taken is exactly what the flash exists to rule out.
-      if (confirmed.current) return;
+      // already taken is exactly what the flash exists to rule out. A select
+      // that has already called back has nothing left to answer.
+      if (confirmed.current || finished.current) return;
       // Read once: a text leaf answers keys through its own entry, and the
       // flushed escape reaches every subscriber in one emit, so popping for a
       // leaf here as well would pop twice and cancel the session the pop was
@@ -739,7 +827,7 @@ export function createSelectView<T>(
         // looks like it lost its caret.
         reset();
       }
-    });
+    };
 
     /** `index` is the field the submitting entry was rendered for. The entry
      * stays mounted for the rest of the synchronous pass that submitted it, so
@@ -794,13 +882,17 @@ export function createSelectView<T>(
      * whole of it and the bar is the only thing moving while a choice is
      * confirmed. */
     const showPhase = onPhase(time, animationInterval);
+    /** The caret is drawn only while the select answers keys: an inactive
+     * select draws the blank cell the caret's hidden phase leaves, so its rows
+     * keep their width and moving focus moves nothing. */
+    const caretShown = isActive && showPhase;
     /** The filter stops accepting input the moment a field is collected, so its
      * row stops carrying a caret then. A caret blinking on a row whose
      * keystrokes are declined advertises an editable row that is not one — the
      * more so because typing into the field resets the shared phase, which
      * would blink the dead caret in lockstep with the live one. The cell stays
      * blank rather than disappearing, so the panel keeps its width. */
-    const filterCaret = showPhase && !collectingField;
+    const filterCaret = caretShown && !collectingField;
     /** The bar blinks off on the flash's off phases and is restored on the
      * frame the flash settles on, so the last thing left on screen is the
      * option that was taken rather than the gap where it was. */
@@ -960,7 +1052,10 @@ export function createSelectView<T>(
             {
               key,
               text: indicatorText(glyph, count),
-              variable: showPhase ? "chrome" : "content",
+              // An inactive select runs no timer, so its count rests on the
+              // phase it opens on rather than whichever one the timer last
+              // stopped at.
+              variable: !isActive || showPhase ? "chrome" : "content",
             },
             { key: `${key}-close`, text: " ", variable: "chrome" },
           ]
@@ -1096,8 +1191,10 @@ export function createSelectView<T>(
       fieldPanel = react.createElement(Entry, {
         key: `field-${fieldIndex}`,
         message: pending.message,
+        width: columns,
+        isActive,
         initialValue: pending.initialValue,
-        caret: showPhase,
+        caret: caretShown,
         onEdit: reset,
         onSubmit: (value: string) => submitField(fieldIndex, value),
         // The main handler answers the same key first in the emit and pops a
@@ -1124,8 +1221,10 @@ export function createSelectView<T>(
       fieldPanel = react.createElement(Entry, {
         key: "leaf",
         message: activeLeaf.field.message,
+        width: columns,
+        isActive,
         initialValue: activeLeaf.field.initialValue,
-        caret: showPhase,
+        caret: caretShown,
         onEdit: reset,
         onSubmit: (value: string) => submitLeaf(activeLeaf, value),
         onCancel: () => popLevel(),
@@ -1138,6 +1237,7 @@ export function createSelectView<T>(
     return react.createElement(
       ink.Box,
       { flexDirection: "column" },
+      react.createElement(Keys, { onInput: handleInput, isActive }),
       panel,
       fieldPanel,
     );

@@ -700,7 +700,12 @@ describe("bundled dialogs provider", () => {
       ),
     ).toBe(0);
     expect(registrations).toHaveLength(1);
-    expect(Object.keys(registrations[0] ?? {})).toEqual(["input", "select"]);
+    expect(Object.keys(registrations[0] ?? {})).toEqual([
+      "input",
+      "select",
+      "Input",
+      "Select",
+    ]);
 
     const helpContext = context(new TerminalInput(), new CapturedOutput());
     const helpText = helpContext.stdoutText;

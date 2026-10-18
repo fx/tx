@@ -81,6 +81,14 @@ export function editedText(
 
 type EntryProps = {
   readonly message: string;
+  /** The terminal columns the entry may draw in: the terminal's own for a
+   * standalone `input`, whatever its host gave it for an embedded `Input`, and
+   * the select's width for an entry drawn under one. */
+  readonly width: number;
+  /** Whether the entry answers keys. An entry under a select inherits the
+   * select's, so a host moving focus away from a select moves it away from the
+   * field or leaf being typed under it too. */
+  readonly isActive: boolean;
   readonly initialValue: string | undefined;
   /** Whether the caret is on its visible phase this frame. Passed in rather
    * than subscribed to here: a dialog animates on one subscription, and a field
@@ -104,6 +112,12 @@ type EntryProps = {
  * each field of a chosen user-provided option, so entry, editing, submission,
  * and cancellation behave identically in either place. Remounting it under a
  * fresh key starts the next field from that field's own initial value.
+ *
+ * It is one-shot: once it has submitted or cancelled, it ignores every later
+ * key for as long as it stays mounted. A chunk carrying several keys is
+ * handled before any of them has re-rendered, and an embedded `Input` stays
+ * mounted until its host removes it, so without this a key after the Enter
+ * would edit, or submit again, a value that has already been handed over.
  */
 export function createEntry(
   react: CoreDependencies["react"],
@@ -112,6 +126,8 @@ export function createEntry(
 ) {
   return function Entry({
     message,
+    width: columns,
+    isActive,
     initialValue,
     caret,
     onEdit,
@@ -119,23 +135,29 @@ export function createEntry(
     onCancel,
     escapeAction = "cancel",
   }: EntryProps) {
-    const { columns } = ink.useWindowSize();
     const entered = react.useRef(initialValue ?? "");
     const [value, setValue] = react.useState(entered.current);
-    ink.useInput((entry, key) => {
-      if (key.escape || (key.ctrl && entry === "c")) {
-        onCancel();
-      } else if (key.return) {
-        onSubmit(entered.current);
-      } else {
-        const edited = editedText(entered.current, entry, key);
-        if (edited !== entered.current) {
-          entered.current = edited;
-          setValue(edited);
-          onEdit();
+    const finished = react.useRef(false);
+    ink.useInput(
+      (entry, key) => {
+        if (finished.current) return;
+        if (key.escape || (key.ctrl && entry === "c")) {
+          finished.current = true;
+          onCancel();
+        } else if (key.return) {
+          finished.current = true;
+          onSubmit(entered.current);
+        } else {
+          const edited = editedText(entered.current, entry, key);
+          if (edited !== entered.current) {
+            entered.current = edited;
+            setValue(edited);
+            onEdit();
+          }
         }
-      }
-    });
+      },
+      { isActive },
+    );
 
     // The caret rides with the value in one text, so start truncation keeps
     // the tail of a long value and the caret itself in view together.

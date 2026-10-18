@@ -43,7 +43,13 @@ function chromeHeight(collecting: boolean): number {
 
 /** The rows the band may take at all: what the terminal has, less the dialog's
  * own chrome and the one row that keeps the whole dialog strictly shorter than
- * the terminal. */
+ * the terminal.
+ *
+ * `terminalRows` is the height the dialog must stay strictly under, which for
+ * `select` is the terminal it renders on. An embedded `Select` is given the
+ * rows it may draw in instead, and measures against one more than that, so a
+ * host's height is the most it ever draws and a height one row short of the
+ * terminal lays out exactly as `select` does. */
 function affordableBandRows(terminalRows: number, collecting: boolean): number {
   return terminalRows - chromeHeight(collecting) - 1;
 }
