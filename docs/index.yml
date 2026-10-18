@@ -317,7 +317,7 @@ changes:
     path: changes/0036-add-embeddable-dialog-components.md
     description: Expose the dialogs as Select and Input components a plugin renders inside its own render session, sized and focused through shared width, height, and isActive props, and make select and input those components mounted in a session of the provider's own.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0017"
       - "0023"

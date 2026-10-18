@@ -492,16 +492,19 @@ The namespace-free bundled dialogs provider registers one capability under the e
 ```ts
 import type {
   Dialogs,
+  EmbeddedProps,
   FilterMode,
+  InputProps,
   InputRequest,
   SelectOption,
+  SelectProps,
   SelectRequest,
   SelectResult,
   TextField,
 } from "@fx/tx/dialogs";
 ```
 
-`Dialogs` is what the key carries: `input(request)` collecting one line of text and `select(request)` driving a column browser, each resolving `undefined` where the reader cancelled. A `SelectRequest` carries the `message`, the `options`, optional `headers` for a column of cells, an optional `filter` of `"typed"` or `"always"`, and an optional `expand` of `"enter"` or `"tab"`. A `SelectOption` declares exactly one of a `label` or a row of `cells`, the opaque `value` it stands for, the `TextField`s it collects, and the `dialog` it opens — a nested request or a single field. A `SelectResult` carries the completing option's `value` and the `values` collected on the way to it. Every member is documented where it is declared, and the contract is types only: it publishes no way to draw a dialog, which stays the registry's job, and nothing behind the import is a renderer, a matcher, or React's element type. The provider's own rendering vocabulary is deliberately not published — a consumer that calls `select` never sees a rendered element, and publishing one would make an internal rendering decision a breaking change.
+`Dialogs` is what the key carries: `input(request)` collecting one line of text and `select(request)` driving a column browser, each resolving `undefined` where the reader cancelled, and `Input` and `Select`, the same two dialogs as components for a plugin that draws its own interface — see [Embed a dialog in your own interface](#embed-a-dialog-in-your-own-interface). A `SelectRequest` carries the `message`, the `options`, optional `headers` for a column of cells, an optional `filter` of `"typed"` or `"always"`, and an optional `expand` of `"enter"` or `"tab"`. A `SelectOption` declares exactly one of a `label` or a row of `cells`, the opaque `value` it stands for, the `TextField`s it collects, and the `dialog` it opens — a nested request or a single field. A `SelectResult` carries the completing option's `value` and the `values` collected on the way to it. Every member is documented where it is declared, and the contract is types only: it publishes no way to draw a dialog, which stays the registry's job, and nothing behind the import is a renderer, a matcher, or React's element type. The provider's own rendering vocabulary is deliberately not published — a consumer that calls `select` never sees a rendered element, and publishing one would make an internal rendering decision a breaking change.
 
 A consumer reads `registrations<Dialogs>("@fx/tx/dialogs")` inside its command action, after initialization has committed every provider. What a read answering none, or more than one, means is the consumer's own decision: the contract types the values under the key and neither supplies one, selects among them, nor rejects one, and tx defines no winner semantics. The grid plugin decides it strictly — `requireDialogsCapability` treats both counts as errors naming the count — because a consumer that fell back would have to own movement, filtering, a viewport, and a terminal session of its own. A consumer with a reason to tolerate an absent provider is free to make the opposite choice.
 
@@ -536,6 +539,95 @@ Three things move, and nothing else does. The `█` caret after entered text and
 A dialog animates on one subscription for all three, which is active exactly while a caret, an indicator, or a flash is on screen. So a select with no filter on screen, nothing hidden, and nothing confirmed runs no timer and writes nothing at all while it waits: it is on screen and quiet, not idling in a redraw loop. Animation never delays input either — a keystroke is reflected in the very next render whatever phase the caret is in — and the subscription belongs to the render session, so the unmount in the cleanup contract below is what stops it and no timer outlives a settled dialog.
 
 Both dialogs are built on the same render session and obey the same cleanup contract, and a `select` that collects fields is one such session for the whole interaction: it does not unmount, restore terminal state, or settle between its selection and field stages. Completion, cancellation, rendering failure, and interaction failure all finish renderer unmounting, restoration of the prior terminal/input state, listener teardown, and pending output before the promise fulfills or rejects. If an injected raw-mode disable, unref, or renderer unmount method persistently throws, the provider retries finitely and rejects with the first applicable cleanup failure; restoration or renderer teardown is necessarily best-effort only on that exceptional path. There is no non-interactive fallback, concurrency policy, nested-dialog support, or multi-provider selection policy.
+
+### Embed a dialog in your own interface
+
+A plugin that draws a full-screen interface of its own — a chat client, a dashboard — already holds the terminal in a render session it started with the injected Ink, and cannot hand it to `select` or `input`: each starts a second session on the same terminal, and the two fight over raw mode, the input stream, and the screen. Render the components instead. `dialogs.Select` and `dialogs.Input` are the dialogs `select` and `input` mount — the same filter, viewport, columns, presentation, and keys — rendered inside your session, placed by your layout, and focused by you.
+
+Every embeddable component that takes keys takes the same props, `EmbeddedProps<R>` plus its `request`, so you learn them once:
+
+- `request`: exactly what the function form takes. A component presents the request it was mounted with; to ask a different question, mount a new component (give it a new `key`).
+- `width`: the terminal columns it may draw in. It never reads the terminal's width, and below twenty it lays itself out as if given twenty.
+- `height` (`Select` only): the terminal rows it may draw in, its edges, hint line, and any field panel beneath it included. The window gives up option rows to fit, and none at all where `height` cannot afford one. `select` passes the terminal's rows less one, the row that keeps a dialog strictly shorter than the terminal, so a `height` one short of your terminal reproduces it exactly. `Input` takes no height: it is always three rows of frame and its hint line.
+- `isActive`: whether it answers keys. An inactive component draws exactly what it would draw active — same rows, same hint line, so moving focus moves nothing — but no caret, and runs no animation, so it never redraws on a timer. A confirmation flash already under way still runs out and calls `onSubmit`.
+- `onSubmit(result)`: called with exactly what the function form resolves with — a `SelectResult<T>` or the entered string.
+- `onCancel()`: called where the function form resolves `undefined`.
+
+A component calls one of the two at most once. After that it ignores every key and keeps drawing its last frame until you unmount it, so unmount it, or mount another, when you have your answer. Callbacks are read on every call rather than captured at mount, so passing fresh closures on each render is fine and costs the component nothing. Every read of the capability yields the same two functions, so rendering one again with new props keeps its state — its filter text, open columns, and active option.
+
+A component reads and writes no stream and changes no terminal state: every key arrives through your session and everything is drawn by it, and restoring the terminal is yours. It does not require interactive streams either, since it never touches them, but it does reject on its first render every request `select` rejects, by throwing before it draws anything — which your session's error handling sees like any other render failure. It resolves its theme through the theme capability once per mount, so a `tx` without exactly one theme provider fails that render with the same error. Ctrl-C reaching it cancels it exactly as it cancels `select`, but whether Ctrl-C reaches it is your session's choice: Ink's default `exitOnCtrlC` ends the session before any input handler runs, so render with `exitOnCtrlC: false` if you want the dialog to see it. Only an active component answers keys, so you may mount several and move focus between them; make two active at once and both answer the same keystroke.
+
+The contract types the components as functions of their props returning `unknown`, because it is types only and names no React type. Your plugin holds the injected React that renders them, so cast once where you call `createElement`:
+
+```ts
+import type { CoreDependencies, Plugin } from "@fx/tx/plugin";
+import type { Dialogs, SelectProps, SelectResult } from "@fx/tx/dialogs";
+
+type Element = ReturnType<CoreDependencies["react"]["createElement"]>;
+
+const plugin: Plugin = ({ command, dependencies, registrations, context }) => {
+  const { react, ink } = dependencies;
+  command((namespace) =>
+    namespace.action(async () => {
+      const [dialogs] = registrations<Dialogs>("@fx/tx/dialogs");
+      if (!dialogs) throw new Error("dialogs capability missing");
+      // The one cast: the contract says `unknown`, the injected React says
+      // what a component returns.
+      const Select = dialogs.Select as (props: SelectProps<string>) => Element;
+
+      const App = () => {
+        const { exit } = ink.useApp();
+        const { columns, rows } = ink.useWindowSize();
+        const [picking, setPicking] = react.useState(true);
+        const [picked, setPicked] = react.useState<string>();
+        // The host's own keys: Tab moves focus between its panel and the
+        // dialog, and q quits once the dialog does not have it.
+        ink.useInput((input, key) => {
+          if (key.tab) setPicking((current) => !current);
+          else if (!picking && input === "q") exit();
+        });
+        return react.createElement(
+          ink.Box,
+          { flexDirection: "column" },
+          react.createElement(ink.Text, null, `Picked: ${picked ?? "nothing"}`),
+          // Unmounted once answered: a component is one-shot, and a host
+          // wanting another answer mounts another.
+          picked === undefined &&
+            react.createElement(Select, {
+              request: {
+                message: "Which branch?",
+                options: [
+                  { label: "main", value: "main" },
+                  { label: "release/2.0", value: "release/2.0" },
+                ],
+              },
+              width: columns,
+              // One row for the line above, one to stay under the terminal.
+              height: rows - 2,
+              isActive: picking,
+              onSubmit: ({ value }: SelectResult<string>) => {
+                setPicked(value);
+                setPicking(false);
+              },
+              onCancel: () => setPicking(false),
+            }),
+        );
+      };
+
+      const session = ink.render(react.createElement(App), {
+        stdin: context.stdin,
+        stdout: context.stderr,
+        exitOnCtrlC: false,
+      });
+      await session.waitUntilExit();
+    }),
+  );
+};
+
+export default plugin;
+```
+
+`Input` is rendered the same way with `InputProps` — `request`, `width`, `isActive`, `onSubmit(value)`, and `onCancel()` — and cast to `(props: InputProps) => Element`. Render both with the React and Ink `tx` injected into your plugin; rendering one with any other copy of either is unsupported.
 
 ## Use the bundled grid capability
 
