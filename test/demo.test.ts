@@ -165,7 +165,7 @@ function unstyled(output: string): string {
 function firstRow(request: SelectRequest<unknown>): SelectResult<unknown> {
   const [first] = request.options;
   if (!first) throw new Error("a select with no options");
-  return { value: first.value, values: {} };
+  return { value: first.value, values: {}, selected: [first.value] };
 }
 
 /**
@@ -244,7 +244,13 @@ describe("the demo runner", () => {
     expect(asked).toEqual([
       { kind: "select", request: scenarios.leaf.request },
     ]);
-    expect(stdout).toBe(reported("leaf", { value: "stable", values: {} }));
+    expect(stdout).toBe(
+      reported("leaf", {
+        value: "stable",
+        values: {},
+        selected: ["stable"],
+      }),
+    );
   });
 
   test("reports a cancelled dialog as cancelled", async () => {
@@ -419,7 +425,45 @@ describe("the demo on a terminal", () => {
     expect(exitCode).toBe(0);
     expect(stderr.text()).toContain("Pick a bump");
     expect(stdout.text()).toBe(
-      `select: ${JSON.stringify({ value: "patch", values: {} })}\n`,
+      `select: ${JSON.stringify({ value: "patch", values: {}, selected: ["patch"] })}\n`,
+    );
+  });
+
+  /** The multi-select scenario driven through the real plugin: Enter at once
+   * takes the pre-ticked host alone rather than the row under the bar, and
+   * the reported answer carries it as `selected`. */
+  test("takes the pre-ticked host when the multi-select scenario is confirmed", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new TerminalOutput();
+    const stdout = new TerminalOutput();
+    const context: CommandContext = {
+      cwd: "/work",
+      env: {},
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stderr: stderr as unknown as NodeJS.WriteStream,
+      plugin: { name: "demo" },
+    };
+
+    const running = main(
+      ["demo", "multiple"],
+      [themePlugin, dialogsPlugin, gridPlugin, demoPlugin],
+      context,
+    );
+    await until(() => stdin.rawModes.includes(true));
+    stdin.write("\r");
+    const exitCode = await running;
+
+    expect(exitCode).toBe(0);
+    const screen = stderr.text().replace(CONTROL_SEQUENCE, "");
+    expect(screen).toContain("■ beta");
+    expect(screen).toContain("Space tick");
+    expect(stdout.text()).toBe(
+      `multiple: ${JSON.stringify({
+        value: "alpha",
+        values: {},
+        selected: ["beta"],
+      })}\n`,
     );
   });
 
@@ -454,7 +498,11 @@ describe("the demo on a terminal", () => {
     expect(screen).toContain("Version");
     expect(screen).toContain("Published");
     expect(stdout.text()).toBe(
-      `cells: ${JSON.stringify({ value: "1.6.1", values: {} })}\n`,
+      `cells: ${JSON.stringify({
+        value: "1.6.1",
+        values: {},
+        selected: ["1.6.1"],
+      })}\n`,
     );
   });
 });

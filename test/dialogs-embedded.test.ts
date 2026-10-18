@@ -224,22 +224,34 @@ function hostKeys({ react, ink }: Host, seen: string[]): Rendered {
 }
 
 /** A host component whose state the test sets from outside, the way the
- * host's own widgets would set it from inside. */
+ * host's own widgets would set it from inside. `committed` answers the state
+ * the last committed render was made with: the host is the root, and a
+ * parent's effects run after its children's, so once it reports a state every
+ * input subscription that state turned on already exists. */
 function controlled<S>(
   { react }: Host,
   initial: S,
   render: (state: S) => Rendered,
-): { readonly View: () => Rendered; set(next: S): void } {
+): {
+  readonly View: () => Rendered;
+  set(next: S): void;
+  committed(): S;
+} {
   let update: ((next: S) => void) | undefined;
+  let committed = initial;
   return {
     View: () => {
       const [state, setState] = react.useState(initial);
       update = setState;
+      react.useEffect(() => {
+        committed = state;
+      }, [state]);
       return render(state);
     },
     set(next: S) {
       (update as (next: S) => void)(next);
     },
+    committed: () => committed,
   };
 }
 
@@ -631,6 +643,11 @@ describe("embedded dialog components", () => {
       // that differs, and an active select at rest draws what it drew
       // inactive.
       focus.set(true);
+      // A fixed pause alone is a race: on a loaded runner the activated
+      // render may not have committed, and a key pressed before the select's
+      // input subscription exists is dropped. The pause after it still gives
+      // a differing frame the time to be written.
+      await until(() => focus.committed());
       await pause(animationInterval / 5);
       expect(frameRows(terminal.output, "Host header")).toEqual(inactive);
       await terminal.press(DOWN);
@@ -802,7 +819,7 @@ describe("embedded dialog components", () => {
       await terminal.press(ESCAPE);
       await pause(animationInterval / 5);
       expect(calls.calls).toEqual([
-        { type: "submit", result: { value: 1, values: {} } },
+        { type: "submit", result: { value: 1, values: {}, selected: [1] } },
       ]);
       expect(activeRow(terminal.output, "Render 3")).toBe("Alpha");
       await terminal.close();
@@ -914,7 +931,9 @@ describe("embedded dialog components", () => {
         CARET,
       );
       focus.set(true);
-      await pause(animationInterval / 5);
+      // Waited for rather than paused for: a fixed pause is a race, because
+      // a key pressed before the activated render commits is dropped.
+      await until(() => focus.committed());
       await terminal.press(ESCAPE);
       await until(() =>
         stripped(lastFrame(terminal.output, "Pick one")).includes("Esc cancel"),

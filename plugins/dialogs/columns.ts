@@ -27,6 +27,18 @@ export const expandGlyph = "▸";
  * up on one edge instead of tracking each label's own length. */
 const expandMarkerWidth = 2;
 
+/** The tick cell's glyphs in a column that ticks: a filled box on a ticked
+ * option and an empty one on the rest, so a multiple column says it is one
+ * before anything in it is ticked. */
+export const tickedGlyph = "■";
+export const untickedGlyph = "□";
+
+/** The columns the tick cell takes at the start of every row of a column that
+ * ticks: the glyph and the space separating it from the label or first cell.
+ * Reserved for the whole column, as the marker is, so every row's text starts
+ * at the same column. */
+const tickCellWidth = 2;
+
 /** What separates one column from the next. */
 export const columnDivider = "│";
 
@@ -79,6 +91,11 @@ export type ColumnCell = ColumnPart & {
    * variable rather than the row's own — except under the cursor bar, which
    * spans its column's full width and therefore owns every piece in it. */
   readonly marker?: ColumnPart;
+  /** The tick cell set at the start of the row, in a column that ticks. Its
+   * own piece for the reason the marker is, drawn ahead of `text`: `marker` on
+   * an option row, `cursor` under the bar, and blank `chrome` on the header
+   * row it offsets. */
+  readonly tick?: ColumnPart;
 };
 
 /** The text of an overflow indicator carrying a count. Compact, because it is
@@ -101,8 +118,12 @@ export function columnWidth(
   widestLabel: number,
   expandable: boolean,
   empty: boolean,
+  ticking = false,
 ): number {
-  const width = widestLabel + (expandable ? expandMarkerWidth : 0);
+  const width =
+    widestLabel +
+    (expandable ? expandMarkerWidth : 0) +
+    (ticking ? tickCellWidth : 0);
   return Math.max(1, empty ? Math.max(width, displayWidth(noMatch)) : width);
 }
 
@@ -153,8 +174,9 @@ export function cellsColumnWidth(
   fields: readonly number[],
   expandable: boolean,
   empty: boolean,
+  ticking = false,
 ): number {
-  return columnWidth(fieldsWidth(fields), expandable, empty);
+  return columnWidth(fieldsWidth(fields), expandable, empty, ticking);
 }
 
 /**
@@ -356,6 +378,13 @@ export type CellLayout = {
  * A column of cell options passes its layout; a column of labels passes none
  * and is measured and drawn against one scalar width, exactly as it was before
  * cells existed.
+ *
+ * A column that ticks passes its ticks, and every row of it — the header
+ * included, which is offset by the same columns so it stays over its fields —
+ * carries the tick cell at its start. The tick cell is reserved before
+ * anything else splits the width: a column too narrow for its whole row
+ * narrows its label or fields, and drops its marker, before it gives up the
+ * tick, because a row whose tick cannot be seen cannot be told ticked.
  */
 export function columnCells<T>(
   options: readonly SelectOption<T>[],
@@ -364,11 +393,26 @@ export function columnCells<T>(
   active: number,
   width: number,
   bandRows: number,
-  dressing: { readonly bar: boolean },
+  dressing: {
+    readonly bar: boolean;
+    readonly ticks?: ReadonlySet<number> | undefined;
+  },
   layout?: CellLayout,
 ): readonly (ColumnCell | undefined)[] {
   const cells: (ColumnCell | undefined)[] = [];
   for (let row = 0; row < bandRows; row += 1) cells.push(undefined);
+  const { ticks } = dressing;
+  /** The columns the tick cell holds, taken off the top of the column's width
+   * before the text and the marker share what is left. */
+  const tickRoom = ticks === undefined ? 0 : Math.min(tickCellWidth, width);
+  const room = width - tickRoom;
+  const ticked = (cell: ColumnCell, glyph: string, variable: ThemeVariable) =>
+    ticks === undefined
+      ? cell
+      : {
+          ...cell,
+          tick: { text: `${glyph} `.slice(0, tickRoom), variable },
+        };
   // A band of no rows is a terminal that could not afford one, and nothing
   // this column has to say is worth a row nobody budgeted for — not its
   // header, and not the row it would otherwise spend saying that its filter
@@ -384,7 +428,7 @@ export function columnCells<T>(
       : {
           fields: fitFieldWidths(
             layout.fields,
-            width - markerRoom(width, layout.expandable),
+            room - markerRoom(room, layout.expandable),
           ),
           headers: layout.headers,
         };
@@ -399,10 +443,15 @@ export function columnCells<T>(
   const header =
     fitted === undefined || fitted.headers.length === 0 || !drawsRows
       ? undefined
-      : cellsRow(fitted.headers, fitted.fields, width, false, "chrome");
+      : ticked(
+          cellsRow(fitted.headers, fitted.fields, room, false, "chrome"),
+          " ",
+          "chrome",
+        );
   if (header !== undefined) cells[0] = header;
   const first = header === undefined ? 0 : 1;
   if (visible.length === 0) {
+    // Not an option, so nothing to tick: the row spends the column whole.
     cells[first] = cell(noMatch, width, false, "content");
     return cells;
   }
@@ -420,10 +469,17 @@ export function columnCells<T>(
     // anything was measured: the empty fallbacks are the shape that cannot be
     // here rather than a label read as a one-cell row, which is the misreading
     // the two shapes are separate to avoid.
-    cells[first + row] =
+    const drawn =
       fitted === undefined
-        ? cell(option.label ?? "", width, marked, variable)
-        : cellsRow(option.cells ?? [], fitted.fields, width, marked, variable);
+        ? cell(option.label ?? "", room, marked, variable)
+        : cellsRow(option.cells ?? [], fitted.fields, room, marked, variable);
+    // Under the bar the tick is part of the bar, as the marker is; everywhere
+    // else it is the annotation it is.
+    cells[first + row] = ticked(
+      drawn,
+      ticks?.has(index) ? tickedGlyph : untickedGlyph,
+      variable === "cursor" ? "cursor" : "marker",
+    );
   }
   return cells;
 }

@@ -837,9 +837,16 @@ describe("the embeddable selecting grid", () => {
     const calls = answers<string, string>();
     const seen: string[] = [];
     let activate: (() => void) | undefined;
+    let activeCommitted = false;
     const session = hostSession(() => {
       const [isActive, setActive] = react.useState(false);
       activate = () => setActive(true);
+      // The host is the root, and a parent's effects run after its
+      // children's: once this reports the active render committed, the
+      // grid's input subscription already exists.
+      react.useEffect(() => {
+        if (isActive) activeCommitted = true;
+      }, [isActive]);
       return react.createElement(
         react.Fragment,
         null,
@@ -868,7 +875,9 @@ describe("the embeddable selecting grid", () => {
     expect(calls.calls).toEqual([]);
 
     (activate as () => void)();
-    await pause(5);
+    // A fixed pause is a race: on a loaded runner the activated render may
+    // not have committed, and the Enter would be dropped.
+    await until(() => activeCommitted);
     await session.press(CARRIAGE_RETURN);
     await until(() => calls.calls.length > 0);
     await session.close();

@@ -375,14 +375,48 @@ function requireAlignedCells<T>(
   }
 }
 
+/**
+ * Rejects a pre-tick a column cannot honour, before any terminal state
+ * changes: `selected: true` on an option of a column not declaring `multiple`
+ * contradicts the column carrying it, at whatever depth that column sits.
+ * `selected: false` says the option starts unticked, which contradicts
+ * nothing, so it passes in every column.
+ *
+ * The cycle guard is keyed on the request, as `requireAlignedCells` keys its
+ * own, and for the same reason: this reads the request's own `multiple`, so
+ * two requests sharing one options list are two different questions, and a
+ * guard keyed on the list would answer the second by skipping it.
+ */
+function requireTickableColumns<T>(
+  request: {
+    readonly options: readonly SelectOption<T>[];
+    readonly multiple?: boolean | undefined;
+  },
+  seen: Set<object> = new Set(),
+): void {
+  if (seen.has(request)) return;
+  seen.add(request);
+  for (const { selected, dialog } of request.options) {
+    if (selected === true && request.multiple !== true) {
+      throw new Error(
+        "A pre-ticked select option requires a column declaring multiple",
+      );
+    }
+    if (dialog !== undefined && "options" in dialog) {
+      requireTickableColumns(dialog, seen);
+    }
+  }
+}
+
 /** Every rejection a select request can earn before anything is drawn, in the
- * order `select` has always raised them. The embedded `Select` runs the same
+ * order `select` has always raised them, the pre-tick last. The embedded `Select` runs the same
  * function on its first render, so the two forms cannot disagree about what is
  * rejected. */
 function requireSelectableRequest<T>(request: SelectRequest<T>): void {
   requireNonEmptyOptions(request.options);
   requireCollectableFields(request.options);
   requireAlignedCells(request);
+  requireTickableColumns(request);
 }
 
 type DialogSession = {
@@ -532,6 +566,7 @@ const definition: PluginDefinition = Object.freeze({
               headers: request.headers ?? [],
               filter: request.filter ?? "typed",
               expandKey: request.expand ?? "enter",
+              multiple: request.multiple === true,
             },
           };
         });

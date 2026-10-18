@@ -2908,6 +2908,7 @@ describe("user-provided select options", () => {
     expect(result).toEqual({
       value: "custom",
       values: { owner: "fx", repository: "tx" },
+      selected: ["custom"],
     });
   });
 
@@ -3171,6 +3172,7 @@ describe("user-provided select options", () => {
     expect(result).toEqual({
       value: "custom",
       values: { owner: "fx", repository: "tx" },
+      selected: ["custom"],
     });
     expect(renders).toBe(1);
     expect(unmounts).toBe(1);
@@ -3753,6 +3755,7 @@ describe("sub-dialog columns", () => {
     let result: SelectResult<string> | undefined = {
       value: "open",
       values: {},
+      selected: ["open"],
     };
     let settled = false;
     const running = main(
@@ -3821,6 +3824,7 @@ describe("sub-dialog columns", () => {
     let result: SelectResult<string> | undefined = {
       value: "stale",
       values: {},
+      selected: ["stale"],
     };
     let settled = false;
     const running = main(
@@ -3869,7 +3873,11 @@ describe("sub-dialog columns", () => {
     });
     stdin.write(CARRIAGE_RETURN);
     expect(await running).toBe(0);
-    expect(result).toEqual({ value: "tagged", values: { tag: "nightly" } });
+    expect(result).toEqual({
+      value: "tagged",
+      values: { tag: "nightly" },
+      selected: ["tagged"],
+    });
   });
 
   test("merges values along the path with deeper submissions winning", async () => {
@@ -4269,6 +4277,7 @@ describe("sub-dialog columns", () => {
     let result: SelectResult<string> | undefined = {
       value: "stale",
       values: {},
+      selected: ["stale"],
     };
     let settled = false;
     const running = main(

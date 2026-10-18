@@ -73,11 +73,15 @@ export type ExpandKey = "enter" | "tab";
  * keys. The line never names a key the dialog would ignore.
  */
 function selectHint(state: {
+  readonly multiple: boolean;
   readonly expandable: boolean;
   readonly nested: boolean;
   readonly expandKey: ExpandKey;
 }): string {
   const phrases = ["↑↓ move"];
+  // Named only where Space ticks: in a single-choice column it is a printable
+  // character like any other, and reaches the filter.
+  if (state.multiple) phrases.push("Space tick");
   if (state.expandable) {
     phrases.push(state.expandKey === "tab" ? "→/Tab open" : "→/Enter open");
   }
@@ -162,6 +166,15 @@ type SelectLevel<T> = {
    * each column is its own request and names what that column lists. */
   readonly headers: readonly string[];
   readonly filter: FilterMode;
+  /** Whether this column ticks. Per level, like `headers` and `filter`. */
+  readonly multiple: boolean;
+  /** Where this column sits in the request: the supplied indices of the
+   * options that opened it, from the root, joined into one key — the root's is
+   * empty. Its ticks are kept under this key rather than under the
+   * sub-request object, so two options sharing one sub-request do not share
+   * ticks, and a column closed and opened again from the same option finds the
+   * ticks it was left with. */
+  readonly path: string;
   readonly entered: string;
   readonly active: number;
   readonly collected: Readonly<Record<string, string>>;
@@ -189,6 +202,15 @@ function declaredSubDialog<T>(
   if (dialog === undefined) return undefined;
   if ("options" in dialog) return { select: dialog };
   return { field: dialog };
+}
+
+/** The supplied indices of a column's options that open ticked. */
+function preTicked<T>(options: readonly SelectOption<T>[]): Set<number> {
+  const ticked = new Set<number>();
+  for (const [index, option] of options.entries()) {
+    if (option.selected === true) ticked.add(index);
+  }
+  return ticked;
 }
 
 /** Merge one submitted input into the values collected along the path:
@@ -282,6 +304,9 @@ export type SelectViewRequest<T> = {
   /** Which key opens a sub-dialog, for the whole dialog rather than per
    * level: one dialog answers one set of keys however deep the reader goes. */
   readonly expandKey: ExpandKey;
+  /** Whether the root column ticks. Unlike `expandKey`, every nested request
+   * decides its own column. */
+  readonly multiple: boolean;
 };
 
 /** What the select view is rendered with: the components drawn from the
@@ -349,7 +374,7 @@ export function createSelectView(
 
   return function SelectView<T>({
     components: { Entry, Frame },
-    request: { message, options, headers, filter, expandKey },
+    request: { message, options, headers, filter, expandKey, multiple },
     width: columns,
     height,
     isActive,
@@ -402,12 +427,31 @@ export function createSelectView(
         options,
         headers,
         filter,
+        multiple,
+        path: "",
         entered: "",
         active: 0,
         collected: {},
         opener: undefined,
       },
     ]);
+    /** The ticks of every column opened so far, as supplied option indices
+     * keyed by the column's path. Beside `levels` and a ref for the same
+     * reason: a chunk carrying several keys ticks before any of them has
+     * re-rendered. A column's entry outlives the column, so backing out and
+     * opening it again restores its ticks; the whole map goes with the
+     * component, which is what discards every tick on cancel. */
+    const ticks = react.useRef(new Map<string, Set<number>>());
+    /** One column's ticks, seeded from its pre-ticks the first time the column
+     * is read — which is the render it first opens on, since a column is drawn
+     * the moment it opens. */
+    const columnTicks = (level: SelectLevel<T>): Set<number> => {
+      const known = ticks.current.get(level.path);
+      if (known !== undefined) return known;
+      const seeded = preTicked(level.options);
+      ticks.current.set(level.path, seeded);
+      return seeded;
+    };
     const [revision, setRevision] = react.useState(0);
     const refresh = () => setRevision((current) => current + 1);
     void revision;
@@ -538,6 +582,7 @@ export function createSelectView(
      * always live, which is why the hint names it whether or not this is set. */
     const filterShown = filterIsShown(topFilter, filterText);
     const hint = selectHint({
+      multiple: top.multiple,
       expandable: activeOption?.dialog !== undefined,
       nested: levels.current.length > 1,
       expandKey,
@@ -639,6 +684,8 @@ export function createSelectView(
         options: nested.options,
         headers: nested.headers ?? [],
         filter: nested.filter ?? "typed",
+        multiple: nested.multiple === true,
+        path: `${current.path}/${chosen}`,
         entered: "",
         active: 0,
         collected: current.collected,
@@ -688,6 +735,26 @@ export function createSelectView(
       refresh();
     };
 
+    /** What the dialog takes: the ticks of every select column open now, left
+     * to right and in supplied order within each, hidden ones included — or,
+     * only where none of them holds a tick, the completing option's value
+     * alone. Read from the stack rather than the frame, so a completion in the
+     * middle of a chunk takes the ticks that chunk made before it. A text leaf
+     * on top is not a column and holds no ticks. */
+    const selectedValues = (completing: T): readonly T[] => {
+      const taken: T[] = [];
+      for (const level of levels.current) {
+        if ("field" in level) continue;
+        const ticked = [...columnTicks(level)].sort(
+          (one, other) => one - other,
+        );
+        for (const index of ticked) {
+          taken.push((level.options[index] as SelectOption<T>).value);
+        }
+      }
+      return taken.length > 0 ? taken : [completing];
+    };
+
     /** Resolve the whole session: the completing option's value plus every
      * input value collected along the path, prototype-free so an opaque
      * caller key lands as an own value. Plain nested options contribute
@@ -703,6 +770,7 @@ export function createSelectView(
           Object.create(null) as Record<string, string>,
           values,
         ),
+        selected: selectedValues(value),
       };
       if (viewport.count === 0) {
         settle({ type: "completed", value: outcome });
@@ -803,6 +871,20 @@ export function createSelectView(
         }
         return;
       }
+      // Space ticks in a column that ticks, and only the keystroke: a chunk
+      // carrying a space among other characters is a paste and filters whole,
+      // and a space under a modifier is not the tick key. Ticking moves
+      // nothing and opens nothing, and with nothing visible there is nothing
+      // under the bar to tick.
+      if (current.multiple && value === " " && !key.ctrl && !key.meta) {
+        if (chosen === undefined) return;
+        const ticked = columnTicks(current);
+        if (ticked.has(chosen)) ticked.delete(chosen);
+        else ticked.add(chosen);
+        refresh();
+        reset();
+        return;
+      }
       const moved = movedPosition(
         key,
         current.active,
@@ -866,6 +948,7 @@ export function createSelectView(
               Object.create(null) as Record<string, string>,
               merged,
             ),
+            selected: selectedValues(collection.value),
           },
         });
       }
@@ -969,11 +1052,13 @@ export function createSelectView(
             column.matched.widestLabel,
             column.matched.expandable,
             column.matched.visible.length === 0,
+            column.level.multiple,
           )
         : cellsColumnWidth(
             column.matched.fields,
             column.matched.expandable,
             column.matched.visible.length === 0,
+            column.level.multiple,
           ),
     );
     // Running out of room collapses the oldest columns first. The driven
@@ -1118,7 +1203,10 @@ export function createSelectView(
         column.active,
         drawnWidths[at] as number,
         bandRows,
-        { bar: column.bar },
+        {
+          bar: column.bar,
+          ticks: column.level.multiple ? columnTicks(column.level) : undefined,
+        },
         layout,
       );
     });
@@ -1144,6 +1232,16 @@ export function createSelectView(
             variable: "content" as const,
           });
           continue;
+        }
+        // The tick cell leads the row, so it is its own piece for the reason
+        // the marker is: it annotates the row rather than belonging to its
+        // text, and the cell already held its columns back.
+        if (drawn.tick !== undefined) {
+          segments.push({
+            key: `tick-${at}`,
+            text: drawn.tick.text,
+            variable: drawn.tick.variable,
+          });
         }
         segments.push({
           key: `cell-${at}`,
