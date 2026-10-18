@@ -291,6 +291,19 @@ describe("demo catalogue", () => {
     },
   );
 
+  test.each(selectRequests)(
+    "%s pre-ticks only in a column that ticks",
+    (_, request) => {
+      // The plugin rejects a pre-tick anywhere else before drawing anything.
+      for (const column of requests(request)) {
+        if (column.multiple === true) continue;
+        for (const option of column.options) {
+          expect(option.selected).not.toBe(true);
+        }
+      }
+    },
+  );
+
   test.each(inputRequests)("%s asks a question", (_, request) => {
     expect(request.message).not.toBe("");
   });
@@ -407,6 +420,20 @@ describe("demo catalogue", () => {
     expect(nested.options.map((option) => option.label)).toEqual(
       tab.options.map((option) => option.label),
     );
+  });
+
+  test("shows ticking in two columns, one option opening ticked", () => {
+    const request: SelectRequest<string> = scenarios.multiple.request;
+    const ticking = requests(request).filter(
+      (column) => column.multiple === true,
+    );
+
+    // The root and a column it opens both tick, so one answer can carry ticks
+    // from each of them.
+    expect(ticking).toHaveLength(2);
+    expect(ticking[0]).toBe(request);
+    expect(request.options.filter((option) => option.selected)).toHaveLength(1);
+    expect(usage).toContain("Space ticks");
   });
 
   test("documents every scenario in its help text", () => {

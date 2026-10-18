@@ -429,6 +429,44 @@ describe("the demo on a terminal", () => {
     );
   });
 
+  /** The multi-select scenario driven through the real plugin: Enter at once
+   * takes the pre-ticked host alone rather than the row under the bar, and
+   * the reported answer carries it as `selected`. */
+  test("takes the pre-ticked host when the multi-select scenario is confirmed", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new TerminalOutput();
+    const stdout = new TerminalOutput();
+    const context: CommandContext = {
+      cwd: "/work",
+      env: {},
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stderr: stderr as unknown as NodeJS.WriteStream,
+      plugin: { name: "demo" },
+    };
+
+    const running = main(
+      ["demo", "multiple"],
+      [themePlugin, dialogsPlugin, gridPlugin, demoPlugin],
+      context,
+    );
+    await until(() => stdin.rawModes.includes(true));
+    stdin.write("\r");
+    const exitCode = await running;
+
+    expect(exitCode).toBe(0);
+    const screen = stderr.text().replace(CONTROL_SEQUENCE, "");
+    expect(screen).toContain("■ beta");
+    expect(screen).toContain("Space tick");
+    expect(stdout.text()).toBe(
+      `multiple: ${JSON.stringify({
+        value: "alpha",
+        values: {},
+        selected: ["beta"],
+      })}\n`,
+    );
+  });
+
   /** The table scenario driven through the real plugin, which is the only
    * place the catalogue meets the validations: a column of cells with headers
    * is either accepted and drawn as a table, or rejected before it renders. */

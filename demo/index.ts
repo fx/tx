@@ -8,6 +8,7 @@
  *   bun run demo filter       # long list: start typing and it narrows
  *   bun run demo shownfilter  # long list whose filter is shown before you type
  *   bun run demo cells        # a table: aligned cells under the headers naming them
+ *   bun run demo multiple     # ticking several: Space ticks, Enter takes every tick
  *   bun run demo fields       # select whose option collects input fields
  *   bun run demo nested       # three-level column browser (Enter/→ in, ←/Esc out)
  *   bun run demo tab          # the same tree with opening bound to Tab

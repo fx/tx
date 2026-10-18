@@ -347,6 +347,7 @@ export const order = [
   "filter",
   "shownfilter",
   "cells",
+  "multiple",
   "fields",
   "nested",
   "tab",
@@ -406,6 +407,38 @@ export const scenarios = {
     kind: "select",
     description: "a table: aligned cells under the headers naming them",
     request: releases,
+  },
+
+  multiple: {
+    kind: "select",
+    // Ticking is a property of one column: the hosts tick, and so does the
+    // region column one of them opens, so the answer can hold ticks from
+    // both. One host opens ticked, so Enter straight away takes it alone
+    // rather than the row under the bar.
+    description: "ticking several: Space ticks, Enter takes every tick",
+    request: {
+      message: "Which hosts?",
+      multiple: true,
+      options: [
+        { label: "alpha", value: "alpha" },
+        { label: "beta", value: "beta", selected: true },
+        { label: "gamma", value: "gamma" },
+        { label: "delta", value: "delta" },
+        {
+          label: "by region",
+          value: "region",
+          dialog: {
+            message: "Which regions?",
+            multiple: true,
+            options: [
+              { label: "eu-west", value: "eu-west" },
+              { label: "us-east", value: "us-east" },
+              { label: "ap-south", value: "ap-south" },
+            ],
+          },
+        },
+      ],
+    },
   },
 
   fields: {
@@ -562,6 +595,8 @@ ${order
 
 In a dialog, a ▸ marks an option that opens a sub-dialog: Enter or → opens it
 as the next column, ← or Esc backs out, and typing always filters the column
-you are in. A printed layout answers nothing and waits for no key, while an
-interactive one is driven exactly like any other dialog: a row that offers
-actions opens them as the next column, and the answer names both.`;
+you are in. In a column whose rows start with □, Space ticks the row under the
+bar and Enter takes every tick. A printed layout answers nothing and waits for
+no key, while an interactive one is driven exactly like any other dialog: a
+row that offers actions opens them as the next column, and the answer names
+both.`;
