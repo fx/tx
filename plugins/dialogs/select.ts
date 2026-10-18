@@ -27,7 +27,14 @@ import type {
   SelectResult,
   TextField,
 } from "./contract.ts";
-import { type EntryComponent, editedText, withCaret } from "./entry.ts";
+import {
+  type EntryComponent,
+  type EntryEscape,
+  editedText,
+  entryHint,
+  keystrokes,
+  withCaret,
+} from "./entry.ts";
 import { filterIsShown, visibleOptionIndices } from "./filter.ts";
 import {
   availableInnerWidth,
@@ -36,6 +43,7 @@ import {
   type FrameRow,
   type FrameSegment,
   innerWidth,
+  paintedWidth,
   panelWidth,
   segmentsWidth,
 } from "./frame.ts";
@@ -204,6 +212,27 @@ function declaredSubDialog<T>(
   return { field: dialog };
 }
 
+/** The supplied option indices a column's path names, from the root down:
+ * none for the root, whose path is empty. */
+function pathIndices(path: string): readonly number[] {
+  return path === "" ? [] : path.slice(1).split("/").map(Number);
+}
+
+/** The order two columns stand in the request: a column before the columns
+ * opened from its options, and siblings in the order of the options that open
+ * them. It is the order a reader meets the columns walking the request from
+ * the top, which is the order their ticks are taken in. */
+function comparePaths(one: string, other: string): number {
+  const first = pathIndices(one);
+  const second = pathIndices(other);
+  const shared = Math.min(first.length, second.length);
+  for (let at = 0; at < shared; at += 1) {
+    const difference = (first[at] as number) - (second[at] as number);
+    if (difference !== 0) return difference;
+  }
+  return first.length - second.length;
+}
+
 /** The supplied indices of a column's options that open ticked. */
 function preTicked<T>(options: readonly SelectOption<T>[]): Set<number> {
   const ticked = new Set<number>();
@@ -368,7 +397,17 @@ export function createSelectView(
     readonly onInput: Parameters<CoreDependencies["ink"]["useInput"]>[0];
     readonly isActive: boolean;
   }) {
-    ink.useInput(onInput, { isActive });
+    ink.useInput(
+      (input, key) => {
+        // One keystroke at a time, in the order they were typed: a Space
+        // that an Enter followed into the same chunk ticks and then takes,
+        // and text typed ahead of an Enter filters before the Enter takes.
+        for (const [text, pressed] of keystrokes(input, key)) {
+          onInput(text, pressed);
+        }
+      },
+      { isActive },
+    );
     return null;
   }
 
@@ -735,24 +774,41 @@ export function createSelectView(
       refresh();
     };
 
-    /** What the dialog takes: the ticks of every select column open now, left
-     * to right and in supplied order within each, hidden ones included — or,
-     * only where none of them holds a tick, the completing option's value
-     * alone. Read from the stack rather than the frame, so a completion in the
-     * middle of a chunk takes the ticks that chunk made before it. A text leaf
-     * on top is not a column and holds no ticks. */
+    /** What the dialog takes: the ticks of every column opened so far, open
+     * or backed out of, in the order the columns stand in the request — a
+     * column ahead of the columns opened from its options, siblings in the
+     * order of the options that open them — and in supplied order within
+     * each, hidden ones included; or, only where no column holds a tick, the
+     * completing option's value alone. Read from the tick map rather than the
+     * frame, so a completion in the middle of a chunk takes the ticks that
+     * chunk made before it, and from the map rather than the stack, so a
+     * column the reader ticked in and backed out of is still taken. A column's
+     * options are the request's own at every level, so the map's path leads
+     * back to them. */
     const selectedValues = (completing: T): readonly T[] => {
       const taken: T[] = [];
-      for (const level of levels.current) {
-        if ("field" in level) continue;
-        const ticked = [...columnTicks(level)].sort(
-          (one, other) => one - other,
-        );
-        for (const index of ticked) {
-          taken.push((level.options[index] as SelectOption<T>).value);
+      const opened = [...ticks.current.entries()].sort(([one], [other]) =>
+        comparePaths(one, other),
+      );
+      for (const [path, ticked] of opened) {
+        const columnOptions = optionsAt(path);
+        for (const index of [...ticked].sort((one, other) => one - other)) {
+          taken.push((columnOptions[index] as SelectOption<T>).value);
         }
       }
       return taken.length > 0 ? taken : [completing];
+    };
+    /** The options of the column at a path: the root's, then the nested
+     * request of each option the path names in turn. Every path in the tick
+     * map was walked to open its column, so each step finds the select it
+     * named. */
+    const optionsAt = (path: string): readonly SelectOption<T>[] => {
+      let columnOptions: readonly SelectOption<T>[] = options;
+      for (const index of pathIndices(path)) {
+        const opener = columnOptions[index] as SelectOption<T>;
+        columnOptions = (opener.dialog as SelectRequest<T>).options;
+      }
+      return columnOptions;
     };
 
     /** Resolve the whole session: the completing option's value plus every
@@ -1178,6 +1234,49 @@ export function createSelectView(
       columns,
       edgeColumns,
     );
+    /** What a field collected now says its Escape does. Keyed on the same
+     * condition the main handler branches on, so the line and the key cannot
+     * drift apart: where that handler pops, Escape backs out of the
+     * collection's column and the entry's own handler never runs; where it
+     * cancels, so does the entry. */
+    const fieldEscape: EntryEscape =
+      levels.current.length > 1 ? "back" : "cancel";
+    /** What the entry under the frame will draw, where one is on screen: the
+     * field being collected or the leaf being typed into, and what its Escape
+     * does there. Known here, ahead of the entry rendering, so the frame can
+     * be painted as wide as the entry will paint itself. */
+    const pendingEntry: { message: string; escape: EntryEscape } | undefined =
+      collectingField
+        ? {
+            message: (
+              (collecting.current as Collection<T>).fields[
+                fieldIndex
+              ] as TextField
+            ).message,
+            escape: fieldEscape,
+          }
+        : leaf === undefined
+          ? undefined
+          : // A leaf is only ever pushed over the select that opened it, so
+            // it is never at the leftmost level: Escape here backs out.
+            { message: leaf.field.message, escape: "back" };
+    /** The width every row of the dialog is painted to: the frame's own, its
+     * hint line while it draws one, and at least what the entry under it
+     * paints — its panel as its message alone sizes it, and its hint — so the
+     * two panels read as one block. A value typed wider than that widens the
+     * entry's rows alone. */
+    const box = paintedWidth(
+      width,
+      entryHasKeys ? undefined : hint,
+      columns,
+      pendingEntry === undefined
+        ? 0
+        : paintedWidth(
+            panelWidth(pendingEntry.message, 1, columns),
+            entryHint(pendingEntry.escape),
+            columns,
+          ),
+    );
     // Sized last, once the frame's own width is known: whatever the title made
     // the panel wider by belongs to the last column, so its cursor bar spans
     // the panel instead of stopping short of it.
@@ -1286,6 +1385,7 @@ export function createSelectView(
         driven?.viewport.hiddenBelow ?? 0,
       ),
       rows: panelRows,
+      box,
     });
     let fieldPanel: DialogElement | undefined;
     if (collectingField) {
@@ -1307,11 +1407,8 @@ export function createSelectView(
         onCancel: () => {
           if (collecting.current) cancel();
         },
-        // Keyed on the same condition the main handler branches on above, so
-        // the line and the key cannot drift apart: where that handler pops,
-        // Escape backs out of the collection's column and the entry's own
-        // handler never runs; where it cancels, so does this.
-        escapeAction: levels.current.length > 1 ? "back" : "cancel",
+        escapeAction: fieldEscape,
+        box,
       });
     } else if (leaf !== undefined) {
       // A text leaf reuses the existing entry logic: its editing is the same
@@ -1331,10 +1428,10 @@ export function createSelectView(
         onEdit: reset,
         onSubmit: (value: string) => submitLeaf(activeLeaf, value),
         onCancel: () => popLevel(),
-        // A leaf is only ever pushed over the select that opened it, so it is
-        // never at the leftmost level and that pop always pops: Escape here
-        // backs out and never cancels.
+        // A leaf's Escape backs out and never cancels, as `pendingEntry`
+        // says above.
         escapeAction: "back",
+        box,
       });
     }
     return react.createElement(

@@ -59,6 +59,33 @@ export function panelWidth(
   );
 }
 
+/**
+ * The columns a dialog paints on every row it draws: the widest of its panel,
+ * its hint line with the column that leads it, and whatever floor a dialog
+ * drawn above it sets — never past the terminal.
+ *
+ * A dialog is a block of rows rather than a panel with a line hanging under
+ * it, because a host that draws it over other content sees exactly the cells
+ * it paints: a hint line reaching past the panel would leave that content
+ * showing through beside the panel above it and after the hint itself. Every
+ * row is therefore painted to this one width, the cells beyond the panel or
+ * past the hint painted blank, so the block covers what it sits on and nothing
+ * outside it. On a terminal of its own the blank cells are the trailing spaces
+ * the renderer trims, so a standalone dialog draws exactly what it drew.
+ */
+export function paintedWidth(
+  width: number,
+  hint: string | undefined,
+  terminalColumns: number,
+  floor = 0,
+): number {
+  const forHint = hint === undefined ? 0 : displayWidth(hint) + 1;
+  return Math.min(
+    layoutColumns(terminalColumns),
+    Math.max(width, forHint, floor),
+  );
+}
+
 /** The content columns a panel of this width leaves. One column is the floor:
  * a panel with nothing to put in it still has a row to draw. */
 export function innerWidth(width: number): number {
@@ -282,6 +309,10 @@ type FrameProps = {
    * start when it has to be cut. */
   readonly bottomLeftTail?: boolean | undefined;
   readonly rows: readonly FrameRow[];
+  /** The narrowest width every row is painted to, for a panel drawn under
+   * another that must paint at least as wide as it; `paintedWidth` widens it
+   * further for this panel's own frame and hint. */
+  readonly box?: number | undefined;
 };
 
 /**
@@ -327,9 +358,20 @@ export function createFrame(
     edgeReserve,
     bottomLeftTail,
     rows,
+    box,
   }: FrameProps) {
     const glyphs = double ? borders.double : borders.single;
     const inner = innerWidth(width);
+    const painted = paintedWidth(width, hint, columns, box);
+    /** The blank cells after the panel on each of its rows, so every row of
+     * the dialog is painted to the same width. They are painted with no
+     * variable at all: they are outside the frame, and the theme owns only
+     * what is in it. */
+    const beyond = react.createElement(
+      ink.Text,
+      { key: "beyond" },
+      " ".repeat(painted - width),
+    );
     const line = (
       key: string,
       segments: readonly FrameSegment[],
@@ -345,6 +387,7 @@ export function createFrame(
             segment.text,
           ),
         ),
+        beyond,
       );
     const side = (key: string): FrameSegment => ({
       key,
@@ -422,24 +465,34 @@ export function createFrame(
       ),
     );
     if (hint !== undefined) {
-      // The hint line is capped like the panel is: a hint wide enough to wrap
-      // would add a row the viewport's arithmetic never counted.
-      const cap = Math.max(1, layoutColumns(columns) - 1);
+      // The hint line is cut to the painted width like the panel is: a hint
+      // wide enough to wrap would add a row the viewport's arithmetic never
+      // counted. The column leading it and the cells after it are painted
+      // blank rather than left, so the line covers exactly the width the rows
+      // above it do; what they look like is nobody's, as the cells beyond the
+      // panel are not.
+      const shown = truncateEnd(hint, painted - 1);
       drawn.push(
         react.createElement(
-          ink.Box,
-          { key: "hint", marginLeft: 1, width: cap },
+          ink.Text,
+          { key: "hint", wrap: "truncate-end" },
+          react.createElement(ink.Text, { key: "lead" }, " "),
           react.createElement(
             ink.Text,
-            { ...styling("chrome"), wrap: "truncate-end" },
-            hint,
+            { key: "keys", ...styling("chrome") },
+            shown,
+          ),
+          react.createElement(
+            ink.Text,
+            { key: "after" },
+            " ".repeat(painted - 1 - displayWidth(shown)),
           ),
         ),
       );
     }
     return react.createElement(
       ink.Box,
-      { flexDirection: "column", width },
+      { flexDirection: "column", width: painted },
       drawn,
     );
   };
