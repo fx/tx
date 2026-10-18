@@ -10,11 +10,11 @@ Three follow-ups from the first host that embedded `Select`: take the ticks of e
 
 ## Motivation
 
-A plugin embedding `Select` as a filter dialog — a root column listing kinds of thing, a multiple column of the things of each kind beneath it — found three things short of what it needed:
+A plugin embedding `Select` as a filter dialog — a root column listing kinds of thing, a multiple column of the things of each kind beneath it — finds three things short of what it needs:
 
-1. Ticks counted only in the columns open at completion. Backing out of a column kept its ticks for re-opening but dropped them from the result, so one pass could filter by one kind and not by two.
-2. A Space and an Enter typed faster than the terminal was read arrived as one input event. Ink separates escape sequences, Backspace, and Ctrl-C out of a chunk and nothing else, so the select received the two-character text ` \r`: not the one-space keystroke that ticks, not the Enter that takes, and a space in the filter besides. Reproduced with a key burst; plausible over a slow link, unlikely typed on a local terminal.
-3. The hint line was wider than the frame above it. A host drawing the dialog over a table saw table text through the cells beside the frame and after the hint, and worked around it with a wrapper of a fixed width and a background colour Ink happened to fill with plain spaces because it did not recognise the colour's name.
+1. Ticks count only in the columns open at completion. Backing out of a column keeps its ticks for re-opening but drops them from the result, so one pass can filter by one kind and not by two.
+2. A Space and an Enter typed faster than the terminal is read arrive as one input event. Ink separates escape sequences, Backspace, and Ctrl-C out of a chunk and nothing else, so the select receives the two-character text ` \r`: not the one-space keystroke that ticks, not the Enter that takes, and a space in the filter besides. It reproduces with a key burst; it is plausible over a slow link and unlikely typed on a local terminal.
+3. The hint line is wider than the frame above it. A host drawing the dialog over a table sees table text through the cells beside the frame and after the hint, and works around it with a wrapper of a fixed width and a background colour Ink happens to fill with plain spaces because it does not recognise the colour's name.
 
 Each is small, and each belongs in `tx` rather than in a workaround every host repeats.
 
