@@ -55,3 +55,4 @@
 | 0037 | [Add Multi-Select](changes/0037-add-multi-select.md) | [Dialogs](specs/dialogs/) | complete | 0027, 0036 |
 | 0038 | [Add Embeddable Grid Components](changes/0038-add-embeddable-grid-components.md) | [Grid](specs/grid/) | complete | 0029, 0030, 0036 |
 | 0039 | [Take Every Tick and Paint Dialog Rows](changes/0039-take-every-tick-and-paint-dialog-rows.md) | [Dialogs](specs/dialogs/) | complete | 0036, 0037 |
+| 0040 | [Paint Dialog Rows to Their Own Width](changes/0040-paint-dialog-rows-to-their-own-width.md) | [Dialogs](specs/dialogs/) | complete | 0039 |

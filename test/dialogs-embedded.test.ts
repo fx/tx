@@ -826,14 +826,15 @@ describe("embedded dialog components", () => {
     });
   });
 
-  test("a component drawn over the host's own rows covers them to its widest row", async () => {
+  test("a component drawn over the host's own rows covers exactly the cells each row draws", async () => {
     await hosted(async (host) => {
       const Select = selectComponent<number>(host.dialogs);
       const Input = inputComponent(host.dialogs);
       const covered = "X".repeat(70);
       // Ten rows of the host's own text, with the two components drawn back
       // over them: a select of six rows over the first six, an input of four
-      // over the rest. Both have a hint line wider than their frame.
+      // over the rest. The select's hint line is wider than its frame; the
+      // input's frame is wider than its hint line.
       const View = () =>
         host.react.createElement(
           host.ink.Box,
@@ -857,7 +858,7 @@ describe("embedded dialog components", () => {
               ...recorder<SelectResult<number>>(),
             }),
             host.react.createElement(Input, {
-              request: { message: "Go" },
+              request: { message: "Name the branch this work lands on" },
               width: 70,
               isActive: false,
               ...recorder<string>(),
@@ -867,82 +868,151 @@ describe("embedded dialog components", () => {
       const terminal = session(host, View);
       await until(() => terminal.output.text().includes("Esc cancel"));
       const rows = frameRows(terminal.output, "Host header");
-      const selectHint = "↑↓ move · Enter select · type to filter · Esc cancel";
-      const selectWidth = Bun.stringWidth(selectHint) + 1;
-      expect(rows[1]?.startsWith("╔═ Pick ═")).toBe(true);
-      // Every row of the select, the hint line included, blanks the host's
-      // text exactly as far as the hint line reaches, and no further.
-      for (const row of rows.slice(1, 7)) {
-        expect(row.indexOf("X")).toBe(selectWidth);
-      }
-      expect(rows[6]).toBe(` ${selectHint}${"X".repeat(70 - selectWidth)}`);
-      const inputHint = "Enter submit · Esc cancel";
-      const inputWidth = Bun.stringWidth(inputHint) + 1;
-      expect(rows[7]?.startsWith("┌─ Go ─")).toBe(true);
-      for (const row of rows.slice(7, 11)) {
-        expect(row.indexOf("X")).toBe(inputWidth);
-      }
-      expect(rows[10]).toBe(` ${inputHint}${"X".repeat(70 - inputWidth)}`);
       expect(rows).toHaveLength(11);
+
+      const selectHint = "↑↓ move · Enter select · type to filter · Esc cancel";
+      const selectHintWidth = Bun.stringWidth(selectHint) + 1;
+      expect(rows[1]?.startsWith("╔═ Pick ═")).toBe(true);
+      const selectFrame = rows[1]?.indexOf("X") ?? -1;
+      expect(selectFrame).toBeLessThan(selectHintWidth);
+      // Every frame row ends at the closing border, the host's text showing
+      // straight after it rather than under blank cells out to the hint.
+      for (const row of rows.slice(1, 6)) {
+        expect(row.indexOf("X")).toBe(selectFrame);
+        expect("╗║╝").toContain(row[selectFrame - 1] as string);
+      }
+      // The hint line covers its leading column and its own characters, and
+      // the host's text resumes at once after the last of them.
+      expect(rows[6]).toBe(` ${selectHint}${"X".repeat(70 - selectHintWidth)}`);
+
+      const inputHint = "Enter submit · Esc cancel";
+      const inputHintWidth = Bun.stringWidth(inputHint) + 1;
+      expect(
+        rows[7]?.startsWith("┌─ Name the branch this work lands on ─"),
+      ).toBe(true);
+      const inputFrame = rows[7]?.indexOf("X") ?? -1;
+      expect(inputFrame).toBeGreaterThan(inputHintWidth);
+      for (const row of rows.slice(7, 10)) {
+        expect(row.indexOf("X")).toBe(inputFrame);
+        expect("┐│┘").toContain(row[inputFrame - 1] as string);
+      }
+      // Under a frame wider than it, the hint line still stops at its last
+      // character, and its leading column is covered rather than left.
+      expect(rows[10]).toBe(` ${inputHint}${"X".repeat(70 - inputHintWidth)}`);
       await terminal.close();
     });
   });
 
-  test("an entry collected under a select is painted as one block with its frame", async () => {
-    await hosted(async (host) => {
-      const Select = selectComponent<number>(host.dialogs);
-      const covered = "X".repeat(70);
-      const View = () =>
+  /** A select whose one option collects a text field, drawn over seven rows
+   * of the host's own text — the select's edges and its option, then the
+   * entry's edges, its value row, and its hint line — with the field already
+   * open. */
+  async function collectedOver(
+    host: Host,
+    message: string,
+    field: string,
+  ): Promise<readonly string[]> {
+    const Select = selectComponent<number>(host.dialogs);
+    const covered = "X".repeat(70);
+    const View = () =>
+      host.react.createElement(
+        host.ink.Box,
+        { flexDirection: "column" },
+        host.react.createElement(host.ink.Text, null, "Host header"),
+        ...Array.from({ length: 7 }, (_, at) =>
+          host.react.createElement(
+            host.ink.Text,
+            { key: `covered-${at}` },
+            covered,
+          ),
+        ),
         host.react.createElement(
           host.ink.Box,
-          { flexDirection: "column" },
-          host.react.createElement(host.ink.Text, null, "Host header"),
-          // Seven rows: the select's edges and its one option, then the
-          // entry's edges, its value row, and its hint line.
-          ...Array.from({ length: 7 }, (_, at) =>
-            host.react.createElement(
-              host.ink.Text,
-              { key: `covered-${at}` },
-              covered,
-            ),
-          ),
-          host.react.createElement(
-            host.ink.Box,
-            { flexDirection: "column", marginTop: -7 },
-            host.react.createElement(Select, {
-              request: {
-                message: "Pick",
-                options: [
-                  {
-                    label: "Own",
-                    value: 1,
-                    fields: [{ type: "text", name: "owner", message: "Owner" }],
-                  },
-                ],
-              },
-              width: 70,
-              height: 8,
-              isActive: true,
-              ...recorder<SelectResult<number>>(),
-            }),
-          ),
-        );
-      const terminal = session(host, View);
-      await until(() => terminal.output.text().includes("Esc cancel"));
-      await terminal.press(CARRIAGE_RETURN);
-      await until(() => terminal.output.text().includes("Enter submit"));
-      const rows = frameRows(terminal.output, "Host header");
-      // The select's own hint is gone while the field is collected, and the
-      // frame is narrow — yet every row down to the entry's hint line is
-      // painted to the entry's width, the widest of the block.
-      const entryWidth = Bun.stringWidth("Enter submit · Esc cancel") + 1;
-      expect(rows[1]?.startsWith("╔═ Pick ═")).toBe(true);
-      expect(rows[4]?.startsWith("┌─ Owner ─")).toBe(true);
-      for (const row of rows.slice(1, 8)) {
-        expect(row.indexOf("X")).toBe(entryWidth);
-      }
+          { flexDirection: "column", marginTop: -7 },
+          host.react.createElement(Select, {
+            request: {
+              message,
+              options: [
+                {
+                  label: "Own",
+                  value: 1,
+                  fields: [{ type: "text", name: "owner", message: field }],
+                },
+              ],
+            },
+            width: 70,
+            height: 8,
+            isActive: true,
+            ...recorder<SelectResult<number>>(),
+          }),
+        ),
+      );
+    const terminal = session(host, View);
+    await until(() => terminal.output.text().includes("Esc cancel"));
+    await terminal.press(CARRIAGE_RETURN);
+    await until(() => terminal.output.text().includes("Enter submit"));
+    const rows = frameRows(terminal.output, "Host header");
+    await terminal.close();
+    return rows;
+  }
+
+  test("an entry under a select paints only its own rows", async () => {
+    const entryKeys = "Enter submit · Esc cancel";
+    const entryKeysWidth = Bun.stringWidth(entryKeys) + 1;
+    await hosted(async (host) => {
+      // An entry wider than the select's frame: the select's rows end at its
+      // own border, and the entry's at its, further right.
+      const rows = await collectedOver(
+        host,
+        "Pick",
+        "Name the owner of this choice",
+      );
       expect(rows).toHaveLength(8);
-      await terminal.close();
+      expect(rows[1]?.startsWith("╔═ Pick ═")).toBe(true);
+      expect(rows[4]?.startsWith("┌─ Name the owner of this choice ─")).toBe(
+        true,
+      );
+      const selectFrame = rows[1]?.indexOf("X") ?? -1;
+      const entryFrame = rows[4]?.indexOf("X") ?? -1;
+      expect(selectFrame).toBeLessThan(entryFrame);
+      expect(entryFrame).toBeGreaterThan(entryKeysWidth);
+      for (const row of rows.slice(1, 4)) {
+        expect(row.indexOf("X")).toBe(selectFrame);
+        expect("╗║╝").toContain(row[selectFrame - 1] as string);
+      }
+      for (const row of rows.slice(4, 7)) {
+        expect(row.indexOf("X")).toBe(entryFrame);
+        expect("┐│┘").toContain(row[entryFrame - 1] as string);
+      }
+      expect(rows[7]).toBe(` ${entryKeys}${"X".repeat(70 - entryKeysWidth)}`);
+    });
+    await hosted(async (host) => {
+      // A select's frame wider than the entry: the entry's rows end at its own
+      // border and hint line, with the host's text beside them under the
+      // wider frame.
+      const rows = await collectedOver(
+        host,
+        "Pick the option that applies here",
+        "Owner",
+      );
+      expect(rows).toHaveLength(8);
+      expect(
+        rows[1]?.startsWith("╔═ Pick the option that applies here ═"),
+      ).toBe(true);
+      expect(rows[4]?.startsWith("┌─ Owner ─")).toBe(true);
+      const selectFrame = rows[1]?.indexOf("X") ?? -1;
+      const entryFrame = rows[4]?.indexOf("X") ?? -1;
+      expect(entryFrame).toBeLessThan(entryKeysWidth);
+      expect(entryKeysWidth).toBeLessThan(selectFrame);
+      for (const row of rows.slice(1, 4)) {
+        expect(row.indexOf("X")).toBe(selectFrame);
+        expect("╗║╝").toContain(row[selectFrame - 1] as string);
+      }
+      for (const row of rows.slice(4, 7)) {
+        expect(row.indexOf("X")).toBe(entryFrame);
+        expect("┐│┘").toContain(row[entryFrame - 1] as string);
+      }
+      expect(rows[7]).toBe(` ${entryKeys}${"X".repeat(70 - entryKeysWidth)}`);
     });
   });
 

@@ -38,13 +38,6 @@ const entryHints = {
  */
 export type EntryEscape = keyof typeof entryHints;
 
-/** The hint line an entry draws for what its Escape does. Exported so a select
- * drawing an entry under its frame can measure the line before the entry has
- * rendered, and paint its own rows as wide as the entry will paint its. */
-export function entryHint(action: EntryEscape): string {
-  return entryHints[action];
-}
-
 /** The key report Ink hands an input handler, as every dialog reads it. */
 export type InputKey = Parameters<
   Parameters<CoreDependencies["ink"]["useInput"]>[0]
@@ -147,11 +140,6 @@ type EntryProps = {
    * input's Escape does and the only thing it can do: there is nothing under
    * it to back out into. */
   readonly escapeAction?: EntryEscape;
-  /** The narrowest width the entry paints every row to, so an entry drawn
-   * under a select's frame paints at least as wide as the frame above it and
-   * the two read as one block to a host drawing them over other content. The
-   * entry's own panel and hint line still widen it past this. */
-  readonly box?: number | undefined;
 };
 
 /**
@@ -181,7 +169,6 @@ export function createEntry(
     onSubmit,
     onCancel,
     escapeAction = "cancel",
-    box,
   }: EntryProps) {
     const entered = react.useRef(initialValue ?? "");
     const [value, setValue] = react.useState(entered.current);
@@ -225,7 +212,6 @@ export function createEntry(
       width,
       columns,
       hint: entryHints[escapeAction],
-      box,
       // Start truncation keeps the tail of a long value and the caret itself
       // in view together.
       rows: [

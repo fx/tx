@@ -31,7 +31,6 @@ import {
   type EntryComponent,
   type EntryEscape,
   editedText,
-  entryHint,
   keystrokes,
   withCaret,
 } from "./entry.ts";
@@ -43,7 +42,6 @@ import {
   type FrameRow,
   type FrameSegment,
   innerWidth,
-  paintedWidth,
   panelWidth,
   segmentsWidth,
 } from "./frame.ts";
@@ -1241,42 +1239,6 @@ export function createSelectView(
      * cancels, so does the entry. */
     const fieldEscape: EntryEscape =
       levels.current.length > 1 ? "back" : "cancel";
-    /** What the entry under the frame will draw, where one is on screen: the
-     * field being collected or the leaf being typed into, and what its Escape
-     * does there. Known here, ahead of the entry rendering, so the frame can
-     * be painted as wide as the entry will paint itself. */
-    const pendingEntry: { message: string; escape: EntryEscape } | undefined =
-      collectingField
-        ? {
-            message: (
-              (collecting.current as Collection<T>).fields[
-                fieldIndex
-              ] as TextField
-            ).message,
-            escape: fieldEscape,
-          }
-        : leaf === undefined
-          ? undefined
-          : // A leaf is only ever pushed over the select that opened it, so
-            // it is never at the leftmost level: Escape here backs out.
-            { message: leaf.field.message, escape: "back" };
-    /** The width every row of the dialog is painted to: the frame's own, its
-     * hint line while it draws one, and at least what the entry under it
-     * paints — its panel as its message alone sizes it, and its hint — so the
-     * two panels read as one block. A value typed wider than that widens the
-     * entry's rows alone. */
-    const box = paintedWidth(
-      width,
-      entryHasKeys ? undefined : hint,
-      columns,
-      pendingEntry === undefined
-        ? 0
-        : paintedWidth(
-            panelWidth(pendingEntry.message, 1, columns),
-            entryHint(pendingEntry.escape),
-            columns,
-          ),
-    );
     // Sized last, once the frame's own width is known: whatever the title made
     // the panel wider by belongs to the last column, so its cursor bar spans
     // the panel instead of stopping short of it.
@@ -1385,7 +1347,6 @@ export function createSelectView(
         driven?.viewport.hiddenBelow ?? 0,
       ),
       rows: panelRows,
-      box,
     });
     let fieldPanel: DialogElement | undefined;
     if (collectingField) {
@@ -1408,7 +1369,6 @@ export function createSelectView(
           if (collecting.current) cancel();
         },
         escapeAction: fieldEscape,
-        box,
       });
     } else if (leaf !== undefined) {
       // A text leaf reuses the existing entry logic: its editing is the same
@@ -1428,10 +1388,9 @@ export function createSelectView(
         onEdit: reset,
         onSubmit: (value: string) => submitLeaf(activeLeaf, value),
         onCancel: () => popLevel(),
-        // A leaf's Escape backs out and never cancels, as `pendingEntry`
-        // says above.
+        // A leaf is only ever pushed over the select that opened it, so it is
+        // never at the leftmost level: its Escape backs out and never cancels.
         escapeAction: "back",
-        box,
       });
     }
     return react.createElement(
