@@ -96,6 +96,10 @@ import type { Grid, GridProps, GridSelectRow, Row } from "@fx/tx/grid";
 import type { ReactNode } from "react";
 import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
 import type { ThemeOverride } from "@fx/tx/theme-override";
+// The selecting grid's props are declared over the dialogs' shared embedded
+// props, so typing them makes the consumer resolve the grid contract through
+// the dialogs contract, as a cell resolves it through the theme's.
+import type { SelectGridProps } from "@fx/tx/grid";
 
 interface Greeter {
   greet(name?: string): string;
@@ -156,6 +160,17 @@ const row: GridSelectRow<string, string> = {
 // The props of the embeddable grid, typed by the contract: the request a
 // consumer would print, its stream left out, and the columns to lay it out in.
 const embedded: GridProps = { request: { rows: [cells] }, width: 40 };
+// The props of the embeddable selecting grid: the request \`select\` takes,
+// sized and focused by the host, and called back with what \`select\` would
+// have resolved.
+const embeddedRows: SelectGridProps<string, string> = {
+  request: { message: "Greet which?", rows: [row] },
+  width: 40,
+  height: 10,
+  isActive: true,
+  onSubmit: (chosen) => void [chosen.value.toUpperCase(), chosen.action],
+  onCancel: () => undefined,
+};
 
 const plugin: Plugin = ({
   command,
@@ -201,6 +216,15 @@ const plugin: Plugin = ({
           context.stdout.write(
             ink.renderToString(react.createElement(Table, embedded)),
           );
+        }
+        // The selecting grid, cast the same way. Only built here, not mounted,
+        // because a host renders it inside a session of its own.
+        if (grid) {
+          const { react } = dependencies;
+          const Rows = grid.SelectGrid as (
+            props: SelectGridProps<string, string>,
+          ) => ReactNode;
+          void react.createElement(Rows, embeddedRows);
         }
         // The config capability, read and typed the same way. Its contract is
         // reachable on its own: nothing behind this import is a store, a path,
