@@ -351,3 +351,19 @@ changes:
     depends_on:
       - "0036"
       - "0037"
+  - id: "0040"
+    name: paint-dialog-rows-to-their-own-width
+    path: changes/0040-paint-dialog-rows-to-their-own-width.md
+    description: Paint each row of a dialog only to its own width — a frame row to its closing border, the hint line to its last character — so a host's content shows through beside a frame narrower than its hint line.
+    spec: dialogs
+    status: complete
+    depends_on:
+      - "0039"
+  - id: "0041"
+    name: let-a-host-hide-the-key-hint-line
+    path: changes/0041-let-a-host-hide-the-key-hint-line.md
+    description: Add an optional keyHints prop to the embeddable components with which a host that shows its own key help turns the key hint line off, giving its row to the options and laying the component out in its frame's width.
+    spec: dialogs
+    status: complete
+    depends_on:
+      - "0040"

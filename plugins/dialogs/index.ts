@@ -553,6 +553,7 @@ const definition: PluginDefinition = Object.freeze({
         width,
         height,
         isActive,
+        keyHints = true,
         onSubmit,
         onCancel,
       }: SelectProps<T>) {
@@ -575,6 +576,7 @@ const definition: PluginDefinition = Object.freeze({
           width,
           height,
           isActive,
+          keyHints,
           onSubmit,
           onCancel,
         });
@@ -591,6 +593,7 @@ const definition: PluginDefinition = Object.freeze({
         request,
         width,
         isActive,
+        keyHints = true,
         onSubmit,
         onCancel,
       }: InputProps) {
@@ -617,6 +620,7 @@ const definition: PluginDefinition = Object.freeze({
           isActive,
           initialValue: mounted.initialValue,
           caret: isActive && onPhase(time, animationInterval),
+          keyHints,
           onEdit: reset,
           onSubmit: (value: string) => {
             setFinished(true);

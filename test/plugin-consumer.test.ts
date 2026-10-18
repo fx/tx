@@ -156,6 +156,7 @@ const embeddedInput: InputProps = {
   request: { message: "Name?", initialValue: "world" },
   width: 40,
   isActive: false,
+  keyHints: false,
   onSubmit: (value) => void value.toUpperCase(),
   onCancel: () => undefined,
 };
@@ -175,6 +176,7 @@ const embeddedRows: SelectGridProps<string, string> = {
   width: 40,
   height: 10,
   isActive: true,
+  keyHints: false,
   onSubmit: (chosen) => void [chosen.value.toUpperCase(), chosen.action],
   onCancel: () => undefined,
 };

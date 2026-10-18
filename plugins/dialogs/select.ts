@@ -31,7 +31,6 @@ import {
   type EntryComponent,
   type EntryEscape,
   editedText,
-  entryHint,
   keystrokes,
   withCaret,
 } from "./entry.ts";
@@ -43,7 +42,6 @@ import {
   type FrameRow,
   type FrameSegment,
   innerWidth,
-  paintedWidth,
   panelWidth,
   segmentsWidth,
 } from "./frame.ts";
@@ -352,6 +350,10 @@ export type SelectViewProps<T> = {
   /** The terminal rows the select may draw in, everything it draws included. */
   readonly height: number;
   readonly isActive: boolean;
+  /** Whether the select draws a key hint line, under its frame or under an
+   * entry it collects. Required here: the embedded component defaults it, so
+   * the view never has to. */
+  readonly keyHints: boolean;
   readonly onSubmit: (result: SelectResult<T>) => void;
   readonly onCancel: () => void;
 };
@@ -417,6 +419,7 @@ export function createSelectView(
     width: columns,
     height,
     isActive,
+    keyHints,
     onSubmit,
     onCancel,
   }: SelectViewProps<T>) {
@@ -425,8 +428,13 @@ export function createSelectView(
      * The viewport keeps the one-row margin it has always kept against the
      * terminal, so `select`, handing its view the terminal's rows less one,
      * lays out exactly as it did, and a host's `height` is the most rows the
-     * select ever draws. */
-    const rows = height + 1;
+     * select ever draws.
+     *
+     * The viewport's chrome counts one key hint line, under the frame or under
+     * the entry beneath it. Without key hints that row is never drawn, so the
+     * budget is measured against one more row, which hands it back to the
+     * option rows. This is the one budget every viewport call reads. */
+    const rows = height + (keyHints ? 1 : 2);
     /** The host's callbacks, read through a ref so a host passing fresh ones on
      * every render never re-runs an effect or re-subscribes a handler. */
     const callbacks = react.useRef({ onSubmit, onCancel });
@@ -1241,42 +1249,6 @@ export function createSelectView(
      * cancels, so does the entry. */
     const fieldEscape: EntryEscape =
       levels.current.length > 1 ? "back" : "cancel";
-    /** What the entry under the frame will draw, where one is on screen: the
-     * field being collected or the leaf being typed into, and what its Escape
-     * does there. Known here, ahead of the entry rendering, so the frame can
-     * be painted as wide as the entry will paint itself. */
-    const pendingEntry: { message: string; escape: EntryEscape } | undefined =
-      collectingField
-        ? {
-            message: (
-              (collecting.current as Collection<T>).fields[
-                fieldIndex
-              ] as TextField
-            ).message,
-            escape: fieldEscape,
-          }
-        : leaf === undefined
-          ? undefined
-          : // A leaf is only ever pushed over the select that opened it, so
-            // it is never at the leftmost level: Escape here backs out.
-            { message: leaf.field.message, escape: "back" };
-    /** The width every row of the dialog is painted to: the frame's own, its
-     * hint line while it draws one, and at least what the entry under it
-     * paints — its panel as its message alone sizes it, and its hint — so the
-     * two panels read as one block. A value typed wider than that widens the
-     * entry's rows alone. */
-    const box = paintedWidth(
-      width,
-      entryHasKeys ? undefined : hint,
-      columns,
-      pendingEntry === undefined
-        ? 0
-        : paintedWidth(
-            panelWidth(pendingEntry.message, 1, columns),
-            entryHint(pendingEntry.escape),
-            columns,
-          ),
-    );
     // Sized last, once the frame's own width is known: whatever the title made
     // the panel wider by belongs to the last column, so its cursor bar spans
     // the panel instead of stopping short of it.
@@ -1368,7 +1340,7 @@ export function createSelectView(
       double: true,
       width,
       columns,
-      hint: entryHasKeys ? undefined : hint,
+      hint: entryHasKeys || !keyHints ? undefined : hint,
       topRight: overflow(
         "hidden-above",
         hiddenAboveGlyph,
@@ -1385,7 +1357,6 @@ export function createSelectView(
         driven?.viewport.hiddenBelow ?? 0,
       ),
       rows: panelRows,
-      box,
     });
     let fieldPanel: DialogElement | undefined;
     if (collectingField) {
@@ -1408,7 +1379,7 @@ export function createSelectView(
           if (collecting.current) cancel();
         },
         escapeAction: fieldEscape,
-        box,
+        keyHints,
       });
     } else if (leaf !== undefined) {
       // A text leaf reuses the existing entry logic: its editing is the same
@@ -1428,10 +1399,10 @@ export function createSelectView(
         onEdit: reset,
         onSubmit: (value: string) => submitLeaf(activeLeaf, value),
         onCancel: () => popLevel(),
-        // A leaf's Escape backs out and never cancels, as `pendingEntry`
-        // says above.
+        // A leaf is only ever pushed over the select that opened it, so it is
+        // never at the leftmost level: its Escape backs out and never cancels.
         escapeAction: "back",
-        box,
+        keyHints,
       });
     }
     return react.createElement(
