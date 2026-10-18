@@ -92,7 +92,8 @@ test("the packed package installs a standalone CLI and every published contract"
         `import type { Command, Plugin } from "@fx/tx/plugin";
 import type { Config, ConfigValidator } from "@fx/tx/config";
 import type { Dialogs, SelectRequest } from "@fx/tx/dialogs";
-import type { Grid, GridSelectRow, Row } from "@fx/tx/grid";
+import type { Grid, GridProps, GridSelectRow, Row } from "@fx/tx/grid";
+import type { ReactNode } from "react";
 import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
 import type { ThemeOverride } from "@fx/tx/theme-override";
 
@@ -134,8 +135,17 @@ const row: GridSelectRow<string, string> = {
   value: "greeter",
   actions: [{ label: "greet", value: "greet" }],
 };
+// The props of the embeddable grid, typed by the contract: the request a
+// consumer would print, its stream left out, and the columns to lay it out in.
+const embedded: GridProps = { request: { rows: [cells] }, width: 40 };
 
-const plugin: Plugin = ({ command, context, register, registrations }) => {
+const plugin: Plugin = ({
+  command,
+  context,
+  dependencies,
+  register,
+  registrations,
+}) => {
   register<Greeter>("greeter", greeter);
   // The key and the specifier its contract is imported from are one string.
   register<ThemeOverride>("@fx/tx/theme-override", override);
@@ -162,6 +172,18 @@ const plugin: Plugin = ({ command, context, register, registrations }) => {
         const grid: Grid | undefined = registrations<Grid>("@fx/tx/grid")[0];
         grid?.print({ stream: context.stdout, rows: [cells] });
         await grid?.select({ message: greeting, rows: [row] });
+        // The same grid as a component, for a consumer drawing its own
+        // interface with the React and Ink tx injected. The contract types it
+        // as returning \`unknown\`, so it names no React type; the consumer,
+        // which has React's types, casts it where it hands it to
+        // \`createElement\`.
+        if (grid) {
+          const { react, ink } = dependencies;
+          const Table = grid.Grid as (props: GridProps) => ReactNode;
+          context.stdout.write(
+            ink.renderToString(react.createElement(Table, embedded)),
+          );
+        }
         // The config capability, read and typed the same way. Its contract is
         // reachable on its own: nothing behind this import is a store, a path,
         // or the marketplace plugin that used to be the only place the shape

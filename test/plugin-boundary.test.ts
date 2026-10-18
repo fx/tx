@@ -696,6 +696,7 @@ test("no capability contract type is declared outside the contract that owns it"
       "FilterMode",
       "Grid",
       "GridAction",
+      "GridProps",
       "GridRequest",
       "GridSelectRequest",
       "GridSelectRow",

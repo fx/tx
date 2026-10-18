@@ -71,13 +71,13 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ## Tasks
 
-- [ ] Add the embeddable `Grid` component
-  - [ ] `plugins/grid/contract.ts`: `GridProps` and the `Grid` member, types alone
-  - [ ] `plugins/grid/render.ts` and `plugins/grid/index.ts`: the component, laid out against `width` and themed for `context.stderr`, created once at registration
-  - [ ] `test/grid-embedded.test.ts`: a host component rendered through `coreDependencies.ink.render` on captured streams, covering every scenario in [Grid: Embeddable Grid](../specs/grid/index.md#embeddable-grid) — the flow matching the printed one, re-flow on a width change, nothing written to the request's stream, a cell's own trailing spaces reaching the host — plus an empty grid drawing nothing and sanitized cells
-  - [ ] `test/plugin-consumer.test.ts`: the consumer fixture types `Grid` through the published contract; `test/plugin-boundary.test.ts` keeps passing
-  - [ ] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-grid-capability): document `Grid`
-  - [ ] [Grid](../specs/grid/) spec: mark [Embeddable Grid](../specs/grid/index.md#embeddable-grid) implemented and add a changelog row
+- [x] Add the embeddable `Grid` component
+  - [x] `plugins/grid/contract.ts`: `GridProps` and the `Grid` member, types alone
+  - [x] `plugins/grid/render.ts` and `plugins/grid/index.ts`: the component, laid out against `width` and themed for `context.stderr`, created once at registration
+  - [x] `test/grid-embedded.test.ts`: a host component rendered through `coreDependencies.ink.render` on captured streams, covering every scenario in [Grid: Embeddable Grid](../specs/grid/index.md#embeddable-grid) — the flow matching the printed one, re-flow on a width change, nothing written to the request's stream, a cell's own trailing spaces reaching the host — plus an empty grid drawing nothing and sanitized cells
+  - [x] `test/plugin-consumer.test.ts`: the consumer fixture types `Grid` through the published contract; `test/plugin-boundary.test.ts` keeps passing
+  - [x] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-grid-capability): document `Grid`
+  - [x] [Grid](../specs/grid/) spec: mark [Embeddable Grid](../specs/grid/index.md#embeddable-grid) implemented and add a changelog row
 - [ ] Add the embeddable `SelectGrid` component (after [Change 0036](./0036-add-embeddable-dialog-components.md))
   - [ ] `plugins/grid/contract.ts`: `SelectGridProps<T, A>` importing `EmbeddedProps` type-only from `@fx/tx/dialogs`, and the `SelectGrid` member
   - [ ] `plugins/grid/index.ts` and `plugins/grid/select.ts`: the component over the dialogs' `Select`, mapping the request on mount and the answer on submit

@@ -172,6 +172,8 @@ function recordingSurfaces(): {
           : { value: first.value, action: action.value }
       ) as GridSelection<T, A>;
     },
+    // The demo embeds nothing, so the component is never rendered here.
+    Grid: () => null,
   };
   return {
     inputs,

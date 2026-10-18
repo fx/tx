@@ -122,6 +122,20 @@ export type GridSelection<T, A> = {
   readonly action?: A;
 };
 
+/** What a host hands the embeddable `Grid`: the request it would print, and
+ * the columns it may lay out in.
+ *
+ * The request is nested under `request`, as every embeddable component takes
+ * its request, and omits `stream` rather than forbidding it: the component
+ * writes to no stream and reads nothing from one, so a host holding a request
+ * it would print may pass it unchanged. `width` is the only width a flow lays
+ * out against, and the terminal's is never read. There is no key handling, so
+ * there is no `height`, `isActive`, `onSubmit`, or `onCancel`. */
+export type GridProps = {
+  readonly request: Omit<GridRequest, "stream">;
+  readonly width: number;
+};
+
 /** The value registered under `@fx/tx/grid`: cells printed once, or driven. A
  * grid is one or the other in a call, never both. */
 export type Grid = {
@@ -129,4 +143,12 @@ export type Grid = {
   select<T, A>(
     request: GridSelectRequest<T, A>,
   ): Promise<GridSelection<T, A> | undefined>;
+  /** The printed grid as a component a host renders inside a session it
+   * owns, with the React and Ink `tx` injected into it. It hands that session
+   * exactly the lines `print` would write to a stream reporting `width`
+   * columns, themed for the standard-error stream `tx` injected, and writes
+   * nothing itself. Typed as returning `unknown` so this contract names no
+   * React type: a host casts it where it passes it to `createElement`. The
+   * same value on every read of the capability. */
+  readonly Grid: (props: GridProps) => unknown;
 };
