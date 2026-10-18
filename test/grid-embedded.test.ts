@@ -279,7 +279,7 @@ function elementRuns(element: unknown): readonly Element["props"][] {
   );
 }
 
-/** A table printed to a stream of the given width, as its unstyled lines. */
+/** A grid printed to a stream of the given width, as its comparable lines. */
 async function printed(
   request: Omit<GridRequest, "stream">,
   columns: number,
