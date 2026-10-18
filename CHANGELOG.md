@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/fx/tx/compare/v2.1.0...v2.2.0) (2026-10-18)
+
+
+### Features
+
+* **dialogs:** paint rows to their own width and let a host hide key hints ([#92](https://github.com/fx/tx/issues/92)) ([4fedcc0](https://github.com/fx/tx/commit/4fedcc0a886301e9c851012de72774150714bdde))
+
 ## [2.1.0](https://github.com/fx/tx/compare/v2.0.0...v2.1.0) (2026-10-18)
 
 
