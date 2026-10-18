@@ -557,13 +557,12 @@ A component calls one of the two at most once. After that it ignores every key a
 
 A component reads and writes no stream and changes no terminal state: every key arrives through your session and everything is drawn by it, and restoring the terminal is yours. It does not require interactive streams either, since it never touches them, but it does reject on its first render every request `select` rejects, by throwing before it draws anything — which your session's error handling sees like any other render failure. It resolves its theme through the theme capability once per mount, so a `tx` without exactly one theme provider fails that render with the same error. Ctrl-C reaching it cancels it exactly as it cancels `select`, but whether Ctrl-C reaches it is your session's choice: Ink's default `exitOnCtrlC` ends the session before any input handler runs, so render with `exitOnCtrlC: false` if you want the dialog to see it. Only an active component answers keys, so you may mount several and move focus between them; make two active at once and both answer the same keystroke.
 
-The contract types the components as functions of their props returning `unknown`, because it is types only and names no React type. Your plugin holds the injected React that renders them, so cast once where you call `createElement`:
+The contract types the components as functions of their props returning `unknown`, because it is types only and names no React type. Your plugin holds the injected React that renders them and has React's types — `@types/react` is a dependency of `@fx/tx` — so cast once where you call `createElement`, as you would `Grid`:
 
 ```ts
-import type { CoreDependencies, Plugin } from "@fx/tx/plugin";
 import type { Dialogs, SelectProps, SelectResult } from "@fx/tx/dialogs";
-
-type Element = ReturnType<CoreDependencies["react"]["createElement"]>;
+import type { Plugin } from "@fx/tx/plugin";
+import type { ReactNode } from "react";
 
 const plugin: Plugin = ({ command, dependencies, registrations, context }) => {
   const { react, ink } = dependencies;
@@ -573,7 +572,9 @@ const plugin: Plugin = ({ command, dependencies, registrations, context }) => {
       if (!dialogs) throw new Error("dialogs capability missing");
       // The one cast: the contract says `unknown`, the injected React says
       // what a component returns.
-      const Select = dialogs.Select as (props: SelectProps<string>) => Element;
+      const Select = dialogs.Select as (
+        props: SelectProps<string>,
+      ) => ReactNode;
 
       const App = () => {
         const { exit } = ink.useApp();
@@ -627,7 +628,7 @@ const plugin: Plugin = ({ command, dependencies, registrations, context }) => {
 export default plugin;
 ```
 
-`Input` is rendered the same way with `InputProps` — `request`, `width`, `isActive`, `onSubmit(value)`, and `onCancel()` — and cast to `(props: InputProps) => Element`. Render both with the React and Ink `tx` injected into your plugin; rendering one with any other copy of either is unsupported.
+`Input` is rendered the same way with `InputProps` — `request`, `width`, `isActive`, `onSubmit(value)`, and `onCancel()` — and cast to `(props: InputProps) => ReactNode`. Render both with the React and Ink `tx` injected into your plugin; rendering one with any other copy of either is unsupported.
 
 ## Use the bundled grid capability
 
