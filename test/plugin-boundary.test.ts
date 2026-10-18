@@ -707,6 +707,7 @@ test("no capability contract type is declared outside the contract that owns it"
       "InputRequest",
       "OutputStream",
       "Row",
+      "SelectGridProps",
       "SelectOption",
       "SelectProps",
       "SelectRequest",

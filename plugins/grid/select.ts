@@ -1,7 +1,11 @@
 import type {
   SelectOption as DialogOption,
   SelectRequest as DialogRequest,
+  Dialogs,
+  SelectProps,
+  SelectResult,
 } from "@fx/tx/dialogs";
+import type { CoreDependencies } from "@fx/tx/plugin";
 import {
   columnCount,
   headerCells,
@@ -14,6 +18,7 @@ import type {
   GridSelection,
   GridSelectRequest,
   GridSelectRow,
+  SelectGridProps,
 } from "./contract.ts";
 
 /**
@@ -147,4 +152,64 @@ export function selection<T, A>(
   const actions = row.actions ?? [];
   const action = actions[choice.action] as GridAction<A>;
   return { value: row.value, action: action.value };
+}
+
+/** What the injected React's `createElement` returns: the type a host casts
+ * an embeddable component's `unknown` to, and the cast made here for the
+ * dialogs' `Select`, which the published contract types the same way. */
+type Rendered = ReturnType<CoreDependencies["react"]["createElement"]>;
+
+/**
+ * The embeddable selecting grid: the request `select` presents, drawn as the
+ * dialogs' embeddable `Select` inside a session its host owns.
+ *
+ * It is the same composition `select` performs over the dialogs function,
+ * performed over the dialogs component instead, so it adds no selection rule
+ * of its own: the host's `width`, `height`, and `isActive` pass straight
+ * through, cancelling is the select's, and a submitted choice is mapped back to
+ * the row and the action exactly as `select` maps it.
+ *
+ * Its first render reads the dialogs capability through `resolveDialogs` and
+ * maps the request, both once per mount. The read happens while the host's
+ * command runs, after every provider has committed, and it throws when it does
+ * not find exactly one provider — failing the host's render rather than
+ * falling back to anything. The request is held from then on, as the select it
+ * is drawn as holds its own: a host presenting other rows mounts another
+ * component, and the answer is mapped against the rows it was given.
+ */
+export function embeddedSelectGrid(
+  react: CoreDependencies["react"],
+  resolveDialogs: () => Dialogs,
+): <T, A>(props: SelectGridProps<T, A>) => unknown {
+  return function SelectGrid<T, A>({
+    request,
+    width,
+    height,
+    isActive,
+    onSubmit,
+    onCancel,
+  }: SelectGridProps<T, A>) {
+    const [mounted] = react.useState(() => ({
+      Select: resolveDialogs().Select as (
+        props: SelectProps<RowChoice>,
+      ) => Rendered,
+      request,
+      choices: selectRequest(request),
+    }));
+    /** Read through a ref, so a host passing fresh callbacks on every render
+     * is called back with the ones of its latest render. */
+    const callbacks = react.useRef({ onSubmit, onCancel });
+    callbacks.current = { onSubmit, onCancel };
+    return react.createElement(mounted.Select, {
+      request: mounted.choices,
+      width,
+      height,
+      isActive,
+      // Only the choice is read: a select result's other fields describe what
+      // the select collected, and a grid's rows collect nothing.
+      onSubmit: (result: SelectResult<RowChoice>) =>
+        callbacks.current.onSubmit(selection(mounted.request, result.value)),
+      onCancel: () => callbacks.current.onCancel(),
+    });
+  };
 }

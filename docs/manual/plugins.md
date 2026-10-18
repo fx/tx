@@ -646,10 +646,11 @@ import type {
   GridSelectRow,
   OutputStream,
   Row,
+  SelectGridProps,
 } from "@fx/tx/grid";
 ```
 
-`Grid` is what the key carries: `print(request)` writing a `GridRequest` — a `stream`, an optional `layout` of `"table"` or `"flow"`, optional `headers`, the `rows`, an optional `empty` message, and an optional `summary` — and `select(request)` driving a `GridSelectRequest` of a `message`, optional `headers`, and `GridSelectRow`s, each carrying its `cells`, the `value` identifying it, and the `GridAction`s it offers, resolving to a `GridSelection` of the chosen `value` and `action` or to `undefined`. It also carries `Grid`, the printed grid as a component taking `GridProps`, described below. A `Row` is a list of `Cell`s or bare strings, and an `OutputStream` is anything that can be written to and may report its `columns` and `isTTY`.
+`Grid` is what the key carries: `print(request)` writing a `GridRequest` — a `stream`, an optional `layout` of `"table"` or `"flow"`, optional `headers`, the `rows`, an optional `empty` message, and an optional `summary` — and `select(request)` driving a `GridSelectRequest` of a `message`, optional `headers`, and `GridSelectRow`s, each carrying its `cells`, the `value` identifying it, and the `GridAction`s it offers, resolving to a `GridSelection` of the chosen `value` and `action` or to `undefined`. It also carries `Grid`, the printed grid as a component taking `GridProps`, and `SelectGrid`, the driven grid as a component taking `SelectGridProps`, both described below. A `Row` is a list of `Cell`s or bare strings, and an `OutputStream` is anything that can be written to and may report its `columns` and `isTTY`.
 
 A consumer reads `registrations<Grid>("@fx/tx/grid")` inside its command action, after initialization has committed every provider. The contract is types only, and it declares a cell's `variable` as [Theming](#use-the-bundled-theme-capability)'s own `ThemeVariable` by importing `@fx/tx/theme` rather than restating that vocabulary, so a variable renamed there is renamed in every cell that can name one. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
 
@@ -764,6 +765,45 @@ const plugin: Plugin = ({ command, context, dependencies, registrations }) => {
     });
   });
 };
+```
+
+`SelectGrid` is `select` as a component, for the same plugin. It takes `SelectGridProps<T, A>`: the `GridSelectRequest` you would pass to `select` as its `request`, and the `width`, `height`, `isActive`, `onSubmit`, and `onCancel` every embeddable component that takes keys shares — the `EmbeddedProps` of [Embed a dialog in your own interface](#embed-a-dialog-in-your-own-interface), which the grid contract imports from `@fx/tx/dialogs` rather than restating, so they mean exactly what they mean for `dialogs.Select`. It draws its request as that embedded `Select`, given your `width`, `height`, and `isActive`, so every rule above about selecting — the padded rows, the dropped `variable` and `align`, a row's actions as the column it opens, a row with no actions taken on its own — holds for it, and so does every rule that section states for an embedded `Select`: it is one-shot, it reads your callbacks on every call, it presents the request it was mounted with, and it answers keys only while it is active. `onSubmit` receives exactly the `GridSelection` `select` would resolve with, its `action` key absent where the row offered none, and `onCancel` is called where `select` would resolve `undefined`.
+
+It reads the dialogs capability when it mounts, while your command runs, and fails that render — which your session's error handling sees like any other render failure — with an error naming the count where a `tx` is composed without exactly one dialogs provider, rather than falling back to anything. It writes to no stream and needs no interactive one, so the handover guarantee above is `select`'s alone: a process you start after `onSubmit` inherits a terminal your session holds, and handing it over is yours. Every read of the capability yields the same `SelectGrid`. Cast it where you hand it to `createElement`, exactly as `Grid`:
+
+```ts
+import type { Grid, GridSelection, SelectGridProps } from "@fx/tx/grid";
+import type { ReactNode } from "react";
+
+// Inside your command action, with `grid`, `react`, and `ink` in hand.
+const ServicePicker = grid.SelectGrid as (
+  props: SelectGridProps<Service, "connect" | "logs">,
+) => ReactNode;
+
+function Picker({ onPicked }: {
+  readonly onPicked: (chosen?: GridSelection<Service, "connect" | "logs">) => void;
+}) {
+  const { columns, rows } = ink.useWindowSize();
+  return react.createElement(ServicePicker, {
+    request: {
+      message: "Pick a service",
+      headers: ["SERVICE", "STATE"],
+      rows: services.map((service) => ({
+        cells: [service.name, service.state],
+        value: service,
+        actions: [
+          { label: "connect", value: "connect" as const },
+          { label: "open logs", value: "logs" as const },
+        ],
+      })),
+    },
+    width: columns,
+    height: rows - 1,
+    isActive: true,
+    onSubmit: (chosen) => onPicked(chosen),
+    onCancel: () => onPicked(undefined),
+  });
+}
 ```
 
 Sorting, grouping, filtering, and paginating the supplied rows are out of scope, as are machine-readable output, borders and box drawing, spanning and wrapped cells, caller-specified widths, multi-row selection, in-place cell editing, column reordering, and value formatting of every kind — a duration, a timestamp, and a byte count are the consumer's to render into a string before it hands one over.

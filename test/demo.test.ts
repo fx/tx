@@ -103,8 +103,9 @@ function stubGrid(asked: Asked[]): PluginDefinition {
             });
             return firstSelection(request);
           },
-          // The demo embeds nothing, so the component is never rendered here.
+          // The demo embeds nothing, so neither component is ever rendered here.
           Grid: () => null,
+          SelectGrid: () => null,
         });
       },
   };

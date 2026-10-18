@@ -8,7 +8,7 @@
  * restating it learns about a contract that moved when it builds rather than
  * when its command reaches for a member that is no longer there.
  *
- * It declares types alone — one type-only import, no statements, nothing that
+ * It declares types alone — type-only imports, no statements, nothing that
  * survives compilation — which is what lets it be published under a `types`
  * condition with no runtime condition beside it. The capability's value comes
  * from the registry and must keep coming from there: nothing here prints,
@@ -20,9 +20,13 @@
  * one runtime module graph; the published path shares no graph at all, since
  * it is erased. It is the mechanism `@fx/tx/plugin` already uses between the
  * same two directories, and it means a variable renamed in one place is
- * renamed everywhere a cell can name one.
+ * renamed everywhere a cell can name one. The props every embeddable component
+ * taking keys shares arrive through `@fx/tx/dialogs` for the same reason, so a
+ * host learns them once and the selecting grid cannot drift from the select it
+ * is drawn as.
  */
 
+import type { EmbeddedProps } from "@fx/tx/dialogs";
 import type { ThemeVariable } from "@fx/tx/theme";
 
 /** One cell of a grid. `variable` and `align` describe a *printed* cell; the
@@ -136,6 +140,21 @@ export type GridProps = {
   readonly width: number;
 };
 
+/** What a host hands the embeddable `SelectGrid`: the selecting request it
+ * would pass to `select`, the props every embeddable component taking keys
+ * shares, and the rows it may draw in.
+ *
+ * `onSubmit` receives exactly the selection `select` resolves with, and
+ * `onCancel` is called where `select` resolves with nothing. The request is the
+ * one the component was mounted with: a host presenting different rows mounts
+ * a new component, keyed differently, rather than passing a new request. */
+export type SelectGridProps<T, A> = EmbeddedProps<GridSelection<T, A>> & {
+  readonly request: GridSelectRequest<T, A>;
+  /** The terminal rows the grid may draw in, as the select it is drawn as
+   * reads them. */
+  readonly height: number;
+};
+
 /** The value registered under `@fx/tx/grid`: cells printed once, or driven. A
  * grid is one or the other in a call, never both. */
 export type Grid = {
@@ -151,4 +170,12 @@ export type Grid = {
    * React type: a host casts it where it passes it to `createElement`. The
    * same value on every read of the capability. */
   readonly Grid: (props: GridProps) => unknown;
+  /** The driven grid as a component a host renders inside a session it owns:
+   * the request `select` would present, drawn as the dialogs' embeddable
+   * `Select` in the host's `width` and `height` and answering keys only while
+   * `isActive`. It writes to no stream and needs no interactive one. It reads
+   * the dialogs capability when it mounts, and fails that render when it finds
+   * other than exactly one provider. Typed as returning `unknown` for the
+   * reason `Grid` is; the same value on every read of the capability. */
+  readonly SelectGrid: <T, A>(props: SelectGridProps<T, A>) => unknown;
 };
