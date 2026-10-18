@@ -91,7 +91,7 @@ test("the packed package installs a standalone CLI and every published contract"
         join(consumerRoot, "plugin.ts"),
         `import type { Command, Plugin } from "@fx/tx/plugin";
 import type { Config, ConfigValidator } from "@fx/tx/config";
-import type { Dialogs, SelectRequest } from "@fx/tx/dialogs";
+import type { Dialogs, InputProps, SelectProps, SelectRequest } from "@fx/tx/dialogs";
 import type { Grid, GridProps, GridSelectRow, Row } from "@fx/tx/grid";
 import type { ReactNode } from "react";
 import type { Appearance, Hue, Theme, ThemeVariable, Theming } from "@fx/tx/theme";
@@ -129,6 +129,24 @@ const isGreeting: ConfigValidator<string> = (value): value is string =>
 const question: SelectRequest<string> = {
   message: "Greet whom?",
   options: [{ label: "world", value: "world" }],
+};
+// The props of the embeddable dialogs, typed by the same contract. They name
+// no React or Ink type: a host places a component, sizes it, focuses it, and
+// is called back with what the function form would have resolved.
+const embeddedSelect: SelectProps<string> = {
+  request: question,
+  width: 40,
+  height: 10,
+  isActive: true,
+  onSubmit: (result) => void result.value.toUpperCase(),
+  onCancel: () => undefined,
+};
+const embeddedInput: InputProps = {
+  request: { message: "Name?", initialValue: "world" },
+  width: 40,
+  isActive: false,
+  onSubmit: (value) => void value.toUpperCase(),
+  onCancel: () => undefined,
 };
 const row: GridSelectRow<string, string> = {
   cells,
@@ -199,6 +217,21 @@ const plugin: Plugin = ({
         const dialogs: Dialogs | undefined =
           registrations<Dialogs>("@fx/tx/dialogs")[0];
         await dialogs?.select(question);
+        // The same dialogs as components, for a host drawing its own
+        // interface: typed as returning \`unknown\` like the grid's, and cast
+        // the same way where they meet \`createElement\`. Only built here, not
+        // mounted, because a host renders them inside a session of its own.
+        if (dialogs) {
+          const { react } = dependencies;
+          const Select = dialogs.Select as (
+            props: SelectProps<string>,
+          ) => ReactNode;
+          const Input = dialogs.Input as (props: InputProps) => ReactNode;
+          void [
+            react.createElement(Select, embeddedSelect),
+            react.createElement(Input, embeddedInput),
+          ];
+        }
       });
   });
 };
