@@ -61,6 +61,10 @@ type OptionBase<T> = {
    * declares one is marked in the list and opens rather than resolves;
    * absence leaves the option a plain choice. */
   readonly dialog?: SelectRequest<T> | TextField;
+  /** Whether this option opens ticked. Accepted only in a column declaring
+   * `multiple`: `true` anywhere else is rejected before anything is drawn,
+   * while `false` means exactly what omitting it means. */
+  readonly selected?: boolean;
 };
 
 /** An option displayed as one string, measured against one scalar width. */
@@ -111,14 +115,28 @@ export type SelectRequest<T> = {
    * either binding. Read from the root request only — one dialog answers one
    * set of keys however deep the reader goes. */
   readonly expand?: "enter" | "tab";
+  /** Whether the reader may tick several of this column's options with Space
+   * and take them together. Per column, like `headers` and `filter`: a nested
+   * sub-dialog request decides its own column, and an omitted setting leaves
+   * the column single-choice. */
+  readonly multiple?: boolean;
 };
 
-/** What a completed dialog carries: the completing option's value, and every
- * field value collected on the way to it, keyed by field name. A path that
- * collected nothing resolves an empty record. */
+/** What a completed dialog carries: the completing option's value, every
+ * field value collected on the way to it keyed by field name, and the values
+ * taken.
+ *
+ * A path that collected nothing resolves an empty record. `selected` holds the
+ * ticked options of every column open at completion, left to right and in
+ * supplied order within a column; only when none of them holds a tick is it
+ * the completing option's value alone, so a dialog declaring no `multiple`
+ * column always resolves it as `[value]`. It is a field of its own rather than
+ * a reuse of `values`, which already means the text collected along the
+ * path. */
 export type SelectResult<T> = {
   readonly value: T;
   readonly values: Readonly<Record<string, string>>;
+  readonly selected: readonly T[];
 };
 
 export type InputRequest = {
@@ -170,8 +188,9 @@ export type InputProps = EmbeddedProps<string> & {
 
 /**
  * The value registered under `@fx/tx/dialogs`: one line of text collected, or
- * one choice taken from a column browser. Both answer `undefined` when the
- * reader cancels, which is a completed dialog rather than a failure.
+ * one choice taken from a column browser, together with whatever the reader
+ * ticked in its `multiple` columns. Both answer `undefined` when the reader
+ * cancels, which is a completed dialog rather than a failure.
  *
  * `Input` and `Select` are the same two dialogs as components, for a plugin
  * that already draws its own interface and cannot hand the terminal to a

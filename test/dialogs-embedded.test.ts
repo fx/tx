@@ -802,7 +802,7 @@ describe("embedded dialog components", () => {
       await terminal.press(ESCAPE);
       await pause(animationInterval / 5);
       expect(calls.calls).toEqual([
-        { type: "submit", result: { value: 1, values: {} } },
+        { type: "submit", result: { value: 1, values: {}, selected: [1] } },
       ]);
       expect(activeRow(terminal.output, "Render 3")).toBe("Alpha");
       await terminal.close();

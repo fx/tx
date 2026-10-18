@@ -150,7 +150,11 @@ function recordingSurfaces(): {
       selects.push(request as SelectRequest<unknown>);
       const [first] = request.options;
       if (!first) throw new Error("a select with no options");
-      return { value: first.value, values: {} } as SelectResult<T>;
+      return {
+        value: first.value,
+        values: {},
+        selected: [first.value],
+      } as SelectResult<T>;
     },
     // The demo asks its questions through the function forms alone; a scenario
     // that rendered a component would be one this stub cannot answer.
@@ -476,6 +480,7 @@ describe("presenting a scenario", () => {
       expect(result).toEqual({
         value: scenario.request.options[0]?.value,
         values: {},
+        selected: [scenario.request.options[0]?.value],
       });
     },
   );
