@@ -7,7 +7,7 @@ import type {
 } from "./contract.ts";
 import { requireDialogsCapability } from "./dialogs.ts";
 import { embeddedGrid, printGrid } from "./render.ts";
-import { selection, selectRequest } from "./select.ts";
+import { embeddedSelectGrid, selection, selectRequest } from "./select.ts";
 import { requireThemeCapability } from "./theme.ts";
 
 /**
@@ -54,6 +54,15 @@ const definition: PluginDefinition = Object.freeze({
       // beside an embedded dialog agrees with it about whether colour is on.
       const Grid = embeddedGrid(react, ink, () =>
         requireThemeCapability(registrations).theme(context.stderr),
+      );
+
+      // Created once for the same reason. The dialogs capability is read when
+      // it mounts rather than here, for the reasons `select` reads it while
+      // the command runs: a plugin reading during its own initialization sees
+      // only what committed before it, and the provider is composed ahead of
+      // its consumers.
+      const SelectGrid = embeddedSelectGrid(react, () =>
+        requireDialogsCapability(registrations),
       );
 
       // Frozen, like every value a capability hands out: a consumer holds the
@@ -108,6 +117,7 @@ const definition: PluginDefinition = Object.freeze({
         },
 
         Grid,
+        SelectGrid,
       });
 
       register<Grid>(gridKey, grid);
