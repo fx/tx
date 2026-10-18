@@ -546,6 +546,7 @@ import type {
   Cell,
   Grid,
   GridAction,
+  GridProps,
   GridRequest,
   GridSelection,
   GridSelectRequest,
@@ -555,7 +556,7 @@ import type {
 } from "@fx/tx/grid";
 ```
 
-`Grid` is what the key carries: `print(request)` writing a `GridRequest` — a `stream`, an optional `layout` of `"table"` or `"flow"`, optional `headers`, the `rows`, an optional `empty` message, and an optional `summary` — and `select(request)` driving a `GridSelectRequest` of a `message`, optional `headers`, and `GridSelectRow`s, each carrying its `cells`, the `value` identifying it, and the `GridAction`s it offers, resolving to a `GridSelection` of the chosen `value` and `action` or to `undefined`. A `Row` is a list of `Cell`s or bare strings, and an `OutputStream` is anything that can be written to and may report its `columns` and `isTTY`.
+`Grid` is what the key carries: `print(request)` writing a `GridRequest` — a `stream`, an optional `layout` of `"table"` or `"flow"`, optional `headers`, the `rows`, an optional `empty` message, and an optional `summary` — and `select(request)` driving a `GridSelectRequest` of a `message`, optional `headers`, and `GridSelectRow`s, each carrying its `cells`, the `value` identifying it, and the `GridAction`s it offers, resolving to a `GridSelection` of the chosen `value` and `action` or to `undefined`. It also carries `Grid`, the printed grid as a component taking `GridProps`, described below. A `Row` is a list of `Cell`s or bare strings, and an `OutputStream` is anything that can be written to and may report its `columns` and `isTTY`.
 
 A consumer reads `registrations<Grid>("@fx/tx/grid")` inside its command action, after initialization has committed every provider. The contract is types only, and it declares a cell's `variable` as [Theming](#use-the-bundled-theme-capability)'s own `ThemeVariable` by importing `@fx/tx/theme` rather than restating that vocabulary, so a variable renamed there is renamed in every cell that can name one. The grid resolves a theme for the stream it is printing to through the theme capability above, so a `tx` composed without exactly one theme provider fails the call with an error naming the count rather than choosing an appearance of its own. It uses the injected React and Ink instances and never reaches for the process's own streams.
 
@@ -623,6 +624,54 @@ const plugin: Plugin = ({ command, context, registrations }) => {
 ```
 
 Running, spawning, and supervising a process are the consumer's, not the grid's: it reports a chosen row and a chosen action and never runs, spawns, names, or interprets one. Returning to the rows after you have acted — the file-manager loop — is not offered; call `select` again if you want it.
+
+`Grid` is the printed grid as a component, for a plugin that draws its own interface. A plugin running a render session of its own cannot `print` — the write lands beneath its session and the next frame overwrites it — so it renders `Grid` inside that session instead, with the React and Ink `tx` injected into it as `dependencies.react` and `dependencies.ink` and no other copy of either. It takes `GridProps`: a `request`, which is the printing request without its `stream`, and a `width`, the terminal columns it may lay out in. Those are the `request` and `width` every embeddable `tx` component takes, with the meanings [Dialogs: Embeddable Components](../specs/dialogs/index.md#embeddable-components) gives them; `Grid` answers no key, so it takes no `height`, `isActive`, `onSubmit`, or `onCancel`. A `GridRequest` you would otherwise print can be passed unchanged, stream and all, because the component neither reads nor writes that stream.
+
+It hands your session exactly the lines `print` would write for the same request to a stream reporting `width` columns, every character of them included — a cell's own trailing spaces too — and every rule above about cells, tables, and flows holds for it. `width` is the only width a flow lays out against, and the terminal's is never read; a table keeps its natural width whatever `width` is, and how your layout treats one wider than that is yours. Whether your session then writes the trailing spaces of a line to the terminal is its renderer's business, not the grid's. Appearance is resolved through the theme capability for the standard error `tx` injected — the stream a dialog draws on — so colour is on for an embedded grid exactly when it is on for a dialog beside it. `Grid` writes to no stream, keeps no state between renders, and animates nothing: render it again with a different `request` or `width` and the next frame shows the change. A grid with nothing to draw — no rows, no empty message, and no summary — draws nothing and takes no rows. Every read of the capability yields the same `Grid`, so rendering it again with fresh props re-renders it rather than remounting it.
+
+The contract types `Grid` as a function of its props returning `unknown`, so the published contract names no React type. Your plugin has React's types — `@types/react` is a dependency of `@fx/tx` — so cast the component where you hand it to `createElement`:
+
+```ts
+import type { Grid, GridProps } from "@fx/tx/grid";
+import type { Plugin } from "@fx/tx/plugin";
+import type { ReactNode } from "react";
+
+const plugin: Plugin = ({ command, context, dependencies, registrations }) => {
+  const { react, ink } = dependencies;
+  command((namespace) => {
+    namespace.action(async () => {
+      const [grid] = registrations<Grid>("@fx/tx/grid");
+      if (!grid) throw new Error("grid capability missing");
+      // The contract's `unknown` narrowed where React's types are in scope.
+      const ServiceGrid = grid.Grid as (props: GridProps) => ReactNode;
+
+      function Dashboard({ width }: { readonly width: number }) {
+        return react.createElement(
+          ink.Box,
+          { flexDirection: "column", width },
+          react.createElement(ink.Text, { bold: true }, "Services"),
+          react.createElement(ServiceGrid, {
+            request: {
+              layout: "flow",
+              rows: services.map((service) => [service.name]),
+              empty: "no services",
+            },
+            width,
+          }),
+        );
+      }
+
+      // Your session, on your streams: the grid draws inside it and owns
+      // none of them.
+      const session = ink.render(
+        react.createElement(Dashboard, { width: context.stdout.columns }),
+        { stdout: context.stdout, stdin: context.stdin },
+      );
+      await session.waitUntilExit();
+    });
+  });
+};
+```
 
 Sorting, grouping, filtering, and paginating the supplied rows are out of scope, as are machine-readable output, borders and box drawing, spanning and wrapped cells, caller-specified widths, multi-row selection, in-place cell editing, column reordering, and value formatting of every kind — a duration, a timestamp, and a byte count are the consumer's to render into a string before it hands one over.
 
