@@ -61,9 +61,11 @@ type OptionBase<T> = {
    * declares one is marked in the list and opens rather than resolves;
    * absence leaves the option a plain choice. */
   readonly dialog?: SelectRequest<T> | TextField;
-  /** Whether this option opens ticked. Accepted only in a column declaring
-   * `multiple`: `true` anywhere else is rejected before anything is drawn,
-   * while `false` means exactly what omitting it means. */
+  /** Whether this option opens ticked: a pre-tick, meaningful only in a
+   * column declaring `multiple`. `selected: true` on an option of a column
+   * that does not declare `multiple` is rejected before anything renders,
+   * while `selected: false` is accepted in any column and means exactly what
+   * omitting it means. */
   readonly selected?: boolean;
 };
 
