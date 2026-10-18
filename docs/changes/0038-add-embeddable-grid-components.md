@@ -78,7 +78,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
   - [x] `test/plugin-consumer.test.ts`: the consumer fixture types `Grid` through the published contract; `test/plugin-boundary.test.ts` keeps passing
   - [x] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-grid-capability): document `Grid`
   - [x] [Grid](../specs/grid/) spec: mark [Embeddable Grid](../specs/grid/index.md#embeddable-grid) implemented and add a changelog row
-- [x] Add the embeddable `SelectGrid` component (after [Change 0036](./0036-add-embeddable-dialog-components.md))
+- [x] Add the embeddable `SelectGrid` component (after [Change 0036](./0036-add-embeddable-dialog-components.md)) (PR #89)
   - [x] `plugins/grid/contract.ts`: `SelectGridProps<T, A>` importing `EmbeddedProps` type-only from `@fx/tx/dialogs`, and the `SelectGrid` member
   - [x] `plugins/grid/index.ts` and `plugins/grid/select.ts`: the component over the dialogs' `Select`, mapping the request on mount and the answer on submit
   - [x] `test/grid-embedded.test.ts`: every scenario in [Grid: Embeddable Selection](../specs/grid/index.md#embeddable-selection) — acting on a row, cancelling, and the absent dialogs provider — plus `isActive`, `height`, and a row offering no actions
