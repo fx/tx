@@ -84,7 +84,8 @@ type GridSelection<T, A> = {
   readonly action?: A
 }
 
-// EmbeddedProps is [Dialogs]'; nothing about it is redefined here.
+// EmbeddedProps is imported type-only from the published dialogs contract;
+// nothing about it is redefined here.
 
 type GridProps = {
   readonly request: Omit<GridRequest, "stream">
