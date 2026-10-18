@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.1.0](https://github.com/fx/tx/compare/v2.0.0...v2.1.0) (2026-10-18)
+
+
+### Features
+
+* **dialogs:** add embeddable select and input components ([#88](https://github.com/fx/tx/issues/88)) ([95e27cf](https://github.com/fx/tx/commit/95e27cfe33cea95994833ba5651afa9d93ae33e6))
+* **dialogs:** add multi-select columns ([#90](https://github.com/fx/tx/issues/90)) ([f812737](https://github.com/fx/tx/commit/f812737d72fb1047076e9a69efb2d44ad8c6eb53))
+* **grid:** add embeddable grid component ([#86](https://github.com/fx/tx/issues/86)) ([38e4299](https://github.com/fx/tx/commit/38e429911c2f7664d8e9f4050520ff755832efab))
+* **grid:** add embeddable select grid component ([#89](https://github.com/fx/tx/issues/89)) ([5b3e3ad](https://github.com/fx/tx/commit/5b3e3ade3ca669c18cfaca121ef52cef25ba0963))
+
+
+### Bug Fixes
+
+* **dialogs:** take every tick, answer chunked Enter, and paint every row ([#91](https://github.com/fx/tx/issues/91)) ([c541514](https://github.com/fx/tx/commit/c541514bb6e6dd525a705454461edc70335dadce))
+
 ## [2.0.0](https://github.com/fx/tx/compare/v1.8.0...v2.0.0) (2026-10-10)
 
 
