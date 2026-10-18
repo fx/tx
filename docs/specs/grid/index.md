@@ -346,8 +346,8 @@ A plugin that draws its own interface has rows to show inside it and no stream t
 
 `SelectGrid` is the driven grid as a component: the same rows a host would pass to `select`, presented inside its own session.
 
-- The capability MUST expose `SelectGrid`, rendered by a host as `Grid` is, taking a selecting `request`, `width`, `height`, `isActive`, `onSubmit`, and `onCancel` with the meanings [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) gives them; `onSubmit` MUST receive exactly the selection `select` would resolve with.
-- `SelectGrid` MUST present its request as an embedded [Dialogs](../dialogs/) `Select` given its own `width`, `height`, and `isActive`, so every rule of [Interactive Grid](#interactive-grid) and [Row Actions](#row-actions) holds for it, with resolving read as calling `onSubmit` and resolving to nothing read as calling `onCancel`, and every rule [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) states for an embedded `Select` holds for it too.
+- The capability MUST expose `SelectGrid`, rendered by a host as `Grid` is, taking a selecting `request`, `width`, `height`, `isActive`, the optional `keyHints`, `onSubmit`, and `onCancel` with the meanings [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) gives them; `onSubmit` MUST receive exactly the selection `select` would resolve with.
+- `SelectGrid` MUST present its request as an embedded [Dialogs](../dialogs/) `Select` given its own `width`, `height`, `isActive`, and `keyHints`, so every rule of [Interactive Grid](#interactive-grid) and [Row Actions](#row-actions) holds for it, with resolving read as calling `onSubmit` and resolving to nothing read as calling `onCancel`, and every rule [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) states for an embedded `Select` holds for it too.
 - `SelectGrid` MUST read the dialogs capability when it renders, and MUST fail that render, rather than fall back to anything, when it does not find exactly one provider — the policy `select` applies.
 - `SelectGrid` MUST NOT require interactive streams or write to any stream; [Terminal Handover](#terminal-handover) binds `select` alone, and a host that launches a process after `onSubmit` hands over a terminal it holds itself.
 - `select` MUST behave as `SelectGrid` mounted the way [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) mounts `Select` for the `select` function, and nothing observable about it MUST change.
@@ -425,6 +425,7 @@ They share every measurement decision and differ only in what drives them. Split
 - [Plugin System](../plugin-system/)
 - [Architecture](../architecture/)
 - [Change 0038: Add Embeddable Grid Components](../../changes/0038-add-embeddable-grid-components.md)
+- [Change 0041: Let a Host Hide the Key Hint Line](../../changes/0041-let-a-host-hide-the-key-hint-line.md)
 
 ## Changelog
 
@@ -437,3 +438,4 @@ They share every measurement decision and differ only in what drives them. Split
 | 2026-10-18 | Desired embeddable `Grid` and `SelectGrid` components, sized by their host under the props Dialogs defines for every embeddable component | [0038-add-embeddable-grid-components](../../changes/0038-add-embeddable-grid-components.md) |
 | 2026-10-18 | Implemented the embeddable `Grid` component: the lines `print` would write, laid out against the host's `width` rather than a stream's, themed for the injected standard error, and handed to the host's session whole, a cell's own trailing spaces included | [0038-add-embeddable-grid-components](../../changes/0038-add-embeddable-grid-components.md) |
 | 2026-10-18 | Implemented the embeddable `SelectGrid` component: the request `select` presents, drawn as the dialogs' embeddable `Select` in the host's `width`, `height`, and focus, mapped once on mount and answered through `onSubmit` with exactly the selection `select` resolves with, reading the dialogs capability when it mounts and failing that render naming the count when there is not exactly one provider | [0038-add-embeddable-grid-components](../../changes/0038-add-embeddable-grid-components.md) |
+| 2026-10-18 | `SelectGrid` takes the optional `keyHints` prop Dialogs added to every embeddable component and passes it to the `Select` it is drawn as | [0041-let-a-host-hide-the-key-hint-line](../../changes/0041-let-a-host-hide-the-key-hint-line.md) |

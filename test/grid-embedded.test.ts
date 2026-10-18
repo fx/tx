@@ -917,6 +917,38 @@ describe("the embeddable selecting grid", () => {
     for (const row of rows) expect(row.length).toBeLessThanOrEqual(50);
   });
 
+  test("passes keyHints through, giving the hint line's row to the grid", async () => {
+    const { grid } = await readSelectingGrid();
+    const SelectGrid = selectingComponent<number, never>(grid);
+    const session = hostSession(() =>
+      coreDependencies.react.createElement(SelectGrid, {
+        request: {
+          message: "Rows",
+          rows: Array.from({ length: 30 }, (_, index) => ({
+            cells: [`row ${String(index + 1).padStart(2, "0")}`],
+            value: index + 1,
+          })),
+        },
+        width: 50,
+        height: 9,
+        isActive: true,
+        keyHints: false,
+        ...answers<number, never>(),
+      }),
+    );
+
+    await until(shows(session, "row 01"));
+    const rows = session.rows();
+    await session.close();
+
+    // Nine rows in all: two edges and seven rows of the grid, with no hint
+    // line under them.
+    expect(rows).toHaveLength(9);
+    expect(rows.filter((row) => row.includes("row "))).toHaveLength(7);
+    expect(rows.some((row) => row.includes("Esc cancel"))).toBe(false);
+    expect(rows.at(-1)).toContain("▼ 23");
+  });
+
   test("fails the host's render naming the count when no dialogs provider is composed", async () => {
     const { grid } = await readSelectingGrid([]);
     const SelectGrid = selectingComponent<string, string>(grid);

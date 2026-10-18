@@ -165,9 +165,9 @@ type Rendered = ReturnType<CoreDependencies["react"]["createElement"]>;
  *
  * It is the same composition `select` performs over the dialogs function,
  * performed over the dialogs component instead, so it adds no selection rule
- * of its own: the host's `width`, `height`, and `isActive` pass straight
- * through, cancelling is the select's, and a submitted choice is mapped back to
- * the row and the action exactly as `select` maps it.
+ * of its own: the host's `width`, `height`, `isActive`, and `keyHints` pass
+ * straight through, cancelling is the select's, and a submitted choice is
+ * mapped back to the row and the action exactly as `select` maps it.
  *
  * Its first render reads the dialogs capability through `resolveDialogs` and
  * maps the request, both once per mount. The read happens while the host's
@@ -186,6 +186,7 @@ export function embeddedSelectGrid(
     width,
     height,
     isActive,
+    keyHints = true,
     onSubmit,
     onCancel,
   }: SelectGridProps<T, A>) {
@@ -205,6 +206,7 @@ export function embeddedSelectGrid(
       width,
       height,
       isActive,
+      keyHints,
       // Only the choice is read: a select result's other fields describe what
       // the select collected, and a grid's rows collect nothing.
       onSubmit: (result: SelectResult<RowChoice>) =>

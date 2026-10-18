@@ -165,6 +165,11 @@ export type EmbeddedProps<R> = {
    * what it would draw active, in the same rows, but no caret, and runs no
    * animation. */
   readonly isActive: boolean;
+  /** Whether the component draws its key hint line. Defaults to `true`.
+   * `false` draws no key hint line under the frame, nor under an entry the
+   * component collects, and lays the component out in its frame's width alone.
+   * A host that turns it off owns telling the reader the keys. */
+  readonly keyHints?: boolean;
   /** Called once, with exactly what the function form resolves with. */
   readonly onSubmit: (result: R) => void;
   /** Called once, where the function form resolves with `undefined`. */
@@ -176,14 +181,14 @@ export type EmbeddedProps<R> = {
  * component, keyed differently, rather than passing a new request. */
 export type SelectProps<T> = EmbeddedProps<SelectResult<T>> & {
   readonly request: SelectRequest<T>;
-  /** The terminal rows the select may draw in, its edges, hint line, and any
-   * entry panel beneath its frame included. The window gives up option rows
-   * first, and none at all where `height` cannot afford one. */
+  /** The terminal rows the select may draw in, its edges, hint line where one
+   * is drawn, and any entry panel beneath its frame included. The window gives
+   * up option rows first, and none at all where `height` cannot afford one. */
   readonly height: number;
 };
 
 /** What a host renders `Input` with. It takes no height: an input is always
- * its frame's three rows and its hint line. */
+ * its frame's three rows and, unless `keyHints` is false, its hint line. */
 export type InputProps = EmbeddedProps<string> & {
   readonly request: InputRequest;
 };

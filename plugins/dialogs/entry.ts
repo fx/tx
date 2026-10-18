@@ -140,6 +140,10 @@ type EntryProps = {
    * input's Escape does and the only thing it can do: there is nothing under
    * it to back out into. */
   readonly escapeAction?: EntryEscape;
+  /** Whether the entry draws its key hint line. Defaults to `true`; an entry
+   * under a select inherits the select's, and without it the entry is its
+   * frame alone and is laid out in that frame's width. */
+  readonly keyHints?: boolean;
 };
 
 /**
@@ -169,6 +173,7 @@ export function createEntry(
     onSubmit,
     onCancel,
     escapeAction = "cancel",
+    keyHints = true,
   }: EntryProps) {
     const entered = react.useRef(initialValue ?? "");
     const [value, setValue] = react.useState(entered.current);
@@ -211,7 +216,7 @@ export function createEntry(
       double: false,
       width,
       columns,
-      hint: entryHints[escapeAction],
+      hint: keyHints ? entryHints[escapeAction] : undefined,
       // Start truncation keeps the tail of a long value and the caret itself
       // in view together.
       rows: [

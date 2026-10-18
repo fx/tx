@@ -30,6 +30,7 @@ const CTRL_C = String.fromCharCode(3);
 const CARRIAGE_RETURN = "\r";
 const DOWN = `${ESCAPE}[B`;
 const RIGHT = `${ESCAPE}[C`;
+const PAGE_DOWN = `${ESCAPE}[6~`;
 
 /** The caret drawn after text under entry. */
 const CARET = "█";
@@ -905,12 +906,13 @@ describe("embedded dialog components", () => {
 
   /** A select whose one option collects a text field, drawn over seven rows
    * of the host's own text — the select's edges and its option, then the
-   * entry's edges, its value row, and its hint line — with the field already
-   * open. */
+   * entry's edges, its value row, and its hint line where one is drawn — with
+   * the field already open. */
   async function collectedOver(
     host: Host,
     message: string,
     field: string,
+    keyHints = true,
   ): Promise<readonly string[]> {
     const Select = selectComponent<number>(host.dialogs);
     const covered = "X".repeat(70);
@@ -928,7 +930,7 @@ describe("embedded dialog components", () => {
         ),
         host.react.createElement(
           host.ink.Box,
-          { flexDirection: "column", marginTop: -7 },
+          { flexDirection: "column", marginTop: -7, height: 7 },
           host.react.createElement(Select, {
             request: {
               message,
@@ -943,14 +945,15 @@ describe("embedded dialog components", () => {
             width: 70,
             height: 8,
             isActive: true,
+            keyHints,
             ...recorder<SelectResult<number>>(),
           }),
         ),
       );
     const terminal = session(host, View);
-    await until(() => terminal.output.text().includes("Esc cancel"));
+    await until(() => activeRow(terminal.output, "Host header") === "Own");
     await terminal.press(CARRIAGE_RETURN);
-    await until(() => terminal.output.text().includes("Enter submit"));
+    await until(() => terminal.output.text().includes(`┌─ ${field} ─`));
     const rows = frameRows(terminal.output, "Host header");
     await terminal.close();
     return rows;
@@ -1013,6 +1016,276 @@ describe("embedded dialog components", () => {
         expect("┐│┘").toContain(row[entryFrame - 1] as string);
       }
       expect(rows[7]).toBe(` ${entryKeys}${"X".repeat(70 - entryKeysWidth)}`);
+    });
+  });
+
+  test("a select without key hints gives the hint line's row to its options", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const terminal = session(host, () =>
+        host.react.createElement(Select, {
+          request: { message: "Pick one", options: listed(30) },
+          width: 60,
+          height: 9,
+          isActive: true,
+          keyHints: false,
+          ...recorder<SelectResult<number>>(),
+        }),
+      );
+      await until(() => activeRow(terminal.output, "Pick one") === "Option 01");
+      const rows = frameRows(terminal.output, "Pick one");
+      // Nine rows in all: two edges and seven option rows, the row a hint
+      // line would have taken given to the window.
+      expect(rows).toHaveLength(9);
+      expect(rows.filter((row) => row.includes("Option "))).toHaveLength(7);
+      expect(rows.at(-1)).toContain("▼ 23");
+      for (const row of rows) {
+        expect(row).not.toContain("move");
+        expect(row).not.toContain("Esc cancel");
+      }
+      // Page Down moves by the window it draws, which is seven rows tall.
+      await terminal.press(PAGE_DOWN);
+      await until(() => activeRow(terminal.output, "Pick one") === "Option 08");
+      await terminal.close();
+    });
+  });
+
+  test("a component without key hints is laid out in its frame's width alone", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const selectHint = "↑↓ move · Enter select · type to filter · Esc cancel";
+      const besideMarker = async (keyHints: boolean | undefined) => {
+        // The host's marker follows the select in a row, so it starts at the
+        // first column past the width the select is laid out in.
+        const terminal = session(host, () =>
+          host.react.createElement(
+            host.ink.Box,
+            { flexDirection: "row" },
+            host.react.createElement(Select, {
+              request: { message: "Pick", options: labelled("A", "B") },
+              width: 70,
+              height: 8,
+              isActive: true,
+              ...(keyHints === undefined ? {} : { keyHints }),
+              ...recorder<SelectResult<number>>(),
+            }),
+            host.react.createElement(host.ink.Text, null, "@"),
+          ),
+        );
+        await until(() => activeRow(terminal.output, "╔═ Pick") === "A");
+        const [top] = frameRows(terminal.output, "╔═ Pick");
+        await terminal.close();
+        return top as string;
+      };
+      const hidden = await besideMarker(false);
+      expect(hidden.indexOf("@")).toBe(hidden.indexOf("╗") + 1);
+      const shown = await besideMarker(undefined);
+      expect(shown.indexOf("╗") + 1).toBeLessThan(Bun.stringWidth(selectHint));
+      expect(shown.indexOf("@")).toBe(Bun.stringWidth(selectHint) + 1);
+    });
+  });
+
+  test("components without key hints hide the host's rows only under their frames", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const Input = inputComponent(host.dialogs);
+      const covered = "X".repeat(70);
+      // Ten rows of the host's own text: a select of five rows over the
+      // first five, one row the host leaves to itself, an input of three
+      // rows, and the host's last row under that. The overlay is held to the
+      // ten rows it is drawn over, so the host's last row stays in its layout.
+      const View = () =>
+        host.react.createElement(
+          host.ink.Box,
+          { flexDirection: "column" },
+          host.react.createElement(host.ink.Text, null, "Host header"),
+          ...Array.from({ length: 10 }, (_, at) =>
+            host.react.createElement(
+              host.ink.Text,
+              { key: `covered-${at}` },
+              covered,
+            ),
+          ),
+          host.react.createElement(
+            host.ink.Box,
+            { flexDirection: "column", marginTop: -10, height: 10 },
+            host.react.createElement(Select, {
+              request: { message: "Pick", options: labelled("A", "B", "C") },
+              width: 70,
+              height: 6,
+              isActive: true,
+              keyHints: false,
+              ...recorder<SelectResult<number>>(),
+            }),
+            host.react.createElement(host.ink.Box, { height: 1 }),
+            host.react.createElement(Input, {
+              request: { message: "Name the branch" },
+              width: 70,
+              isActive: false,
+              keyHints: false,
+              ...recorder<string>(),
+            }),
+          ),
+        );
+      const terminal = session(host, View);
+      await until(() => activeRow(terminal.output, "Host header") === "A");
+      await until(() =>
+        terminal.output.text().includes("┌─ Name the branch ─"),
+      );
+      const rows = frameRows(terminal.output, "Host header");
+      expect(rows).toHaveLength(11);
+      expect(rows[1]?.startsWith("╔═ Pick ═")).toBe(true);
+      expect(rows[7]?.startsWith("┌─ Name the branch ─")).toBe(true);
+      const selectFrame = rows[1]?.indexOf("X") ?? -1;
+      for (const row of rows.slice(1, 6)) {
+        expect(row.indexOf("X")).toBe(selectFrame);
+        expect("╗║╝").toContain(row[selectFrame - 1] as string);
+        expect(row.slice(selectFrame)).toBe("X".repeat(70 - selectFrame));
+      }
+      const inputFrame = rows[7]?.indexOf("X") ?? -1;
+      for (const row of rows.slice(7, 10)) {
+        expect(row.indexOf("X")).toBe(inputFrame);
+        expect("┐│┘").toContain(row[inputFrame - 1] as string);
+        expect(row.slice(inputFrame)).toBe("X".repeat(70 - inputFrame));
+      }
+      // Under each bottom edge the host's own row is untouched: no hint line
+      // was drawn there to hide it.
+      expect(rows[6]).toBe(covered);
+      expect(rows[10]).toBe(covered);
+      await terminal.close();
+    });
+  });
+
+  test("an entry collected without key hints draws no hint line of its own", async () => {
+    await hosted(async (host) => {
+      const rows = await collectedOver(host, "Pick", "Owner", false);
+      // The select's three rows and the entry's three: the host's last row is
+      // left to it.
+      expect(rows).toHaveLength(8);
+      expect(rows[4]?.startsWith("┌─ Owner ─")).toBe(true);
+      expect(rows.some((row) => row.includes("Enter submit"))).toBe(false);
+      expect(rows.some((row) => row.includes("Esc"))).toBe(false);
+      expect(rows[7]).toBe("X".repeat(70));
+    });
+    /** The option rows a select of `height` rows shows while a field is
+     * collected under it. */
+    const collectingWindow = async (host: Host, keyHints: boolean) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const height = 12;
+      const terminal = session(host, () =>
+        host.react.createElement(Select, {
+          request: {
+            message: "Pick one",
+            options: [
+              {
+                label: "Own",
+                value: 0,
+                fields: [{ type: "text", name: "owner", message: "Owner" }],
+              },
+              ...listed(30),
+            ],
+          },
+          width: 60,
+          height,
+          isActive: true,
+          keyHints,
+          ...recorder<SelectResult<number>>(),
+        }),
+      );
+      await until(() => activeRow(terminal.output, "Pick one") === "Own");
+      await terminal.press(CARRIAGE_RETURN);
+      await until(() => terminal.output.text().includes("┌─ Owner ─"));
+      const rows = frameRows(terminal.output, "Pick one");
+      await terminal.close();
+      expect(rows).toHaveLength(height);
+      expect(rows.some((row) => row.includes("Enter submit"))).toBe(keyHints);
+      // Every row between the select's edges is an option row.
+      return rows.filter((row) => row.startsWith("║")).length;
+    };
+    await hosted(async (host) => {
+      // The entry's hint line is the row handed back: twelve rows hold six
+      // options with it and seven without.
+      expect(await collectingWindow(host, true)).toBe(12 - 6);
+      expect(await collectingWindow(host, false)).toBe(12 - 5);
+    });
+  });
+
+  test("a text leaf opened without key hints draws no hint line of its own", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const calls = recorder<SelectResult<number>>();
+      const terminal = session(host, () =>
+        host.react.createElement(Select, {
+          request: {
+            message: "Pick one",
+            options: [
+              {
+                label: "Rename",
+                value: 1,
+                dialog: { type: "text", name: "name", message: "New name" },
+              },
+            ],
+          },
+          width: 60,
+          height: 10,
+          isActive: true,
+          keyHints: false,
+          ...calls,
+        }),
+      );
+      await until(
+        () =>
+          activeRow(terminal.output, "Pick one")?.startsWith("Rename") === true,
+      );
+      await terminal.press(RIGHT);
+      await until(() => terminal.output.text().includes("┌─ New name ─"));
+      const rows = frameRows(terminal.output, "Pick one");
+      // The select's three rows and the leaf's three, the leaf's bottom edge
+      // last.
+      expect(rows).toHaveLength(6);
+      expect(rows[3]?.startsWith("┌─ New name ─")).toBe(true);
+      expect(rows.at(-1)?.startsWith("└")).toBe(true);
+      expect(rows.some((row) => row.includes("Esc back"))).toBe(false);
+      expect(rows.some((row) => row.includes("Enter submit"))).toBe(false);
+      await terminal.close();
+    });
+  });
+
+  test("keyHints true draws exactly what leaving it out draws", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const Input = inputComponent(host.dialogs);
+      const drawn = async (keyHints: true | undefined) => {
+        const terminal = session(host, () =>
+          host.react.createElement(
+            host.ink.Box,
+            { flexDirection: "column" },
+            host.react.createElement(host.ink.Text, null, "Host header"),
+            host.react.createElement(Select, {
+              request: { message: "Pick one", options: listed(30) },
+              width: 60,
+              height: 9,
+              isActive: false,
+              ...(keyHints === undefined ? {} : { keyHints }),
+              ...recorder<SelectResult<number>>(),
+            }),
+            host.react.createElement(Input, {
+              request: { message: "Name" },
+              width: 60,
+              isActive: false,
+              ...(keyHints === undefined ? {} : { keyHints }),
+              ...recorder<string>(),
+            }),
+          ),
+        );
+        await until(() => terminal.output.text().includes("Enter submit"));
+        const rows = frameRows(terminal.output, "Host header");
+        await terminal.close();
+        return rows;
+      };
+      const explicit = await drawn(true);
+      expect(explicit).toHaveLength(1 + 9 + 4);
+      expect(explicit).toEqual(await drawn(undefined));
     });
   });
 

@@ -359,3 +359,11 @@ changes:
     status: complete
     depends_on:
       - "0039"
+  - id: "0041"
+    name: let-a-host-hide-the-key-hint-line
+    path: changes/0041-let-a-host-hide-the-key-hint-line.md
+    description: Add an optional keyHints prop to the embeddable components with which a host that shows its own key help turns the key hint line off, giving its row to the options and laying the component out in its frame's width.
+    spec: dialogs
+    status: complete
+    depends_on:
+      - "0040"
