@@ -5,7 +5,7 @@
 Let a select column declare `multiple`, so the reader ticks options with Space and takes every tick together, and give every select result a `selected` list — the ticked values, or the completing option's value alone when nothing is ticked — for the function form and the embedded component alike.
 
 **Spec:** [Dialogs](../specs/dialogs/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0027, 0036
 
 ## Motivation
@@ -81,19 +81,19 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ## Tasks
 
-- [ ] Add per-column multi-select to the dialogs
-  - [ ] `plugins/dialogs/contract.ts`: `multiple`, `selected` on options, and `selected` on `SelectResult`
-  - [ ] `plugins/dialogs/index.ts`: the pre-tick validation, shared by the function form and the component
-  - [ ] `plugins/dialogs/select.ts`: tick state keyed by path, Space handling, the hint phrase, and `selected` computed on every completion path — Enter on a plain option, a finished field collection, and a submitted text leaf
-  - [ ] `plugins/dialogs/columns.ts`: the tick cell and the header offset
-  - [ ] `plugins/grid/select.ts`: confirm the grid never sets `multiple` and ignores `selected`, with a test in `test/grid-select.test.ts`
-  - [ ] Every test double constructing a `SelectResult` gains `selected`, found by search
-  - [ ] `test/dialogs-multi-select.test.ts`: every scenario in [Dialogs: Multi-Select](../specs/dialogs/index.md#multi-select) through `select`, plus ticking and submission through an embedded `Select` in a host session, the hint line naming `Space tick` only in a multiple column, the tick cell under the cursor bar, and the default theme drawing it as `marker`
-  - [ ] Existing dialogs and demo tests updated only where they assert a whole result, to include `selected` — the demo prints each result as JSON, so its reported output gains the field
-  - [ ] `test/plugin-consumer.test.ts`: the consumer fixture builds a request with `multiple` and reads `selected`
-  - [ ] `demo/scenarios.ts` and `test/demo-scenarios.test.ts`: a multi-select scenario
-  - [ ] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-dialogs-capability): document `multiple`, the pre-tick, Space, and `selected`, and that a test double constructing a `SelectResult` now fills `selected`
-  - [ ] [Dialogs](../specs/dialogs/) spec: mark [Multi-Select](../specs/dialogs/index.md#multi-select) implemented and add a changelog row; set this change `complete` in `docs/index.yml` and `docs/index.md`
+- [x] Add per-column multi-select to the dialogs
+  - [x] `plugins/dialogs/contract.ts`: `multiple`, `selected` on options, and `selected` on `SelectResult`
+  - [x] `plugins/dialogs/index.ts`: the pre-tick validation, shared by the function form and the component
+  - [x] `plugins/dialogs/select.ts`: tick state keyed by path, Space handling, the hint phrase, and `selected` computed on every completion path — Enter on a plain option, a finished field collection, and a submitted text leaf
+  - [x] `plugins/dialogs/columns.ts`: the tick cell and the header offset
+  - [x] `plugins/grid/select.ts`: confirm the grid never sets `multiple` and ignores `selected`, with a test in `test/grid-select.test.ts`
+  - [x] Every test double constructing a `SelectResult` gains `selected`, found by search
+  - [x] `test/dialogs-multi-select.test.ts`: every scenario in [Dialogs: Multi-Select](../specs/dialogs/index.md#multi-select) through `select`, plus ticking and submission through an embedded `Select` in a host session, the hint line naming `Space tick` only in a multiple column, the tick cell under the cursor bar, and the default theme drawing it as `marker`
+  - [x] Existing dialogs and demo tests updated only where they assert a whole result, to include `selected` — the demo prints each result as JSON, so its reported output gains the field
+  - [x] `test/plugin-consumer.test.ts`: the consumer fixture builds a request with `multiple` and reads `selected`
+  - [x] `demo/scenarios.ts` and `test/demo-scenarios.test.ts`: a multi-select scenario
+  - [x] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-dialogs-capability): document `multiple`, the pre-tick, Space, and `selected`, and that a test double constructing a `SelectResult` now fills `selected`
+  - [x] [Dialogs](../specs/dialogs/) spec: mark [Multi-Select](../specs/dialogs/index.md#multi-select) implemented and add a changelog row; set this change `complete` in `docs/index.yml` and `docs/index.md`
 
 ## References
 

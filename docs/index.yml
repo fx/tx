@@ -328,7 +328,7 @@ changes:
     path: changes/0037-add-multi-select.md
     description: Let a select column declare multiple so Space ticks options and Enter takes every tick, and give every select result a selected list holding the ticked values or the completing option's value alone.
     spec: dialogs
-    status: draft
+    status: complete
     depends_on:
       - "0027"
       - "0036"
