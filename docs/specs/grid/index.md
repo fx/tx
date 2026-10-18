@@ -6,7 +6,9 @@ The grid capability lays text out in aligned cells and either prints it once or 
 
 A grid is not only a table. A table — a header row over columns of equal meaning — is one layout; a flow, where a list of short items fills as many columns as the terminal affords, is another. Both are the same cells measured the same way, so both belong to one capability.
 
-[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/grid` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change has landed, so every requirement below describes current behavior.
+[Change 0030](../../changes/0030-publish-bundled-capability-contracts.md) publishes this contract at `@fx/tx/grid` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change has landed, so every requirement below describes current behavior except those the next paragraph names.
+
+[Change 0038](../../changes/0038-add-embeddable-grid-components.md) specifies [Embeddable Grid](#embeddable-grid) and [Embeddable Selection](#embeddable-selection) — a printed grid and a driven one rendered inside a plugin's own render session — together with the members they add to [Grid Capability](#grid-capability). Those requirements are planned and not yet implemented: today the capability exposes only `print` and `select`.
 
 ## Background
 
@@ -21,7 +23,7 @@ The interactive grid then costs almost nothing extra: a driveable grid is a sele
 ### Grid Capability
 
 - The grid capability MUST be supplied by a bundled plugin registered under the opaque registry key `@fx/tx/grid`, which is also the specifier its contract is published at under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), and its provider MUST NOT claim a command namespace.
-- The capability MUST expose printing a grid and selecting a row of one, and MUST NOT expose a renderer, a component, or a layout primitive.
+- The capability MUST expose printing a grid and selecting a row of one, together with the [embeddable](#embeddable-grid) components `Grid` and `SelectGrid` that draw the same two inside a plugin's own interface, and MUST NOT expose a renderer, any other component, or a layout primitive.
 - A consumer MUST read the capability while its command runs rather than during its own initialization.
 - The contract MUST be published from the package as a types-only import under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), so a consumer types the capability by importing the contract rather than by restating it. Nothing about grids MUST enter `src/` or the public `@fx/tx/plugin` contract: the contract is published beside that contract rather than inside it.
 - The grid MUST resolve every appearance through [Theming](../theming/) and MUST NOT decide a hue, a dim, or an inversion itself, under the one-provider rule [Theming: Theme Capability](../theming/index.md#theme-capability) states; the grid MUST NOT carry a theme of its own to fall back to.
@@ -82,11 +84,27 @@ type GridSelection<T, A> = {
   readonly action?: A
 }
 
+// EmbeddedProps is [Dialogs]'; nothing about it is redefined here.
+
+type GridProps = {
+  readonly request: Omit<GridRequest, "stream">
+  readonly width: number
+}
+
+type SelectGridProps<T, A> = EmbeddedProps<GridSelection<T, A>> & {
+  readonly request: GridSelectRequest<T, A>
+  readonly height: number
+}
+
 type Grid = {
   print(request: GridRequest): void
   select<T, A>(
     request: GridSelectRequest<T, A>,
   ): Promise<GridSelection<T, A> | undefined>
+  // Components, rendered by a host with the injected React; `unknown` keeps
+  // React's element type out of the published contract.
+  readonly Grid: (props: GridProps) => unknown
+  readonly SelectGrid: <T, A>(props: SelectGridProps<T, A>) => unknown
 }
 ```
 
@@ -287,6 +305,64 @@ The first thing a consumer will want to do with a chosen row is run something on
 - **WHEN** that process reads from the terminal
 - **THEN** it finds the terminal in its pre-dialog state and receives the user's keystrokes itself
 
+### Embeddable Grid
+
+A plugin that draws its own interface has rows to show inside it and no stream to print them to: the session it renders in owns the terminal, and a print beside that session would be written underneath it. `Grid` is the printed grid as a component that host renders.
+
+- The capability MUST expose `Grid`, rendered by a host exactly as [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) requires a dialog's component to be: inside a render session the host owns, with the React and Ink `tx` injected into that host, typed as a function of its props returning `unknown`, and the same value on every read of the capability.
+- `Grid` MUST take a `request` — a printing request, whose `stream` it does not read and a host need not supply — and a `width`, meaning the terminal columns the grid may lay out in, as [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) defines it. It MUST NOT take keys, so it takes no `height`, `isActive`, `onSubmit`, or `onCancel`.
+- `Grid` MUST draw exactly the lines `print` would write for the same request to a stream reporting `width` columns, every rule of [Cell Values](#cell-values), [Table Layout](#table-layout), and [Flow Layout](#flow-layout) included. `width` MUST be the only width a flow lays out against, and `Grid` MUST NOT read the terminal's width. A table is laid out at its natural width whatever `width` is, under [Table Layout](#table-layout)'s rule against re-flowing; how the host's layout treats a table wider than `width` is the host's.
+- `Grid` MUST resolve every appearance through [Theming](../theming/) for the standard-error stream `tx` injected into the grid's provider — the stream a dialog draws on — because a component has no stream of its own for [Theming: Colour Enablement](../theming/index.md#colour-enablement) to read.
+- `Grid` MUST NOT write to any stream, answer a key, keep state between renders, or animate. It MUST draw the `request` and `width` of the render it is in, so a host changing either sees the change on the next render.
+- A grid with nothing to draw — no rows, no empty message, and no summary — MUST draw nothing and take no rows, as `print` writes nothing for it.
+- [Printing](#printing)'s guarantees about bytes written to a stream bind `print` alone. The bytes that reach the terminal for an embedded grid are its host's session's to write; what `Grid` guarantees is the lines that session is given to draw.
+
+#### Scenario: An embedded flow matches the printed one
+
+- **GIVEN** a flow request printed to a stream reporting sixty columns, and the same request rendered as `Grid` with a width of sixty in a host session
+- **WHEN** the host's frame is compared with the printed output, hues and trailing whitespace removed from both
+- **THEN** their lines are identical
+
+#### Scenario: A narrower width re-flows the items
+
+- **GIVEN** an embedded flow of six items whose width affords two columns
+- **WHEN** the host renders it again with a width affording three
+- **THEN** the items are placed into three columns, down each before across
+
+#### Scenario: An embedded grid writes nothing
+
+- **GIVEN** a host session rendering `Grid` for a table request carrying a stream
+- **WHEN** the session renders
+- **THEN** nothing is written to that stream, and the table appears in the host's frame
+
+### Embeddable Selection
+
+`SelectGrid` is the driven grid as a component: the same rows a host would pass to `select`, presented inside its own session.
+
+- The capability MUST expose `SelectGrid`, rendered by a host as `Grid` is, taking a selecting `request`, `width`, `height`, `isActive`, `onSubmit`, and `onCancel` with the meanings [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) gives them; `onSubmit` MUST receive exactly the selection `select` would resolve with.
+- `SelectGrid` MUST present its request as an embedded [Dialogs](../dialogs/) `Select` given its own `width`, `height`, and `isActive`, so every rule of [Interactive Grid](#interactive-grid) and [Row Actions](#row-actions) holds for it, with resolving read as calling `onSubmit` and resolving to nothing read as calling `onCancel`, and every rule [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) states for an embedded `Select` holds for it too.
+- `SelectGrid` MUST read the dialogs capability when it renders, and MUST fail that render, rather than fall back to anything, when it does not find exactly one provider — the policy `select` applies.
+- `SelectGrid` MUST NOT require interactive streams or write to any stream; [Terminal Handover](#terminal-handover) binds `select` alone, and a host that launches a process after `onSubmit` hands over a terminal it holds itself.
+- `select` MUST behave as `SelectGrid` mounted the way [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) mounts `Select` for the `select` function, and nothing observable about it MUST change.
+
+#### Scenario: Act on a row inside a host
+
+- **GIVEN** a host session rendering `SelectGrid` whose rows declare the actions `connect` and `open logs`
+- **WHEN** the user confirms a row and then confirms `connect`
+- **THEN** `onSubmit` is called once with that row's value and the `connect` action, and the host's session stays mounted
+
+#### Scenario: Cancel inside a host
+
+- **GIVEN** a host session rendering `SelectGrid` with its rows on screen
+- **WHEN** the user presses Escape
+- **THEN** `onCancel` is called once and nothing is written to any stream except by the host's session
+
+#### Scenario: No dialogs provider
+
+- **GIVEN** a `tx` composed with no dialogs provider
+- **WHEN** a host session renders `SelectGrid`
+- **THEN** the render fails with an error naming the number of providers found
+
 ## Design
 
 ### Ownership
@@ -307,6 +383,10 @@ A duration, a timestamp, a byte count, and a relative time are all things a cons
 
 They share every measurement decision and differ only in what drives them. Splitting them would duplicate the geometry, and the duplication would drift the moment one of them gained a column rule the other did not.
 
+### Why Components
+
+`print` and `select` each assume the caller has the terminal to give: one writes beneath whatever is there, the other takes the terminal for a session of its own. A plugin running its own session has neither to give, so it gets the same two as components it places itself, under the props [Dialogs](../dialogs/) defines for every embeddable component. `Grid` is the printed lines as a component rather than a new layout, and `SelectGrid` is the same request-to-select mapping `select` already performs, over the dialogs component rather than the dialogs function, so neither adds a measurement or a selection rule of its own. `Grid` takes its request whole, stream and all, so a host holding a request it would print can render it unchanged.
+
 ## Constraints
 
 - Sorting, grouping, filtering the supplied rows, pagination, and any query language are out of scope. A consumer supplies the rows it wants, in the order it wants them.
@@ -315,10 +395,10 @@ They share every measurement decision and differ only in what drives them. Split
 - Caller-specified column widths, minimum or maximum widths, weights, and horizontal scrolling are out of scope.
 - Machine-readable output — JSON, CSV, TSV — is out of scope. A consumer that offers it writes it itself and never routes it through the grid.
 - Value formatting of every kind is out of scope: durations, dates, relative times, numbers, byte sizes, and truncation policy for a consumer's own text.
-- Mouse input, column reordering, resizable columns, multi-row selection, and in-place editing of a cell are out of scope.
+- Mouse input, column reordering, resizable columns, multi-row selection, and in-place editing of a cell are out of scope. Multi-row selection stays out of scope although [Dialogs: Multi-Select](../dialogs/index.md#multi-select) exists: a selecting grid never declares a multiple column, and its selection carries no list of rows.
 - Match highlighting within a cell is out of scope, as it is for [Dialogs](../dialogs/).
 - Running, spawning, or supervising a process is out of scope; the grid reports a chosen action and nothing more.
-- The grid contract is published as types alone. A runtime grid export, a grid package versioned separately from `tx`, and any way of obtaining the capability other than reading the `@fx/tx/grid` registry key are out of scope.
+- The grid contract is published as types alone. A runtime grid export, a grid package versioned separately from `tx`, and any way of obtaining the capability other than reading the `@fx/tx/grid` registry key are out of scope. `Grid` and `SelectGrid` are values of the capability, read from that key, and are not exports of the contract.
 
 ## Open Questions
 
@@ -337,6 +417,7 @@ They share every measurement decision and differ only in what drives them. Split
 - [Theming](../theming/)
 - [Plugin System](../plugin-system/)
 - [Architecture](../architecture/)
+- [Change 0038: Add Embeddable Grid Components](../../changes/0038-add-embeddable-grid-components.md)
 
 ## Changelog
 
@@ -346,3 +427,4 @@ They share every measurement decision and differ only in what drives them. Split
 | 2026-09-05 | Interactive grid, row actions, and the terminal-handover guarantee | [0029-add-interactive-grid-row-actions](../../changes/0029-add-interactive-grid-row-actions.md) |
 | 2026-09-05 | Implemented the interactive grid as a select composed over Dialogs: rows carrying their own value and their own actions, a row's actions as the sub-dialog it opens, a value carried through that column identifying both the row and the action so a selection reports each without the other being reconstructed, and the terminal-handover guarantee pinned by tests over completion, cancellation, and failure alike | [0029-add-interactive-grid-row-actions](../../changes/0029-add-interactive-grid-row-actions.md) |
 | 2026-09-06 | Required the grid contract to be published at `@fx/tx/grid` as a types-only import, replacing the local structural copy every consumer maintained | [0030-publish-bundled-capability-contracts](../../changes/0030-publish-bundled-capability-contracts.md) |
+| 2026-10-18 | Desired embeddable `Grid` and `SelectGrid` components, sized by their host under the props Dialogs defines for every embeddable component | [0038-add-embeddable-grid-components](../../changes/0038-add-embeddable-grid-components.md) |
