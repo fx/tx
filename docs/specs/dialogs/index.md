@@ -2,7 +2,7 @@
 
 ## Overview
 
-`tx` provides a bundled dialogs plugin for terminal interactions shared by its own plugins. The plugin MUST expose dialogs through the generic registry rather than through core vocabulary, and its contract MUST contain only a single-choice `select` dialog and a single-field text `input` dialog, which compose when a select option is marked as user-provided.
+`tx` provides a bundled dialogs plugin for terminal interactions shared by its own plugins. The plugin MUST expose dialogs through the generic registry rather than through core vocabulary, and its contract MUST contain only a `select` dialog — single-choice unless a column is declared [multiple](#multi-select) — and a single-field text `input` dialog, which compose when a select option is marked as user-provided, together with the [embeddable component](#embeddable-components) behind each of the two for a plugin drawing its own interface.
 
 [Change 0016](../../changes/0016-add-plugin-capabilities-and-dialogs.md) implements the generic registry that carries the internal capability and the namespace-free bundled provider that supplies `select`. [Change 0017](../../changes/0017-add-dialog-text-input-and-composition.md) implements the text `input` dialog and the user-provided option that composes the two. Those requirements are implemented.
 
@@ -12,7 +12,9 @@
 
 [Change 0027](../../changes/0027-add-multi-cell-select-rows.md) implements the aligned cells and headers in [Select Request](#select-request), [Filtering](#filtering), and [Presentation](#presentation), together with the `marker` variable on the glyph that marks an option leading to a sub-dialog: the marker was drawn with the row carrying it until a cell became a field of its own, so it landed with the cell rules rather than with theming. Those requirements are implemented.
 
-[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/dialogs` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is complete: the contract is published at that specifier, the key in use is that same string, and the bundled consumers, the demo, and the capability tests import it rather than restating it. Every requirement below describes current behavior.
+[Change 0031](../../changes/0031-publish-the-dialogs-and-config-contracts.md) publishes this contract at `@fx/tx/dialogs` and renames the capability's registry key to that same specifier, so a consumer imports the contract rather than restating it, under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts). That change is complete: the contract is published at that specifier, the key in use is that same string, and the bundled consumers, the demo, and the capability tests import it rather than restating it. Every requirement below describes current behavior except those the next paragraph names.
+
+[Change 0036](../../changes/0036-add-embeddable-dialog-components.md) specifies the [Embeddable Components](#embeddable-components) — `Select` and `Input` rendered inside a plugin's own render session, with `select` and `input` restated as mounting them — and the members they add to [Dialog Capability](#dialog-capability). [Change 0037](../../changes/0037-add-multi-select.md) specifies [Multi-Select](#multi-select), together with the `selected` list it adds to every result, the Space keystroke it takes from [Selection](#selection) and [Filtering](#filtering) in a multiple column, and the tick cell and hint it adds to [Presentation](#presentation). Those requirements are planned and not yet implemented: today the capability exposes only the two functions, which size themselves from the terminal, every select is single-choice, and a result carries no `selected` list.
 
 ## Background
 
@@ -25,7 +27,7 @@ The dialogs plugin provides that first concrete use of the generic registry. It 
 ### Dialog Capability
 
 - The bundled dialogs plugin MUST register one dialog capability under the opaque registry key `@fx/tx/dialogs`, which is also the specifier its contract is published at under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), and MUST NOT claim a command namespace.
-- The dialog capability MUST expose only `select` and `input`; confirm and every other dialog are outside the contract.
+- The dialog capability MUST expose only `select` and `input` and the [embeddable components](#embeddable-components) `Select` and `Input` they mount; confirm and every other dialog are outside the contract.
 - A consumer MUST read the capability while its command runs, after plugin initialization has completed, rather than snapshotting it during initialization.
 - The dialogs contract MUST be published from the package as a types-only import under [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts), so a consumer types the capability by importing the contract rather than by restating it; the capability MUST NOT add dialog types or runtime values to `@fx/tx/plugin`.
 - A consumer MUST own the behavior for an absent dialog capability; the registry and provider MUST NOT prescribe that command's output or exit code.
@@ -48,6 +50,8 @@ type SelectOption<T> = {
   readonly value: T
   readonly fields?: readonly TextField[]
   readonly dialog?: SelectRequest<T> | TextField
+  // A pre-tick, accepted only in a column declaring `multiple`.
+  readonly selected?: boolean
 }
 
 type SelectRequest<T> = {
@@ -56,11 +60,14 @@ type SelectRequest<T> = {
   readonly headers?: readonly string[]
   readonly filter?: "typed" | "always"
   readonly expand?: "enter" | "tab"
+  // Per column, like `headers` and `filter`.
+  readonly multiple?: boolean
 }
 
 type SelectResult<T> = {
   readonly value: T
   readonly values: Readonly<Record<string, string>>
+  readonly selected: readonly T[]
 }
 
 type InputRequest = {
@@ -68,9 +75,31 @@ type InputRequest = {
   readonly initialValue?: string
 }
 
+// The props every embeddable component that takes keys shares, here and in
+// [Grid](../grid/); `R` is what the function form resolves with on completion.
+type EmbeddedProps<R> = {
+  readonly width: number
+  readonly isActive: boolean
+  readonly onSubmit: (result: R) => void
+  readonly onCancel: () => void
+}
+
+type SelectProps<T> = EmbeddedProps<SelectResult<T>> & {
+  readonly request: SelectRequest<T>
+  readonly height: number
+}
+
+type InputProps = EmbeddedProps<string> & {
+  readonly request: InputRequest
+}
+
 type Dialogs = {
   input(request: InputRequest): Promise<string | undefined>
   select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>
+  // Components, rendered by a host with the injected React; `unknown` keeps
+  // React's element type out of the published contract.
+  readonly Input: (props: InputProps) => unknown
+  readonly Select: <T>(props: SelectProps<T>) => unknown
 }
 ```
 
@@ -140,9 +169,9 @@ One principle settles every empty list a caller can pass, here and in the specif
 - Up and Down input MUST move the active option by one position among the visible options and MUST keep it at the first or last visible option when movement would pass that boundary.
 - Home and End input MUST make the first and the last visible option active.
 - Page Up and Page Down input MUST move the active option by the number of option rows the [viewport](#viewport) shows, clamped at the first and last visible option.
-- Enter on a plain option declaring no sub-dialog MUST confirm the selection and resolve with a result carrying the exact value belonging to that option and no collected values; [Sub-Dialog Columns](#sub-dialog-columns) governs Enter on an option that declares one.
+- Enter on a plain option declaring no sub-dialog MUST confirm the selection and resolve with a result carrying the exact value belonging to that option, no collected values, and the `selected` list [Multi-Select](#multi-select) defines; [Sub-Dialog Columns](#sub-dialog-columns) governs Enter on an option that declares one.
 - Escape or Ctrl-C before a selection is confirmed MUST cancel the dialog and resolve with `undefined` without terminating the process; after confirmation the outcome is fixed, and [Presentation](#presentation) bounds how long settlement may take.
-- Printable input MUST always reach the [filter](#filtering); there is no state of an open list in which typing leaves the dialog unchanged.
+- Printable input MUST always reach the [filter](#filtering), except the Space keystroke a [multiple column](#multi-select) takes for ticking; apart from that one key, there is no state of an open list in which typing leaves the dialog unchanged.
 - The dialog MUST NOT print the selected value or assign cancellation an exit code; those decisions belong to the consuming command.
 
 Every option is visible while the filter text is blank; [Filtering](#filtering) defines visibility otherwise.
@@ -193,7 +222,7 @@ Every option is visible while the filter text is blank; [Filtering](#filtering) 
 ### Filtering
 
 - The filter MUST be the element that receives typed text from the moment the dialog opens, with no key moving focus to or from it.
-- Printable input and Backspace MUST edit the filter text exactly as they edit a [text input's](#text-input) value.
+- Printable input and Backspace MUST edit the filter text exactly as they edit a [text input's](#text-input) value, except the Space keystroke a [multiple column](#multi-select) takes for ticking.
 - The dialog MUST render the current filter text once there is any, and MUST render it in a place whose appearing and disappearing moves no option row.
 - The filter's terms are the whitespace-separated pieces of its text; an option MUST be visible when every term occurs within its display text under a case-insensitive comparison, or when the option declares fields.
 - What an option's display text is follows the shape it declared, and matching follows that: on an option declaring a label, every term MUST be matched against that label; on an option declaring cells, every term MUST be matched against each cell individually rather than against the cells joined together, and the option MUST be visible when every term occurs within at least one of its cells — so a term never matches by spanning the gap between two cells. Every option of one column declares the same one of those shapes, so no column mixes the two readings. Headers MUST NOT participate in matching.
@@ -247,6 +276,8 @@ Every option is visible while the filter text is blank; [Filtering](#filtering) 
 - **THEN** the third visible option is active, whatever its position in the supplied list
 
 ### Viewport
+
+The terminal this section measures against is the one `select` renders on. An [embedded](#embeddable-components) `Select` measures against the height its host gives it instead, and [Embeddable Components](#embeddable-components) owns how these rules read there.
 
 - The dialog MUST render at most ten option rows at once, and fewer so that the dialog as a whole — its edges and hints included — stays shorter than the terminal. One row is the floor wherever the terminal can afford one and something is visible to fill it; where the terminal cannot afford that row, or the filter has left nothing visible, the dialog MUST render no option rows at all, because the row a terminal cannot afford is exactly the row that would take the frame to the terminal's own height and clear the screen when it is replaced.
 - Whenever the terminal is tall enough for the dialog's other rows plus one option row, the dialog MUST NOT clear the terminal or scroll away what was on screen before it opened, on any frame or when it settles.
@@ -402,6 +433,92 @@ An option MAY declare a sub-dialog holding a nested select request or a single t
 - **WHEN** the user presses the right arrow
 - **THEN** nothing opens and the dialog stays on the same option
 
+### Multi-Select
+
+A column MAY let the reader tick several of its options and take them together. Ticking is a property of one column rather than of the dialog, so a column browser can offer a multiple choice at one level and a single choice at another.
+
+- A select request MAY declare `multiple`, and the setting MUST belong to the column it is written on, exactly as `headers` and `filter` do: a nested sub-dialog request decides its own column, and an omitted setting MUST mean the column is single-choice. Unlike the `expand` binding, it MUST NOT be read from the root request for every column.
+- An option MAY declare `selected: true` to open ticked. That declaration MUST be accepted only on an option of a column declaring `multiple`, and a request declaring it anywhere else, at any reachable depth, MUST be rejected before rendering or changing terminal state: a pre-tick in a column that cannot tick contradicts the column carrying it. `selected: false` MUST mean exactly what omitting it means and MUST NOT be rejected, because declaring that an option starts unticked contradicts nothing.
+- In a multiple column, the Space keystroke — input consisting of exactly one space character and no modifier — MUST toggle the tick on the active option and MUST NOT reach the filter. With no option visible it MUST do nothing. Input carrying a space among other characters, as a paste does, MUST reach the filter whole as [Filtering](#filtering) requires. In a column not declaring `multiple`, Space MUST remain printable input that reaches the filter.
+- Every option of a multiple column MUST be tickable, an option declaring a sub-dialog or fields included. Ticking MUST NOT open a sub-dialog, collect a field, or move the active option, and the keys that open a sub-dialog MUST keep opening it.
+- A tick MUST belong to the column it was made in. It MUST survive the filter hiding its option, and a column closed and re-opened from the same option within one dialog MUST show the ticks it was left with. Cancelling the dialog MUST discard every tick.
+- Ticking MUST NOT add a way to complete the dialog. Completion MUST be reached only as [Selection](#selection), [User-Provided Options](#user-provided-options), and [Sub-Dialog Columns](#sub-dialog-columns) already require, and Enter confirming a plain option in a multiple column MUST run the confirmation flash [Presentation](#presentation) describes, as it does anywhere else.
+- Every result MUST carry `selected`. It MUST hold the value of every ticked option of every column open when the dialog completes, ordered by column from left to right and within a column by supplied option order, ticked options the filter hides included. Only when no option of any open column is ticked MUST it instead be exactly the completing option's value alone: a tick in one open column is enough for `selected` to hold the ticks alone, and an open column holding none contributes nothing to it. A dialog declaring no multiple column therefore always resolves `selected` as that one value.
+- `value` and `values` MUST keep their meaning when options are ticked: `value` MUST be the completing option's value whether or not it is ticked, and `values` MUST hold only the fields collected along the path to it, so a ticked option's own fields MUST NOT be collected.
+- Every row of a multiple column MUST carry a tick cell at its start, before its label or its first cell, drawn as [Theming](../theming/)'s `marker` variable and as part of the cursor bar on the active row. A header row of a multiple column MUST be offset by the same cell, so each header stays over its field. The tick cell MUST NOT take part in [filtering](#filtering), and a column too narrow for its whole row MUST narrow its label or fields before the tick cell, because a row whose tick cannot be seen cannot be told ticked.
+
+The tick cell is the tick glyph followed by one space: `■` on a ticked option and `□` on an unticked one. Reference rendering of a multiple column with the first and third options ticked and the second active, greyscale omitted:
+
+```text
+╔═ Which hosts? ═══════════════════════╗
+║ ■ alpha                              ║
+║ □ beta                               ║  ← inverted bar
+║ ■ gamma                              ║
+║ □ delta                              ║
+╚══════════════════════════════════════╝
+ ↑↓ move · Space tick · Enter select · type to filter · Esc cancel
+```
+
+#### Scenario: Tick two and take them
+
+- **GIVEN** a multiple column listing `alpha`, `beta`, and `gamma` with the first active and nothing ticked
+- **WHEN** the user presses Space, Down, Down, Space, and Enter
+- **THEN** `select` resolves with `gamma`'s value as `value`, `alpha`'s and `gamma`'s values in that order as `selected`, and empty collected values
+
+#### Scenario: Nothing ticked takes the active option
+
+- **GIVEN** a multiple column listing `alpha`, `beta`, and `gamma` with nothing ticked
+- **WHEN** the user presses Down and Enter
+- **THEN** `select` resolves with `beta`'s value as `value` and as the only entry of `selected`
+
+#### Scenario: A pre-tick is submitted without being touched
+
+- **GIVEN** a multiple column whose second option declares `selected: true`
+- **WHEN** the dialog opens and the user presses Enter
+- **THEN** the second option is drawn ticked, and `select` resolves with the first option's value as `value` and the second's alone as `selected`
+
+#### Scenario: A pre-tick outside a multiple column is rejected
+
+- **GIVEN** a nested sub-dialog request not declaring `multiple`, one of whose options declares `selected: true`
+- **WHEN** the caller calls `select`
+- **THEN** the call rejects before rendering anything
+
+#### Scenario: Space ticks rather than filters
+
+- **GIVEN** a multiple column whose filter is empty
+- **WHEN** the user types `a`, presses Space, and types `b`
+- **THEN** the filter text is `ab`, and the option that was active when Space was pressed is ticked
+
+#### Scenario: A pasted space still filters
+
+- **GIVEN** a multiple column listing `release branch` and `main`
+- **WHEN** the chunk `rel br` arrives as one input
+- **THEN** the filter text is `rel br`, only `release branch` is visible, and nothing is ticked
+
+#### Scenario: A hidden tick is still taken
+
+- **GIVEN** a multiple column listing `alpha`, `beta`, and `gamma` with `alpha` ticked
+- **WHEN** the user types `gam` and presses Enter
+- **THEN** `alpha` is not visible, and `select` resolves with `gamma`'s value as `value` and `alpha`'s alone as `selected`
+
+#### Scenario: Ticks across columns
+
+- **GIVEN** a multiple root column whose first option is plain and whose second opens a multiple nested column
+- **WHEN** the user ticks the first root option, opens the second, ticks the nested column's second option, and presses Enter on its first
+- **THEN** `selected` holds the first root option's value and then the nested second option's value
+
+#### Scenario: A tick in one column is enough
+
+- **GIVEN** a single-choice root column whose first option opens a multiple nested column
+- **WHEN** the user opens it, ticks its second option, and presses Enter on its first
+- **THEN** `select` resolves with the nested first option's value as `value` and the nested second option's value alone as `selected`
+
+#### Scenario: Ticks survive backing out
+
+- **GIVEN** a nested multiple column with one option ticked
+- **WHEN** the user presses the left arrow and then opens the same option's sub-dialog again
+- **THEN** the same option is drawn ticked
+
 ### Presentation
 
 The look is Norton Commander's: framed panels, a title set into the frame, a full-width cursor bar, and a key bar underneath — in greyscale.
@@ -412,7 +529,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - The active option MUST be rendered as [Theming](../theming/)'s `cursor` variable spanning its column's full width, which the default theme renders as the terminal's own inversion. The rightmost column MUST take whatever width the title or the edges left the panel spare, so a select showing one column has its bar spanning the frame's whole inner width.
 - A dialog MUST resolve every appearance it draws through [Theming](../theming/) and MUST NOT choose a dim, an inversion, or a hue itself. Against the default theme a dialog therefore uses only the terminal's default foreground and background, their dimmed form, and their inversion, and emits no hue; that greyscale is the default theme's property rather than a prohibition this specification makes.
 - The filter and the overflow counts MUST be set into the frame's own edges rather than drawn as rows of the panel: the filter into the bottom edge, the counts into the top and bottom edges on their right. Neither MUST cost the panel a row, and neither appearing nor disappearing MUST move an option row. The room the counts take MUST be held whether a count is showing or not, so the title does not resize as the reader scrolls. Both describe the rightmost column: it is the one taking keys, and it is the only one that scrolls.
-- A dimmed key hint line MUST appear beneath the frame, naming exactly the keys the dialog answers where the reader is: a select's names moving, opening when the row under the cursor leads somewhere, taking when that row can be taken, backing out once a column has been opened, typing to filter, and cancelling; an entry's names submitting and then whichever of backing out or cancelling its own cancel key performs. A dialog MUST draw exactly one such line however many columns it is showing.
+- A dimmed key hint line MUST appear beneath the frame, naming exactly the keys the dialog answers where the reader is: a select's names moving, ticking when the column taking keys is [multiple](#multi-select), opening when the row under the cursor leads somewhere, taking when that row can be taken, backing out once a column has been opened, typing to filter, and cancelling; an entry's names submitting and then whichever of backing out or cancelling its own cancel key performs. A dialog MUST draw exactly one such line however many columns it is showing.
 - Backing out and cancelling MUST NOT both be named. Above the leftmost column the cancel key backs out exactly as the left arrow does, so the line MUST name the two keys as the one thing they do there and MUST NOT promise a cancellation the dialog will not perform; cancelling MUST be named only at the leftmost column, where it is what the cancel key does. The same rule binds an entry: a standalone `input` and a field collected at the leftmost column MUST name cancelling, while a text leaf and a field collected in an opened column MUST name backing out, because their cancel key closes only that column.
 - The line names the keys the dialog answers in the mode it is in — leftmost column or a column opened over it, list or entry — and MUST NOT track momentary availability. Typing to filter MUST be named whether or not the filter is on screen, because typing always filters. Moving and taking MUST stay named when a filter has left nothing to move over or take, though both are no-ops in that state. A phrase that came and went as the reader typed would be one more thing moving under them, which is the churn the filter and the overflow counts were set into the frame's edges to stop; a mode changes only when the reader opens or closes a column, which they do deliberately.
 - Every column of a select MUST render inside one frame — the one the first level drew, and the only one however deep the reader goes — and a sub-dialog MUST NOT draw a border, an offset, or a shadow of its own. A text-field sub-dialog is not a column: it MUST render as its own single-line panel beneath the frame, as a collected field does.
@@ -435,7 +552,7 @@ The look is Norton Commander's: framed panels, a title set into the frame, a ful
 - Every animation timer MUST be stopped before the dialog settles.
 - A request rejected before rendering MUST still render nothing, frame included.
 
-The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow counts are `▲ N` on the top edge and `▼ N` on the bottom with `N` the hidden count, the no-match row reads `no match`, the marker on an option that opens a sub-dialog is `▸`, the divider between columns is `│`, the gap between the cell fields of one option is two spaces, and the trail in the title joins its columns with `›` and opens with `…` when columns have been dropped. The select hint line is assembled from `↑↓ move`, then `→/Enter open` on a row that leads somewhere (`→/Tab open` under the Tab binding), then `Enter select` unless Enter opens that row, then `←/Esc back` once a column has been opened, then `type to filter`, then `Esc cancel` at the leftmost column only, joined with ` · `; the entry hint line reads `Enter submit · Esc cancel` where Escape cancels the dialog — a standalone `input`, and a field collected at the leftmost column — and `Enter submit · Esc back` where it backs out instead — a text leaf, and a field collected in a column opened over the leftmost one. An entry offers no left arrow of its own, so it names Escape alone where the select's line reads `←/Esc back`.
+The glyphs are part of the contract, so tests and later changes have one source: the filter prompt is `›`, the caret is `█`, the overflow counts are `▲ N` on the top edge and `▼ N` on the bottom with `N` the hidden count, the no-match row reads `no match`, the marker on an option that opens a sub-dialog is `▸`, the divider between columns is `│`, the gap between the cell fields of one option is two spaces, and the trail in the title joins its columns with `›` and opens with `…` when columns have been dropped. The tick cell of a [multiple column](#multi-select) is `■` on a ticked option and `□` on an unticked one, followed by one space. The select hint line is assembled from `↑↓ move`, then `Space tick` when the column taking keys is multiple, then `→/Enter open` on a row that leads somewhere (`→/Tab open` under the Tab binding), then `Enter select` unless Enter opens that row, then `←/Esc back` once a column has been opened, then `type to filter`, then `Esc cancel` at the leftmost column only, joined with ` · `; the entry hint line reads `Enter submit · Esc cancel` where Escape cancels the dialog — a standalone `input`, and a field collected at the leftmost column — and `Enter submit · Esc back` where it backs out instead — a text leaf, and a field collected in a column opened over the leftmost one. An entry offers no left arrow of its own, so it names Escape alone where the select's line reads `←/Esc back`.
 
 Reference rendering of a select in a terminal of 80 columns and 10 rows, greyscale omitted; the [viewport](#viewport) leaves six option rows because the dialog's other three rows — the two frame edges and the hint line — must fit alongside them and still stay strictly under the terminal height. The filter and the counts are set into the edges the panel is already drawing, so neither takes a row:
 
@@ -495,6 +612,8 @@ Reference rendering of a select in a terminal of 80 columns and 10 rows, greysca
 
 ### Terminal Streams and Cleanup
 
+This section binds the `select` and `input` functions. An [embedded component](#embeddable-components) reads and writes no stream and changes no terminal state of its own, and leaves every rule here to its host.
+
 - A dialog MUST read input only from the dialogs provider's injected standard-input stream.
 - A dialog MUST render its prompts, options, and entered values only to the dialogs provider's injected standard-error stream, leaving standard output untouched for the consumer's data.
 - A dialog MUST reject before rendering when its injected standard-input or standard-error stream is not an interactive terminal; it MUST NOT provide a non-interactive fallback.
@@ -521,6 +640,91 @@ Reference rendering of a select in a terminal of 80 columns and 10 rows, greysca
 - **WHEN** it selects, cancels, or fails
 - **THEN** terminal state is restored and rendering is unmounted before the caller observes settlement
 
+### Embeddable Components
+
+A plugin that draws its own interface — a full-screen application rather than a command that asks one question — cannot hand the terminal to `select` or `input`: each takes the terminal for a render session of its own, and two sessions on one terminal fight over its input and its screen. The capability therefore also exposes the dialogs as components, `Select` and `Input`, which such a host renders inside its own session. The function forms are those same components, mounted by the provider in a session of its own, so the two forms are one dialog rather than two that could drift apart.
+
+- `Select` and `Input` MUST be rendered by a host inside a render session the host owns, with the React and Ink `tx` injected into that host; rendering one with any other copy of either is unsupported. The contract MUST type each as a function of its props returning `unknown`, so the published contract names no React or Ink type.
+- Each read of the capability MUST yield the same `Select` and `Input` values, so a host rendering one again with fresh props keeps its state rather than remounting it.
+- Every embeddable component that takes keys — these two and the ones [Grid: Embeddable Selection](../grid/index.md#embeddable-selection) adds — MUST take the props this section defines, and they MUST mean the same thing on every one of them:
+  - `request`: what the function form takes. A component MUST present the request it was mounted with, and a host presents a different request by mounting a new component.
+  - `width`: the terminal columns the component may draw in. It MUST NOT read the terminal's width.
+  - `height`: the terminal rows the component may draw in, taken by `Select` and by the components that compose over it. It MUST NOT read the terminal's height. `Input` takes none, because it is always its frame's three rows and its hint line.
+  - `isActive`: whether the component answers keys.
+  - `onSubmit(result)`: called with exactly what the function form resolves with on completion.
+  - `onCancel()`: called where the function form resolves with `undefined`.
+- Every other rule of this specification MUST hold for a component exactly as it holds for the function form, read with three substitutions: where a rule says the dialog resolves with a result, the component calls `onSubmit` with it; where a rule says it resolves with `undefined`, the component calls `onCancel`; and where [Viewport](#viewport) or [Presentation](#presentation) measures against the terminal's width or height, the component measures against its `width` and its `height`.
+- A component MUST reject every request the function form rejects before rendering — under [Select Request](#select-request), [Sub-Dialog Columns](#sub-dialog-columns), and [Multi-Select](#multi-select) — by throwing when it is first rendered, before it draws anything of its own. It MUST NOT require interactive streams: the host owns its streams, and [Terminal Streams and Cleanup](#terminal-streams-and-cleanup) binds the function forms alone.
+- A component MUST call at most one of `onSubmit` and `onCancel`, at most once per mount. Once it has called one, it MUST ignore every key and keep drawing its last frame until its host unmounts it.
+- A component MUST NOT read or write any stream, change terminal state, or unmount anything itself: every key it answers arrives through its host's session and everything it draws is drawn by that session. Restoring the terminal and ending the session belong to the host.
+- `Select` MUST render in at most `height` rows, its edges, hint line, and any entry panel beneath its frame included. The viewport MUST take any shortfall exactly as it does against the terminal — fewer option rows first, and none at all where `height` cannot afford one — so a `height` exactly one row short of the terminal reproduces the window `select` shows. A `height` smaller than the select's rows other than its option rows is unsupported, and how the host lays out what overflows it is unspecified, as it is for a terminal narrower than twenty columns.
+- A component's frame MUST fit its content and MUST NOT exceed `width`, and below twenty columns it MUST lay itself out as if `width` were twenty.
+- A change to `width` or `height` MUST be reflected on the next render, as a resized terminal is.
+- While `isActive` is false, a component MUST NOT answer any key, MUST draw no caret, and MUST run no animation, so it never re-renders on a timer; it MUST otherwise draw exactly what it would draw active in the same state, in the same rows, hint line included, so moving focus moves nothing on screen. From the keystroke after `isActive` becomes true, it MUST answer every key the function form answers. A confirmation flash already under way MUST run out and call `onSubmit` whatever `isActive` becomes meanwhile, because the choice is already made.
+- A component MUST answer a Ctrl-C keystroke its host's session delivers to it exactly as the function form answers Ctrl-C. Whether the host's session delivers that keystroke or ends itself on it is the host's choice.
+- A host MAY mount several components in one session. Only an active component answers keys, and a host that makes two active at once has both answer the same keystroke.
+- `select` and `input` MUST be the components mounted in a render session of the provider's own, with no observable change to anything else this specification requires: each MUST validate its request and require interactive streams before any terminal state changes, MUST mount its component with `isActive` true — `select` mounting `Select` with `width` as the terminal's columns and `height` as the terminal's rows less one, the row that keeps the dialog strictly shorter than the terminal under [Viewport](#viewport), and `input` mounting `Input` with `width` as the terminal's columns alone — MUST re-measure those sizes when the terminal is resized, and MUST settle as [Terminal Streams and Cleanup](#terminal-streams-and-cleanup) requires once the component calls `onSubmit` or `onCancel`.
+
+#### Scenario: A host embeds a select
+
+- **GIVEN** a host session rendering `Select` with a width of 40, a height of 8, `isActive` true, and three plain options
+- **WHEN** the user presses Down and Enter
+- **THEN** the cursor bar flashes, `onSubmit` is called once with the second option's value, empty collected values, and that value alone as `selected`, nothing is written to any stream except by the host's session, and the host's session stays mounted
+
+#### Scenario: Height bounds the window
+
+- **GIVEN** a `Select` with thirty options and a height of 9
+- **WHEN** it renders
+- **THEN** it draws six option rows inside nine rows in all — the window `select` shows in a terminal of ten rows
+
+#### Scenario: A height affording no option row
+
+- **GIVEN** a `Select` whose height is exactly its edges and hint line
+- **WHEN** it renders and the user presses Down and Enter
+- **THEN** it draws no option rows, and `onSubmit` is called with the second option's value
+
+#### Scenario: Width bounds the frame
+
+- **GIVEN** an `Input` with a width of 30 rendered in a terminal of 120 columns, and a message of sixty characters
+- **WHEN** it renders
+- **THEN** its frame is no wider than thirty columns and the title ends in an ellipsis
+
+#### Scenario: Only the active component takes keys
+
+- **GIVEN** a host session rendering two `Input` components, the first active and the second not
+- **WHEN** the user types `x` and no further input arrives for one second
+- **THEN** only the first shows `x`, and the second draws no caret on any frame
+
+#### Scenario: Focus moves nothing
+
+- **GIVEN** an inactive `Select` in a host session
+- **WHEN** the host makes it active and the user presses Down
+- **THEN** it occupies the same rows before and after, and the second option becomes active
+
+#### Scenario: A re-render keeps state
+
+- **GIVEN** an embedded `Select` whose filter text is `al`
+- **WHEN** the host renders it again with a different width
+- **THEN** the filter text and the active option are unchanged and the frame is laid out against the new width
+
+#### Scenario: An invalid request fails the render
+
+- **GIVEN** a host session rendering `Select` with an empty options list
+- **WHEN** the session renders
+- **THEN** the render fails with the error `select` would reject with, and the component has drawn nothing
+
+#### Scenario: A finished component takes no more keys
+
+- **GIVEN** an embedded `Input` that has called `onSubmit` and is still mounted
+- **WHEN** the user types and presses Enter again
+- **THEN** neither `onSubmit` nor `onCancel` is called and the drawn value does not change
+
+#### Scenario: Cancel at the root
+
+- **GIVEN** an embedded `Select` with one sub-dialog column open
+- **WHEN** the user presses Escape twice
+- **THEN** the first Escape closes the column without a callback, and the second calls `onCancel` once
+
 ## Design
 
 ### Ownership
@@ -529,11 +733,23 @@ The dialogs plugin is an ordinary bundled provider outside `src/`. Core stores i
 
 The provider obtains React, Ink, and process streams from its own initialization API. It renders interactive UI on standard error so command results may continue to use standard output. The caller decides whether cancellation is success, failure, or no action.
 
+### Why Components
+
+A dialog is two things that used to be welded together: the interaction — the list, the filter, the columns, the keys — and the render session that holds a terminal for it. A command that asks one question wants both, which is what `select` and `input` are. A plugin that already holds the terminal in a session of its own wants only the first, and the only alternative to embedding it was re-implementing the dialog, which is the duplication this capability exists to remove. Splitting the two along that seam keeps one dialog: the component owns the interaction and sizes itself from what it is given, and the session — the streams, raw mode, restoration, settlement — is either the provider's or the host's.
+
+The host owns placement and focus because it is the only party that knows its own layout. A component that read the terminal's size would claim the whole terminal inside a panel that has a third of it, and one that always took keys would answer keystrokes meant for the host's other widgets; `width`, `height`, and `isActive` are exactly the three things a host has to be able to say. The props are the same on every embeddable component, here and in [Grid](../grid/), so a host learns them once.
+
+The contract types a component as a function returning `unknown` because the alternative is putting React's element type into a published contract, which [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts) keeps out by making contracts types-only and this specification keeps out by publishing no rendering vocabulary. A host already holds the injected React that can render the function; what the contract adds is the props it takes. The frame and its row vocabulary stay unpublished: a host embeds a whole dialog, or draws its own.
+
+### Why Ticks Belong to a Column
+
+`multiple` is per column for the reason `headers` and `filter` are: a column is its own request, and a browser whose levels list different things decides at each level whether several of them can be taken. Ticks are kept by the column they were made in, survive the filter because a reader narrowing to find the next thing to tick has not asked to lose the last one, and are submitted from the columns open when the dialog completes so that what is taken is what the open columns hold. The completing option keeps its place as `value` and its path keeps its fields as `values`, so a caller that ignores `selected` reads exactly the result it read before; `selected` is a field of its own rather than a reuse of `values` because `values` already means the text collected along the path. Space is the tick key because it is the key every file manager and checkbox list uses, and taking it from the filter in a multiple column alone costs that column only the multi-term filter a typed space would have started.
+
 ### Composition
 
 A caller that only needs a value calls `input` directly. A caller that offers known choices alongside "let me type it" declares the fields on the option that means that, so one dialog covers both. The provider owns the transition between stages, which keeps the caller from stitching two dialogs together with its own terminal state, cancellation, and cleanup handling in between.
 
-Fields are the extension point. A field carries a discriminating type, so a later field kind is a new type rather than a new dialog method or a second request shape, and a later multi-choice dialog can reuse the same option and field declarations. `text` is the only type that exists today; nothing about the model presumes the collection is a form, and nothing about it forecloses one.
+Fields are the extension point. A field carries a discriminating type, so a later field kind is a new type rather than a new dialog method or a second request shape, and [multi-select](#multi-select) reuses the same option and field declarations, adding only a column setting and a pre-tick. `text` is the only type that exists today; nothing about the model presumes the collection is a form, and nothing about it forecloses one.
 
 Results carry the option's value and the collected values side by side because the two are different kinds of information: the value is opaque and the caller's own, while the collected values are strings the provider gathered against names the caller chose. Merging them would require the provider to interpret the caller's value.
 
@@ -557,24 +773,28 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 
 ## Constraints
 
-- Only `select`, `input`, and their composition are in scope.
-- The dialogs contract is published as types alone. A runtime dialogs export, a dialogs package versioned separately from `tx`, and any way of obtaining the capability other than reading the `@fx/tx/dialogs` registry key are out of scope.
+- Only `select`, `input`, their composition, and the components they mount are in scope.
+- The dialogs contract is published as types alone. A runtime dialogs export, a dialogs package versioned separately from `tx`, and any way of obtaining the capability other than reading the `@fx/tx/dialogs` registry key are out of scope. The embeddable components are values of the capability, read from that key like `select` and `input`, and are not exports of the contract.
+- Publishing the frame, its row and segment vocabulary, or any other drawing primitive is out of scope, as is a theme helper that turns a variable into renderer props: a host embeds a whole dialog or draws its own.
 - `text` is the only field type. Dropdown, checkbox, numeric, masked, and multi-line fields are out of scope, as is a form that presents several fields at once with focus movement between them. An option's cells are display text and are unrelated to fields: they collect nothing and take no focus.
 - Field validation, required-field policy, defaults beyond an initial value, error messages, and re-prompting after a rejected value are out of scope; a caller validates what it receives.
 - Caret movement, word or line deletion, clipboard integration, paste-specific handling, entry history, completion, and character masking are out of scope for text entry and for the filter; a terminal paste arrives as ordinary input and is appended as such.
 - Fuzzy or prefix matching, match ranking, match highlighting, matching against option values, a caller-supplied matcher, an initial filter text, and a filter on `input` are out of scope.
 - Returning to an earlier stage, partial results, and any back-navigation key are out of scope, except that Escape and the left arrow MUST close the rightmost sub-dialog column and return to the one that opened it.
-- Multi-select, disabled or grouped options, arbitrary caller-supplied option rendering, mouse input, and layout APIs are out of scope. Aligned cells and a header row are the only structure an option may have, and they are declared rather than drawn by the caller.
+- Multi-select beyond the per-column ticking [Multi-Select](#multi-select) owns — a cap on the number of ticks, select-all, and range ticking — is out of scope. Disabled or grouped options, arbitrary caller-supplied option rendering, mouse input, and layout APIs are out of scope; an embeddable component is placed by its host, not by a layout API of this capability. Aligned cells and a header row are the only structure an option may have, and they are declared rather than drawn by the caller.
 - Deciding an appearance is out of scope: [Theming](../theming/) owns the variables, the default greyscale theme, whether hues are emitted, and what a plugin may override.
 - Per-field alignment, caller-specified field widths, per-field truncation policy, sorting or reordering by a field, and a header that can be clicked or activated are out of scope.
-- Non-interactive fallback, concurrent dialogs, independently nested dialogs in separate render sessions, global serialization, persistence, and terminal accessibility policy are out of scope. Sub-dialog columns are not nested dialogs in this sense: they are one dialog in one render session.
+- Non-interactive fallback, concurrent dialogs, independently nested dialogs in separate render sessions, global serialization, persistence, and terminal accessibility policy are out of scope. Sub-dialog columns are not nested dialogs in this sense: they are one dialog in one render session. Several embedded components in one host session are not concurrent dialogs either: the host decides which one is active.
 - Registry collision policy, provider priority, deduplication, ownership metadata, and version negotiation are owned by neither this spec nor the initial implementation.
 
 ## Open Questions
 
 - ~~A public dialogs type export MAY be considered when an external plugin needs one; the current internal consumers do not justify that contract.~~ **Resolved: published.** An external plugin needed one, and what it did instead was restate the shape — an unchecked copy that keeps compiling after the contract it copies has moved. [Plugin System: Published Capability Contracts](../plugin-system/index.md#published-capability-contracts) now requires every bundled capability to publish its contract, and this one is published at the subpath its registry key names.
 - A confirm dialog MAY be specified when a concrete bundled consumer needs one.
-- Further field types and a multi-choice dialog MAY reuse the field and option model when a concrete bundled consumer needs them; neither is specified here.
+- Further field types MAY reuse the field and option model when a concrete bundled consumer needs them; none is specified here. ~~A multi-choice dialog MAY reuse it too.~~ **Resolved:** [Multi-Select](#multi-select) reuses it, ticking per column.
+- Whether ticks left on a column that has been closed SHOULD be taken when the dialog completes is undecided. They are remembered so re-opening the column restores them, but only the open columns are submitted, so a reader who ticks in one branch, backs out, and completes in another takes only the second branch's ticks.
+- Whether a multiple column SHOULD say how many of its options are ticked, and how many of those the filter hides, is undecided; the edges that could carry a count already carry the filter and the overflow counts.
+- Whether `Input` SHOULD offer a form that can be submitted repeatedly without remounting, as a chat prompt would want, is undecided; today a host remounts it for the next entry.
 - Whether a reduced-motion preference, such as an environment variable, SHOULD disable the caret blink, the indicator pulse, and the confirmation flash is undecided; all three are SHOULD-level, so adding one changes no MUST.
 - Whether a filter that has been cleared back to empty should stay on screen for the column it was used in MAY be revisited once a bundled consumer presents real lists.
 - Whether a column left of the rightmost one SHOULD report its own hidden counts is undecided. Only the rightmost reports today, so a column behind it whose list runs past the band shows a list that stops without saying it was cut; the two edges have room for one column's pair, and a rule for the rest needs somewhere to put the numbers first.
@@ -594,6 +814,8 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 - [Change 0021: Restyle Dialogs as Norton Commander](../../changes/0021-restyle-dialogs-as-norton-commander.md)
 - [Change 0023: Render Sub-Dialogs as Columns](../../changes/0023-render-sub-dialogs-as-columns.md)
 - [Change 0033: Upgrade to Ink 8 and React 19.3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md)
+- [Change 0036: Add Embeddable Dialog Components](../../changes/0036-add-embeddable-dialog-components.md)
+- [Change 0037: Add Multi-Select](../../changes/0037-add-multi-select.md)
 - [Ink](https://github.com/vadimdemedes/ink)
 
 ## Changelog
@@ -619,3 +841,5 @@ The Norton Commander vocabulary — double-line panels, a title set into the fra
 | 2026-09-05 | Implemented aligned cells and headers: the two display shapes with the validations that settle a column's, matching within one cell rather than across the join, fields measured over the whole visible list, the header row drawn as chrome at the top of its band at the cost of one option row, and the sub-dialog marker drawn as its own `marker` piece of the row | [0027-add-multi-cell-select-rows](../../changes/0027-add-multi-cell-select-rows.md) |
 | 2026-09-06 | Required the dialogs contract to be published at `@fx/tx/dialogs` as a types-only import, and resolved the deferred public-export open question | [0031-publish-the-dialogs-and-config-contracts](../../changes/0031-publish-the-dialogs-and-config-contracts.md) |
 | 2026-10-10 | Text input stopped recognizing control sequences by shape: Ink 8 resolves or discards every complete sequence before the dialog sees it, so text shaped like a sequence's payload appends | [0033-upgrade-to-ink-8-and-react-19-3](../../changes/0033-upgrade-to-ink-8-and-react-19-3.md) |
+| 2026-10-18 | Desired embeddable `Select` and `Input` components with the shared `width`, `height`, `isActive`, `onSubmit`, and `onCancel` props, and `select` and `input` restated as mounting them | [0036-add-embeddable-dialog-components](../../changes/0036-add-embeddable-dialog-components.md) |
+| 2026-10-18 | Desired per-column multi-select: the `multiple` setting, the `selected` pre-tick, Space ticking, the tick cell and hint, and the `selected` list every result carries | [0037-add-multi-select](../../changes/0037-add-multi-select.md) |

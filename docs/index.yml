@@ -12,7 +12,7 @@ specs:
     status: active
   - name: dialogs
     path: specs/dialogs/
-    description: Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, aligned multi-cell option rows with headers, text input composed through user-provided options, and a themed Norton Commander presentation.
+    description: Shared terminal dialogs supplied by a bundled plugin, covering selection with type-to-filter and a bounded viewport, per-column multi-select, aligned multi-cell option rows with headers, text input composed through user-provided options, embeddable components for a plugin's own interface, and a themed Norton Commander presentation.
     status: active
   - name: updates
     path: specs/updates/
@@ -28,7 +28,7 @@ specs:
     status: active
   - name: grid
     path: specs/grid/
-    description: Aligned cell layout supplied by a bundled plugin, covering table and flowed presentations, one-shot printing, interactive row selection, and row actions.
+    description: Aligned cell layout supplied by a bundled plugin, covering table and flowed presentations, one-shot printing, interactive row selection, row actions, and embeddable components for a plugin's own interface.
     status: active
 
 changes:
@@ -312,3 +312,33 @@ changes:
     status: complete
     depends_on:
       - "0033"
+  - id: "0036"
+    name: add-embeddable-dialog-components
+    path: changes/0036-add-embeddable-dialog-components.md
+    description: Expose the dialogs as Select and Input components a plugin renders inside its own render session, sized and focused through shared width, height, and isActive props, and make select and input those components mounted in a session of the provider's own.
+    spec: dialogs
+    status: draft
+    depends_on:
+      - "0017"
+      - "0023"
+      - "0031"
+      - "0033"
+  - id: "0037"
+    name: add-multi-select
+    path: changes/0037-add-multi-select.md
+    description: Let a select column declare multiple so Space ticks options and Enter takes every tick, and give every select result a selected list holding the ticked values or the completing option's value alone.
+    spec: dialogs
+    status: draft
+    depends_on:
+      - "0027"
+      - "0036"
+  - id: "0038"
+    name: add-embeddable-grid-components
+    path: changes/0038-add-embeddable-grid-components.md
+    description: Expose the grid as a Grid component drawing the printed lines for a given width and a SelectGrid component driving rows over the dialogs' embeddable Select, leaving print and select unchanged.
+    spec: grid
+    status: draft
+    depends_on:
+      - "0029"
+      - "0030"
+      - "0036"

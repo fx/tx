@@ -6,11 +6,11 @@
 |------|-------------|--------|
 | [Architecture](specs/architecture/) | Generic core runtime, neutral composition, packaging, and development conventions for tx. | active |
 | [Plugin System](specs/plugin-system/) | Generic plugin hosting, opaque capability registration, and externalized marketplace-plugin ownership contracts. | active |
-| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering single-choice selection with type-to-filter and a bounded viewport, aligned multi-cell option rows with headers, text input composed through user-provided options, and a themed Norton Commander presentation. | active |
+| [Dialogs](specs/dialogs/) | Shared terminal dialogs supplied by a bundled plugin, covering selection with type-to-filter and a bounded viewport, per-column multi-select, aligned multi-cell option rows with headers, text input composed through user-provided options, embeddable components for a plugin's own interface, and a themed Norton Commander presentation. | active |
 | [Updates](specs/updates/) | User-invoked updating of marketplaces and the executable through generic update participants, with automatic checking prohibited. | active |
 | [Config](specs/config/) | Shared per-user JSON config persistence supplied by a bundled plugin, covering validated key definition, reads, writes, and atomic storage. | active |
 | [Theming](specs/theming/) | Named appearance variables supplied by a bundled plugin, covering the default greyscale Norton Commander theme, plugin overrides, and colour enablement. | active |
-| [Grid](specs/grid/) | Aligned cell layout supplied by a bundled plugin, covering table and flowed presentations, one-shot printing, interactive row selection, and row actions. | active |
+| [Grid](specs/grid/) | Aligned cell layout supplied by a bundled plugin, covering table and flowed presentations, one-shot printing, interactive row selection, row actions, and embeddable components for a plugin's own interface. | active |
 
 ## Changes
 
@@ -51,3 +51,6 @@
 | 0033 | [Upgrade to Ink 8 and React 19.3](changes/0033-upgrade-to-ink-8-and-react-19-3.md) | [Plugin System](specs/plugin-system/) | complete | 0003, 0017 |
 | 0034 | [Add Marketplace tx Compatibility](changes/0034-add-marketplace-tx-compatibility.md) | [Updates](specs/updates/) | complete | 0013, 0014, 0019 |
 | 0035 | [Production React and Cached Text Widths](changes/0035-production-react-and-cached-widths.md) | [Architecture](specs/architecture/) | complete | 0033 |
+| 0036 | [Add Embeddable Dialog Components](changes/0036-add-embeddable-dialog-components.md) | [Dialogs](specs/dialogs/) | draft | 0017, 0023, 0031, 0033 |
+| 0037 | [Add Multi-Select](changes/0037-add-multi-select.md) | [Dialogs](specs/dialogs/) | draft | 0027, 0036 |
+| 0038 | [Add Embeddable Grid Components](changes/0038-add-embeddable-grid-components.md) | [Grid](specs/grid/) | draft | 0029, 0030, 0036 |
