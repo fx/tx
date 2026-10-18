@@ -152,6 +152,14 @@ function recordingSurfaces(): {
       if (!first) throw new Error("a select with no options");
       return { value: first.value, values: {} } as SelectResult<T>;
     },
+    // The demo asks its questions through the function forms alone; a scenario
+    // that rendered a component would be one this stub cannot answer.
+    Input: () => {
+      throw new Error("the demo renders no embedded input");
+    },
+    Select: () => {
+      throw new Error("the demo renders no embedded select");
+    },
   };
   const grid: Grid = {
     print(request) {

@@ -24,6 +24,13 @@
  * Publishing the vocabulary does not publish a dialog: a consumer that can
  * name a request and a result still cannot draw one without the capability.
  * Nothing here reads a stream, renders, or knows a terminal.
+ *
+ * The capability's `Select` and `Input` are components a host renders in its
+ * own render session, and they are typed here without naming React: each is a
+ * function of its props returning `unknown`. React's element type is exactly
+ * the rendering detail kept out above, so a host holding the injected React
+ * casts a component once where it calls `createElement` rather than this file
+ * importing the type that would let it skip the cast.
  */
 
 /**
@@ -120,11 +127,67 @@ export type InputRequest = {
 };
 
 /**
+ * The props every embeddable component that takes keys shares, here and in the
+ * grid's selecting component, so a host learns them once. `R` is what the
+ * function form resolves with on completion.
+ *
+ * The host owns placement and focus: the component draws in the columns it is
+ * given rather than the terminal's, and answers keys only while it is active.
+ * It is one-shot — once it has called either callback it ignores every key
+ * until its host unmounts it, and a host wanting another answer mounts another
+ * component.
+ */
+export type EmbeddedProps<R> = {
+  /** The terminal columns the component may draw in. Below twenty it lays
+   * itself out as if given twenty. */
+  readonly width: number;
+  /** Whether the component answers keys. An inactive component draws exactly
+   * what it would draw active, in the same rows, but no caret, and runs no
+   * animation. */
+  readonly isActive: boolean;
+  /** Called once, with exactly what the function form resolves with. */
+  readonly onSubmit: (result: R) => void;
+  /** Called once, where the function form resolves with `undefined`. */
+  readonly onCancel: () => void;
+};
+
+/** What a host renders `Select` with. The request is the one the component
+ * was mounted with: a host presenting a different question mounts a new
+ * component, keyed differently, rather than passing a new request. */
+export type SelectProps<T> = EmbeddedProps<SelectResult<T>> & {
+  readonly request: SelectRequest<T>;
+  /** The terminal rows the select may draw in, its edges, hint line, and any
+   * entry panel beneath its frame included. The window gives up option rows
+   * first, and none at all where `height` cannot afford one. */
+  readonly height: number;
+};
+
+/** What a host renders `Input` with. It takes no height: an input is always
+ * its frame's three rows and its hint line. */
+export type InputProps = EmbeddedProps<string> & {
+  readonly request: InputRequest;
+};
+
+/**
  * The value registered under `@fx/tx/dialogs`: one line of text collected, or
  * one choice taken from a column browser. Both answer `undefined` when the
  * reader cancels, which is a completed dialog rather than a failure.
+ *
+ * `Input` and `Select` are the same two dialogs as components, for a plugin
+ * that already draws its own interface and cannot hand the terminal to a
+ * second render session. `input` and `select` are those components mounted in
+ * a session of the provider's own. Every read of the capability yields the
+ * same two component functions, so a host rendering one again keeps its state.
  */
 export type Dialogs = {
   input(request: InputRequest): Promise<string | undefined>;
   select<T>(request: SelectRequest<T>): Promise<SelectResult<T> | undefined>;
+  /** Rendered by a host with the injected React inside its own render
+   * session; `unknown` keeps React's element type out of this contract. */
+  readonly Input: (props: InputProps) => unknown;
+  /** Rendered by a host with the injected React inside its own render
+   * session; `unknown` keeps React's element type out of this contract. A
+   * request the function form would reject throws on first render, before
+   * anything is drawn. */
+  readonly Select: <T>(props: SelectProps<T>) => unknown;
 };

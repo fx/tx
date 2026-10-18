@@ -67,6 +67,15 @@ function stubDialogs(
             asked.push(call);
             return answer(call) as SelectResult<T> | undefined;
           },
+          // The runner asks through the function forms alone, so a component
+          // reached for here is a scenario this stub was never meant to
+          // answer.
+          Input: () => {
+            throw new Error("the demo renders no embedded input");
+          },
+          Select: () => {
+            throw new Error("the demo renders no embedded select");
+          },
         });
       },
   };
