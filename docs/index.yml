@@ -337,7 +337,7 @@ changes:
     path: changes/0038-add-embeddable-grid-components.md
     description: Expose the grid as a Grid component drawing the printed lines for a given width and a SelectGrid component driving rows over the dialogs' embeddable Select, leaving print and select unchanged.
     spec: grid
-    status: draft
+    status: complete
     depends_on:
       - "0029"
       - "0030"

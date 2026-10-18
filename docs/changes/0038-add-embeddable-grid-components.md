@@ -5,7 +5,7 @@
 Expose the grid as two components a plugin renders inside its own render session: `Grid`, the printed lines as an element laid out for a given width, and `SelectGrid`, the driven grid over the dialogs' embeddable `Select`. `print` and `select` stay as they are.
 
 **Spec:** [Grid](../specs/grid/)
-**Status:** draft
+**Status:** complete
 **Depends On:** 0029, 0030, 0036
 
 ## Motivation
@@ -78,13 +78,13 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
   - [x] `test/plugin-consumer.test.ts`: the consumer fixture types `Grid` through the published contract; `test/plugin-boundary.test.ts` keeps passing
   - [x] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-grid-capability): document `Grid`
   - [x] [Grid](../specs/grid/) spec: mark [Embeddable Grid](../specs/grid/index.md#embeddable-grid) implemented and add a changelog row
-- [ ] Add the embeddable `SelectGrid` component (after [Change 0036](./0036-add-embeddable-dialog-components.md))
-  - [ ] `plugins/grid/contract.ts`: `SelectGridProps<T, A>` importing `EmbeddedProps` type-only from `@fx/tx/dialogs`, and the `SelectGrid` member
-  - [ ] `plugins/grid/index.ts` and `plugins/grid/select.ts`: the component over the dialogs' `Select`, mapping the request on mount and the answer on submit
-  - [ ] `test/grid-embedded.test.ts`: every scenario in [Grid: Embeddable Selection](../specs/grid/index.md#embeddable-selection) — acting on a row, cancelling, and the absent dialogs provider — plus `isActive`, `height`, and a row offering no actions
-  - [ ] `test/plugin-consumer.test.ts`: the consumer fixture types `SelectGrid`, resolving the grid contract through the dialogs contract in the packed tarball
-  - [ ] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-grid-capability): document `SelectGrid`
-  - [ ] [Grid](../specs/grid/) spec: mark [Embeddable Selection](../specs/grid/index.md#embeddable-selection) implemented and add a changelog row; set this change `complete` in `docs/index.yml` and `docs/index.md`
+- [x] Add the embeddable `SelectGrid` component (after [Change 0036](./0036-add-embeddable-dialog-components.md))
+  - [x] `plugins/grid/contract.ts`: `SelectGridProps<T, A>` importing `EmbeddedProps` type-only from `@fx/tx/dialogs`, and the `SelectGrid` member
+  - [x] `plugins/grid/index.ts` and `plugins/grid/select.ts`: the component over the dialogs' `Select`, mapping the request on mount and the answer on submit
+  - [x] `test/grid-embedded.test.ts`: every scenario in [Grid: Embeddable Selection](../specs/grid/index.md#embeddable-selection) — acting on a row, cancelling, and the absent dialogs provider — plus `isActive`, `height`, and a row offering no actions
+  - [x] `test/plugin-consumer.test.ts`: the consumer fixture types `SelectGrid`, resolving the grid contract through the dialogs contract in the packed tarball
+  - [x] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-grid-capability): document `SelectGrid`
+  - [x] [Grid](../specs/grid/) spec: mark [Embeddable Selection](../specs/grid/index.md#embeddable-selection) implemented and add a changelog row; set this change `complete` in `docs/index.yml` and `docs/index.md`
 
 ## References
 

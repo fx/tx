@@ -53,4 +53,4 @@
 | 0035 | [Production React and Cached Text Widths](changes/0035-production-react-and-cached-widths.md) | [Architecture](specs/architecture/) | complete | 0033 |
 | 0036 | [Add Embeddable Dialog Components](changes/0036-add-embeddable-dialog-components.md) | [Dialogs](specs/dialogs/) | complete | 0017, 0023, 0031, 0033 |
 | 0037 | [Add Multi-Select](changes/0037-add-multi-select.md) | [Dialogs](specs/dialogs/) | draft | 0027, 0036 |
-| 0038 | [Add Embeddable Grid Components](changes/0038-add-embeddable-grid-components.md) | [Grid](specs/grid/) | draft | 0029, 0030, 0036 |
+| 0038 | [Add Embeddable Grid Components](changes/0038-add-embeddable-grid-components.md) | [Grid](specs/grid/) | complete | 0029, 0030, 0036 |
