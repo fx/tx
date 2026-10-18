@@ -38,9 +38,11 @@ const CARET = "█";
 class HostInput extends PassThrough {
   readonly isTTY = true;
   isRaw = false;
+  rawModeChanges = 0;
 
   setRawMode(enabled: boolean): this {
     this.isRaw = enabled;
+    this.rawModeChanges++;
     return this;
   }
 
@@ -931,5 +933,48 @@ describe("embedded dialog components", () => {
       });
       await terminal.close();
     });
+  });
+
+  test("the function forms still reject a missing request before taking the terminal", async () => {
+    const stdin = new HostInput();
+    const stderr = new Untouched();
+    const failures: unknown[] = [];
+    const caller: PluginDefinition = {
+      identity: { name: "caller" },
+      load:
+        () =>
+        ({ command, registrations }) => {
+          command((namespace) =>
+            namespace.action(async () => {
+              const [dialogs] = registrations<Dialogs>("@fx/tx/dialogs");
+              // An untyped consumer passing nothing at all.
+              const untyped = dialogs as unknown as {
+                input(request?: unknown): Promise<unknown>;
+                select(request?: unknown): Promise<unknown>;
+              };
+              for (const ask of [untyped.input, untyped.select]) {
+                try {
+                  await ask.call(untyped);
+                } catch (error) {
+                  failures.push(error);
+                }
+              }
+            }),
+          );
+        },
+    };
+    expect(
+      await main(["caller"], [themePlugin, dialogsPlugin, caller], {
+        cwd: "/work",
+        env: {},
+        stdin: stdin as unknown as NodeJS.ReadStream,
+        stdout: new Untouched() as unknown as NodeJS.WriteStream,
+        stderr: stderr as unknown as NodeJS.WriteStream,
+      }),
+    ).toBe(0);
+    expect(failures).toHaveLength(2);
+    for (const failure of failures) expect(failure).toBeInstanceOf(TypeError);
+    expect(stdin.rawModeChanges).toBe(0);
+    expect(stderr.text()).toBe("");
   });
 });

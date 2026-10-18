@@ -586,6 +586,10 @@ const definition: PluginDefinition = Object.freeze({
 
       const dialogs: Dialogs = {
         async input(request: InputRequest) {
+          // Read before anything else, as the destructured parameter this
+          // replaced was: a missing request rejects here rather than inside a
+          // session that has already taken the terminal.
+          const { message, initialValue } = request;
           requireInteractiveStreams(context, "An input dialog");
           // Resolved ahead of the session as well as by the mount, so a `tx`
           // composed without exactly one theme rejects before any terminal
@@ -599,7 +603,10 @@ const definition: PluginDefinition = Object.freeze({
             const Root = () => {
               const { columns } = ink.useWindowSize();
               return react.createElement(Input, {
-                request,
+                request:
+                  initialValue === undefined
+                    ? { message }
+                    : { message, initialValue },
                 width: columns,
                 isActive: true,
                 onSubmit: (value: string) =>
