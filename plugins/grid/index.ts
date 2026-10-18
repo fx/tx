@@ -6,7 +6,7 @@ import type {
   GridSelectRequest,
 } from "./contract.ts";
 import { requireDialogsCapability } from "./dialogs.ts";
-import { printGrid } from "./render.ts";
+import { embeddedGrid, printGrid } from "./render.ts";
 import { selection, selectRequest } from "./select.ts";
 import { requireThemeCapability } from "./theme.ts";
 
@@ -41,8 +41,20 @@ const gridKey = "@fx/tx/grid";
 const definition: PluginDefinition = Object.freeze({
   identity,
   load(): Plugin {
-    return ({ dependencies, register, registrations }) => {
+    return ({ context, dependencies, register, registrations }) => {
       const { react, ink } = dependencies;
+
+      // Created once, here, so every read of the capability yields the same
+      // component and a host rendering it again with fresh props re-renders
+      // it rather than remounting it. The theme is resolved when it mounts —
+      // a host renders it while its command runs, after every provider has
+      // committed — and for the standard-error stream `tx` injected rather
+      // than any stream on the request: a component has none of its own, and
+      // that is the stream a dialog resolves against, so an embedded grid
+      // beside an embedded dialog agrees with it about whether colour is on.
+      const Grid = embeddedGrid(react, ink, () =>
+        requireThemeCapability(registrations).theme(context.stderr),
+      );
 
       // Frozen, like every value a capability hands out: a consumer holds the
       // same object every other consumer in the process holds.
@@ -94,6 +106,8 @@ const definition: PluginDefinition = Object.freeze({
             ? undefined
             : selection(request, chosen.value);
         },
+
+        Grid,
       });
 
       register<Grid>(gridKey, grid);

@@ -94,6 +94,8 @@ function stubGrid(asked: Asked[]): PluginDefinition {
             });
             return firstSelection(request);
           },
+          // The demo embeds nothing, so the component is never rendered here.
+          Grid: () => null,
         });
       },
   };

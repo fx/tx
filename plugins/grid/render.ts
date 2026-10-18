@@ -1,6 +1,6 @@
 import type { CoreDependencies } from "@fx/tx/plugin";
 import type { Theme, ThemeVariable } from "@fx/tx/theme";
-import type { GridRequest, OutputStream } from "./contract.ts";
+import type { GridProps, GridRequest, OutputStream } from "./contract.ts";
 import {
   canvasWidth,
   defaultLayoutColumns,
@@ -133,6 +133,23 @@ export function gridElement(
   );
 }
 
+/** A request's lines laid out against the given columns. The one place a
+ * request becomes lines, so a printed grid and an embedded one differ in where
+ * their width comes from and in nothing else. */
+function requestLines(
+  request: Omit<GridRequest, "stream">,
+  columns: number,
+): readonly Line[] {
+  return gridLines({
+    layout: request.layout ?? "table",
+    headers: request.headers,
+    rows: request.rows,
+    empty: request.empty,
+    summary: request.summary,
+    columns,
+  });
+}
+
 /**
  * Prints one grid: laid out, drawn, and written to the request's own stream.
  *
@@ -145,14 +162,7 @@ export function printGrid(
   theme: Theme,
   request: GridRequest,
 ): void {
-  const lines = gridLines({
-    layout: request.layout ?? "table",
-    headers: request.headers,
-    rows: request.rows,
-    empty: request.empty,
-    summary: request.summary,
-    columns: layoutColumns(request.stream),
-  });
+  const lines = requestLines(request, layoutColumns(request.stream));
   if (lines.length === 0) return;
   const split = lines.map(splitTrailing);
   const element = gridElement(
@@ -171,4 +181,37 @@ export function printGrid(
     .map((line, index) => `${line}${split[index]?.trailing ?? ""}`)
     .join("\n");
   request.stream.write(`${printed}\n`);
+}
+
+/**
+ * The printed grid as a component, for a host rendering it inside a session
+ * of its own.
+ *
+ * It is laid out exactly as `printGrid` lays one out, against the host's
+ * `width` where printing reads the stream's, and drawn as the same element
+ * `printGrid` renders to a string. What it does not do is `printGrid`'s
+ * `splitTrailing`: that exists only because rendering to a string trims an
+ * unstyled run of whitespace off the end of a line. This renders to no string,
+ * so the element carries every character of every line — a cell's own
+ * trailing spaces included — and whether the host's session then writes them
+ * to the terminal is that session's business.
+ *
+ * It keeps no state, answers no key, writes to no stream, and animates
+ * nothing: every render draws the request and width it was given. The one
+ * thing resolved once per mount is the theme, through `resolveTheme`, because
+ * a component has no stream of its own for colour enablement to read; the
+ * caller supplies one that answers for the standard-error stream `tx`
+ * injected, the stream a dialog draws on.
+ */
+export function embeddedGrid(
+  react: CoreDependencies["react"],
+  ink: CoreDependencies["ink"],
+  resolveTheme: () => Theme,
+): (props: GridProps) => unknown {
+  return function Grid({ request, width }: GridProps) {
+    const theme = react.useMemo(resolveTheme, []);
+    const lines = requestLines(request, width);
+    // Nothing to draw takes no rows, as printing it writes nothing.
+    return lines.length === 0 ? null : gridElement(react, ink, theme, lines);
+  };
 }
