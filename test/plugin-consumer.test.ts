@@ -130,9 +130,15 @@ const isGreeting: ConfigValidator<string> = (value): value is string =>
 // rather than restated as the part this consumer happens to send. The
 // contract publishes what a request may hold; it publishes no rendering, so
 // nothing behind this import is a view, a matcher, or React's element type.
+// A column may tick several of its options; a pre-tick is accepted only on
+// one that does.
 const question: SelectRequest<string> = {
   message: "Greet whom?",
-  options: [{ label: "world", value: "world" }],
+  multiple: true,
+  options: [
+    { label: "world", value: "world", selected: true },
+    { label: "moon", value: "moon" },
+  ],
 };
 // The props of the embeddable dialogs, typed by the same contract. They name
 // no React or Ink type: a host places a component, sizes it, focuses it, and
@@ -142,7 +148,8 @@ const embeddedSelect: SelectProps<string> = {
   width: 40,
   height: 10,
   isActive: true,
-  onSubmit: (result) => void result.value.toUpperCase(),
+  // Every result carries what was taken: the ticks, or the value alone.
+  onSubmit: (result) => void result.selected.map((value) => value.toUpperCase()),
   onCancel: () => undefined,
 };
 const embeddedInput: InputProps = {

@@ -473,6 +473,64 @@ describe("mapping a chosen option back", () => {
   });
 });
 
+describe("what a grid leaves to multi-select", () => {
+  /** Every column a select request opens, the root first, so a property of a
+   * column can be asserted of all of them. */
+  function columns<T>(request: SelectRequest<T>): readonly SelectRequest<T>[] {
+    const nested = request.options.flatMap((option) =>
+      option.dialog !== undefined && "options" in option.dialog
+        ? columns(option.dialog)
+        : [],
+    );
+    return [request, ...nested];
+  }
+
+  test("never declares a multiple column or a pre-tick", () => {
+    const opened = columns(selectRequest(fleet));
+
+    // The rows column and every row's actions column.
+    expect(opened).toHaveLength(3);
+    for (const column of opened) {
+      expect("multiple" in column).toBe(false);
+      for (const option of column.options) {
+        expect("selected" in option).toBe(false);
+      }
+    }
+  });
+
+  test("answers with the completing row alone whatever the result lists as selected", async () => {
+    const asked: SelectRequest<RowChoice>[] = [];
+    // A dialogs capability answering with a result whose `selected` names
+    // other rows, which the real one never does for a request with no multiple
+    // column: the grid maps the completing value back and nothing else.
+    const answering: PluginDefinition = {
+      identity: { name: "answering" },
+      load:
+        () =>
+        ({ register }) => {
+          register("@fx/tx/dialogs", {
+            async select(request: SelectRequest<RowChoice>) {
+              asked.push(request);
+              return {
+                value: { row: 1, action: 1 },
+                values: {},
+                selected: [{ row: 0 }, { row: 2 }],
+              };
+            },
+          });
+        },
+    };
+
+    const { chosen, failure } = await drive(fleet, [], {
+      plugins: [themePlugin, answering, gridPlugin],
+    });
+
+    expect(failure).toBeUndefined();
+    expect(asked).toEqual([selectRequest(fleet)]);
+    expect(chosen).toEqual({ value: "worker", action: "logs" });
+  });
+});
+
 describe("driving an interactive grid", () => {
   test("answers with the value the caller supplied for the chosen row", async () => {
     const { chosen, exitCode, failure } = await drive(plainFleet, [
