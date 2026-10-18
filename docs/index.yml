@@ -342,3 +342,12 @@ changes:
       - "0029"
       - "0030"
       - "0036"
+  - id: "0039"
+    name: take-every-tick-and-paint-dialog-rows
+    path: changes/0039-take-every-tick-and-paint-dialog-rows.md
+    description: Take the ticks of every column opened during a dialog, answer a carriage return inside one input event as Enter, and paint every row of a dialog to its widest row so a host can draw a component over its own content.
+    spec: dialogs
+    status: complete
+    depends_on:
+      - "0036"
+      - "0037"

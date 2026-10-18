@@ -631,7 +631,7 @@ describe("multi-select through select", () => {
     expect(result).toBeUndefined();
   });
 
-  test("a closed column's ticks are remembered but not taken", async () => {
+  test("Ticks in a closed column are taken", async () => {
     const request: SelectRequest<string> = {
       message: "Root",
       options: [
@@ -660,7 +660,112 @@ describe("multi-select through select", () => {
       CARRIAGE_RETURN,
     ]);
     expect(result?.value).toBe("elsewhere");
-    expect(result?.selected).toEqual(["elsewhere"]);
+    expect(result?.selected).toEqual(["first"]);
+  });
+
+  test("Ticks are taken in request order", async () => {
+    const request: SelectRequest<string> = {
+      message: "Root",
+      multiple: true,
+      options: [
+        { label: "plain", value: "plain" },
+        {
+          label: "second",
+          value: "second",
+          dialog: {
+            message: "Second",
+            multiple: true,
+            options: labelled("s1", "s2"),
+          },
+        },
+        {
+          label: "third",
+          value: "third",
+          dialog: {
+            message: "Third",
+            multiple: true,
+            options: labelled("t1", "t2"),
+          },
+        },
+      ],
+    };
+    // Ticked back to front — the third option's column, then the second's,
+    // then the root — and taken front to back, as the request stands.
+    const { result } = await runSelect(request, [
+      barOn(unticked("plain")),
+      DOWN,
+      DOWN,
+      barOn(unticked("third")),
+      CARRIAGE_RETURN,
+      barOn(unticked("t1")),
+      DOWN,
+      SPACE,
+      barOn(ticked("t2")),
+      LEFT,
+      barOn(unticked("third")),
+      UP,
+      barOn(unticked("second")),
+      CARRIAGE_RETURN,
+      barOn(unticked("s1")),
+      SPACE,
+      barOn(ticked("s1")),
+      LEFT,
+      barOn(unticked("second")),
+      UP,
+      SPACE,
+      barOn(ticked("plain")),
+      CARRIAGE_RETURN,
+    ]);
+    expect(result?.value).toBe("plain");
+    expect(result?.selected).toEqual(["plain", "s1", "t2"]);
+  });
+
+  test("A column never opened contributes nothing", async () => {
+    const request: SelectRequest<string> = {
+      message: "Root",
+      options: [
+        { label: "plain", value: "plain" },
+        {
+          label: "opens",
+          value: "opens",
+          dialog: {
+            message: "Nested",
+            multiple: true,
+            options: [{ label: "pre", value: "pre", selected: true }],
+          },
+        },
+      ],
+    };
+    const { result } = await runSelect(request, [
+      barOn("plain"),
+      CARRIAGE_RETURN,
+    ]);
+    expect(result?.value).toBe("plain");
+    expect(result?.selected).toEqual(["plain"]);
+  });
+
+  test("Space and Enter arrive together", async () => {
+    // One chunk, as a terminal read after both keys delivers them: Ink hands
+    // it over as the text of a space and a carriage return.
+    const { result } = await runSelect(greek, [
+      barOn(unticked("alpha")),
+      `${SPACE}${CARRIAGE_RETURN}`,
+    ]);
+    expect(result?.value).toBe("alpha");
+    expect(result?.selected).toEqual(["alpha"]);
+  });
+
+  test("a chunk past the Enter that completed the dialog changes nothing", async () => {
+    const { result, output } = await runSelect(greek, [
+      barOn(unticked("alpha")),
+      DOWN,
+      barOn(unticked("beta")),
+      `${SPACE}${CARRIAGE_RETURN}${SPACE}${CARRIAGE_RETURN}`,
+    ]);
+    expect(result?.value).toBe("beta");
+    expect(result?.selected).toEqual(["beta"]);
+    // The filter never saw the space: nothing was typed into it.
+    expect(stripped(output.text())).not.toContain("› ");
   });
 
   test("two options sharing one sub-request keep ticks of their own", async () => {

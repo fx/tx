@@ -826,6 +826,126 @@ describe("embedded dialog components", () => {
     });
   });
 
+  test("a component drawn over the host's own rows covers them to its widest row", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const Input = inputComponent(host.dialogs);
+      const covered = "X".repeat(70);
+      // Ten rows of the host's own text, with the two components drawn back
+      // over them: a select of six rows over the first six, an input of four
+      // over the rest. Both have a hint line wider than their frame.
+      const View = () =>
+        host.react.createElement(
+          host.ink.Box,
+          { flexDirection: "column" },
+          host.react.createElement(host.ink.Text, null, "Host header"),
+          ...Array.from({ length: 10 }, (_, at) =>
+            host.react.createElement(
+              host.ink.Text,
+              { key: `covered-${at}` },
+              covered,
+            ),
+          ),
+          host.react.createElement(
+            host.ink.Box,
+            { flexDirection: "column", marginTop: -10 },
+            host.react.createElement(Select, {
+              request: { message: "Pick", options: labelled("A", "B", "C") },
+              width: 70,
+              height: 6,
+              isActive: true,
+              ...recorder<SelectResult<number>>(),
+            }),
+            host.react.createElement(Input, {
+              request: { message: "Go" },
+              width: 70,
+              isActive: false,
+              ...recorder<string>(),
+            }),
+          ),
+        );
+      const terminal = session(host, View);
+      await until(() => terminal.output.text().includes("Esc cancel"));
+      const rows = frameRows(terminal.output, "Host header");
+      const selectHint = "↑↓ move · Enter select · type to filter · Esc cancel";
+      const selectWidth = Bun.stringWidth(selectHint) + 1;
+      expect(rows[1]?.startsWith("╔═ Pick ═")).toBe(true);
+      // Every row of the select, the hint line included, blanks the host's
+      // text exactly as far as the hint line reaches, and no further.
+      for (const row of rows.slice(1, 7)) {
+        expect(row.indexOf("X")).toBe(selectWidth);
+      }
+      expect(rows[6]).toBe(` ${selectHint}${"X".repeat(70 - selectWidth)}`);
+      const inputHint = "Enter submit · Esc cancel";
+      const inputWidth = Bun.stringWidth(inputHint) + 1;
+      expect(rows[7]?.startsWith("┌─ Go ─")).toBe(true);
+      for (const row of rows.slice(7, 11)) {
+        expect(row.indexOf("X")).toBe(inputWidth);
+      }
+      expect(rows[10]).toBe(` ${inputHint}${"X".repeat(70 - inputWidth)}`);
+      expect(rows).toHaveLength(11);
+      await terminal.close();
+    });
+  });
+
+  test("an entry collected under a select is painted as one block with its frame", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const covered = "X".repeat(70);
+      const View = () =>
+        host.react.createElement(
+          host.ink.Box,
+          { flexDirection: "column" },
+          host.react.createElement(host.ink.Text, null, "Host header"),
+          // Seven rows: the select's edges and its one option, then the
+          // entry's edges, its value row, and its hint line.
+          ...Array.from({ length: 7 }, (_, at) =>
+            host.react.createElement(
+              host.ink.Text,
+              { key: `covered-${at}` },
+              covered,
+            ),
+          ),
+          host.react.createElement(
+            host.ink.Box,
+            { flexDirection: "column", marginTop: -7 },
+            host.react.createElement(Select, {
+              request: {
+                message: "Pick",
+                options: [
+                  {
+                    label: "Own",
+                    value: 1,
+                    fields: [{ type: "text", name: "owner", message: "Owner" }],
+                  },
+                ],
+              },
+              width: 70,
+              height: 8,
+              isActive: true,
+              ...recorder<SelectResult<number>>(),
+            }),
+          ),
+        );
+      const terminal = session(host, View);
+      await until(() => terminal.output.text().includes("Esc cancel"));
+      await terminal.press(CARRIAGE_RETURN);
+      await until(() => terminal.output.text().includes("Enter submit"));
+      const rows = frameRows(terminal.output, "Host header");
+      // The select's own hint is gone while the field is collected, and the
+      // frame is narrow — yet every row down to the entry's hint line is
+      // painted to the entry's width, the widest of the block.
+      const entryWidth = Bun.stringWidth("Enter submit · Esc cancel") + 1;
+      expect(rows[1]?.startsWith("╔═ Pick ═")).toBe(true);
+      expect(rows[4]?.startsWith("┌─ Owner ─")).toBe(true);
+      for (const row of rows.slice(1, 8)) {
+        expect(row.indexOf("X")).toBe(entryWidth);
+      }
+      expect(rows).toHaveLength(8);
+      await terminal.close();
+    });
+  });
+
   test("Escape closes an opened column, then cancels at the root", async () => {
     await hosted(async (host) => {
       const Select = selectComponent<string>(host.dialogs);

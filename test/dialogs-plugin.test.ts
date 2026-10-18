@@ -1524,6 +1524,19 @@ describe("select filter", () => {
     }
   });
 
+  test("Text and Enter arrive together", async () => {
+    // Typed faster than the terminal was read, the three characters and the
+    // Enter after them reach the dialog as one chunk; the text filters and
+    // the Enter takes, as they would have arriving one by one.
+    const result = await runSelection(eight, [`gam${CARRIAGE_RETURN}`]);
+
+    expect(result.value).toBe("gamma");
+    expect(result.values).toEqual({});
+    const frame = stripped(lastFrame(result.stderr));
+    expect(frame).toContain("› gam");
+    expect(frame).not.toContain("Alpha");
+  });
+
   test("stays off screen until something is typed into it", async () => {
     // Filtering is always live, so there is no list length and no setting at
     // which typing does nothing. What the reader has not asked for is the
@@ -2635,12 +2648,23 @@ describe("bundled text input dialog", () => {
   test("appends a multi-character chunk whole and drops the control characters it carries", async () => {
     const result = await runEntry({ message: "Paste" }, [
       "hello world!",
-      `ab${CARRIAGE_RETURN}cd`,
+      `ab\tcd`,
       `ef${NEXT_LINE}gh`,
       CARRIAGE_RETURN,
     ]);
 
     expect(result.value).toBe("hello world!abcdefgh");
+  });
+
+  test("a carriage return inside a chunk submits what was typed before it", async () => {
+    // Keys typed faster than the terminal is read arrive together, and Ink
+    // cuts neither a carriage return nor what follows it out of the chunk.
+    const result = await runEntry({ message: "Burst" }, [
+      "x",
+      `ab${CARRIAGE_RETURN}cd`,
+    ]);
+
+    expect(result.value).toBe("xab");
   });
 
   test("removes the last character on Backspace and does nothing when the value is empty", async () => {

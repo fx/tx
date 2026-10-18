@@ -36,7 +36,49 @@ const entryHints = {
  * names: `cancel` settles the dialog as cancelled, `back` returns to whatever
  * opened the entry without settling anything.
  */
-type EntryEscape = keyof typeof entryHints;
+export type EntryEscape = keyof typeof entryHints;
+
+/** The hint line an entry draws for what its Escape does. Exported so a select
+ * drawing an entry under its frame can measure the line before the entry has
+ * rendered, and paint its own rows as wide as the entry will paint its. */
+export function entryHint(action: EntryEscape): string {
+  return entryHints[action];
+}
+
+/** The key report Ink hands an input handler, as every dialog reads it. */
+export type InputKey = Parameters<
+  Parameters<CoreDependencies["ink"]["useInput"]>[0]
+>[1];
+
+/** What the Enter key sends in raw mode, and so what marks it inside a chunk. */
+const carriageReturn = "\r";
+
+/**
+ * The keystrokes one input event carries, in the order they were typed.
+ *
+ * Ink reads whatever the terminal has buffered as one chunk and cuts only
+ * escape sequences, Backspace, and Ctrl-C out of it, so two keys typed faster
+ * than the chunk is read — a Space and an Enter over a slow link, a character
+ * and the Enter after it — arrive as one text event with no key flag set: as
+ * ` \r`, which is neither the tick key nor Enter. A carriage return in text
+ * can only be the Enter key, so the event is answered as the text before it,
+ * then Enter, then whatever follows, each exactly as if it had arrived alone.
+ * An event Ink has already resolved to a key, or one carrying no return, is
+ * handed back whole; a space the return follows is the one-space keystroke a
+ * multiple column ticks on, not the paste it would be among other text.
+ */
+export function keystrokes(
+  entry: string,
+  key: InputKey,
+): readonly (readonly [string, InputKey])[] {
+  if (!entry.includes(carriageReturn)) return [[entry, key]];
+  const pressed: (readonly [string, InputKey])[] = [];
+  for (const [at, text] of entry.split(carriageReturn).entries()) {
+    if (at > 0) pressed.push(["", { ...key, return: true }]);
+    if (text !== "") pressed.push([text, key]);
+  }
+  return pressed;
+}
 
 /** Everything a chunk carries that a terminal would display, in order. Control
  * characters drop out, so a pasted line survives while the newline ending it
@@ -105,6 +147,11 @@ type EntryProps = {
    * input's Escape does and the only thing it can do: there is nothing under
    * it to back out into. */
   readonly escapeAction?: EntryEscape;
+  /** The narrowest width the entry paints every row to, so an entry drawn
+   * under a select's frame paints at least as wide as the frame above it and
+   * the two read as one block to a host drawing them over other content. The
+   * entry's own panel and hint line still widen it past this. */
+  readonly box?: number | undefined;
 };
 
 /**
@@ -134,26 +181,35 @@ export function createEntry(
     onSubmit,
     onCancel,
     escapeAction = "cancel",
+    box,
   }: EntryProps) {
     const entered = react.useRef(initialValue ?? "");
     const [value, setValue] = react.useState(entered.current);
     const finished = react.useRef(false);
+    const answer = (entry: string, key: InputKey): void => {
+      if (finished.current) return;
+      if (key.escape || (key.ctrl && entry === "c")) {
+        finished.current = true;
+        onCancel();
+      } else if (key.return) {
+        finished.current = true;
+        onSubmit(entered.current);
+      } else {
+        const edited = editedText(entered.current, entry, key);
+        if (edited !== entered.current) {
+          entered.current = edited;
+          setValue(edited);
+          onEdit();
+        }
+      }
+    };
     ink.useInput(
       (entry, key) => {
-        if (finished.current) return;
-        if (key.escape || (key.ctrl && entry === "c")) {
-          finished.current = true;
-          onCancel();
-        } else if (key.return) {
-          finished.current = true;
-          onSubmit(entered.current);
-        } else {
-          const edited = editedText(entered.current, entry, key);
-          if (edited !== entered.current) {
-            entered.current = edited;
-            setValue(edited);
-            onEdit();
-          }
+        // Answered one keystroke at a time: text typed ahead of an Enter is
+        // appended before the Enter submits it, and whatever the chunk
+        // carries past the Enter meets an entry that has finished.
+        for (const [text, pressed] of keystrokes(entry, key)) {
+          answer(text, pressed);
         }
       },
       { isActive },
@@ -169,6 +225,7 @@ export function createEntry(
       width,
       columns,
       hint: entryHints[escapeAction],
+      box,
       // Start truncation keeps the tail of a long value and the caret itself
       // in view together.
       rows: [
