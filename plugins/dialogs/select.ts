@@ -369,12 +369,16 @@ export function createSelectView(
     callbacks.current = { onSubmit, onCancel };
     /** Set by the first callback, after which every key is ignored: the select
      * is one-shot, and a host keeping it mounted keeps its last frame on
-     * screen rather than a dialog that can answer twice. */
+     * screen rather than a dialog that can answer twice. The ref is what the
+     * key handler reads mid-chunk; the state is what stops the animation, so
+     * nothing on that last frame goes on blinking. */
     const finished = react.useRef(false);
+    const [settled, setSettled] = react.useState(false);
     const settle = react.useCallback(
       (outcome: Outcome<SelectResult<T>>): void => {
         if (finished.current) return;
         finished.current = true;
+        setSettled(true);
         if (outcome.type === "completed") {
           callbacks.current.onSubmit(outcome.value);
         } else {
@@ -589,8 +593,9 @@ export function createSelectView(
     const { time, reset } = ink.useAnimation({
       interval: flashing ? flashInterval : animationInterval,
       isActive:
-        flashing ||
-        (isActive && (filterShown || collectingField || hidden > 0)),
+        !settled &&
+        (flashing ||
+          (isActive && (filterShown || collectingField || hidden > 0))),
     });
     /** The flash ends on elapsed time reaching its duration, never on a frame
      * number: a tick landing inside the renderer's render throttle is dropped

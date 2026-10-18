@@ -759,6 +759,10 @@ describe("embedded dialog components", () => {
       expect(all).not.toContain("abc");
       expect(all).not.toContain("abe");
       expect(frameRows(terminal.output, "Name").join("\n")).toContain("ab");
+      // Its last frame stays put: the caret stopped blinking with it.
+      const settled = terminal.output.text().length;
+      await pause(animationInterval * 2);
+      expect(terminal.output.text().length).toBe(settled);
       expect(terminal.exited()).toBe(false);
       await terminal.close();
     });
@@ -976,5 +980,35 @@ describe("embedded dialog components", () => {
     for (const failure of failures) expect(failure).toBeInstanceOf(TypeError);
     expect(stdin.rawModeChanges).toBe(0);
     expect(stderr.text()).toBe("");
+  });
+
+  test("a cancelled select keeps its last frame rather than blinking on", async () => {
+    await hosted(async (host) => {
+      const Select = selectComponent<number>(host.dialogs);
+      const calls = recorder<SelectResult<number>>();
+      const terminal = session(host, () =>
+        host.react.createElement(Select, {
+          request: {
+            message: "Pick one",
+            options: listed(30),
+            filter: "always",
+          },
+          width: 60,
+          height: 9,
+          isActive: true,
+          ...calls,
+        }),
+      );
+      await until(() => terminal.output.text().includes("Pick one"));
+      await terminal.press(ESCAPE);
+      await until(() => calls.calls.length > 0);
+      await pause(animationInterval / 5);
+      const settled = terminal.output.text().length;
+      await pause(animationInterval * 2);
+      expect(terminal.output.text().length).toBe(settled);
+      expect(calls.calls).toEqual([{ type: "cancel" }]);
+      expect(terminal.exited()).toBe(false);
+      await terminal.close();
+    });
   });
 });

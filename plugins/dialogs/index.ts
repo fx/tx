@@ -568,9 +568,13 @@ const definition: PluginDefinition = Object.freeze({
          * render hands the entry nothing new to answer with. */
         const callbacks = react.useRef({ onSubmit, onCancel });
         callbacks.current = { onSubmit, onCancel };
+        /** Set once the entry has called back, which stops the caret's timer
+         * where it stood: a settled input keeps drawing its last frame for as
+         * long as its host keeps it mounted, rather than blinking on. */
+        const [finished, setFinished] = react.useState(false);
         const { time, reset } = ink.useAnimation({
           interval: animationInterval,
-          isActive,
+          isActive: isActive && !finished,
         });
         return react.createElement(mounted.Entry, {
           message: mounted.message,
@@ -579,8 +583,14 @@ const definition: PluginDefinition = Object.freeze({
           initialValue: mounted.initialValue,
           caret: isActive && onPhase(time, animationInterval),
           onEdit: reset,
-          onSubmit: (value: string) => callbacks.current.onSubmit(value),
-          onCancel: () => callbacks.current.onCancel(),
+          onSubmit: (value: string) => {
+            setFinished(true);
+            callbacks.current.onSubmit(value);
+          },
+          onCancel: () => {
+            setFinished(true);
+            callbacks.current.onCancel();
+          },
         });
       }
 
