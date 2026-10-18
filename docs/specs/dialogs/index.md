@@ -443,7 +443,7 @@ A column MAY let the reader tick several of its options and take them together. 
 - Every option of a multiple column MUST be tickable, an option declaring a sub-dialog or fields included. Ticking MUST NOT open a sub-dialog, collect a field, or move the active option, and the keys that open a sub-dialog MUST keep opening it.
 - A tick MUST belong to the column it was made in. It MUST survive the filter hiding its option, and a column closed and re-opened from the same option within one dialog MUST show the ticks it was left with. Cancelling the dialog MUST discard every tick.
 - Ticking MUST NOT add a way to complete the dialog. Completion MUST be reached only as [Selection](#selection), [User-Provided Options](#user-provided-options), and [Sub-Dialog Columns](#sub-dialog-columns) already require, and Enter confirming a plain option in a multiple column MUST run the confirmation flash [Presentation](#presentation) describes, as it does anywhere else.
-- Every result MUST carry `selected`. It MUST hold the value of every ticked option of every column open when the dialog completes, ordered by column from left to right and within a column by supplied option order, ticked options the filter hides included; when no option of an open column is ticked it MUST be exactly the completing option's value alone. A dialog declaring no multiple column therefore always resolves `selected` as that one value.
+- Every result MUST carry `selected`. It MUST hold the value of every ticked option of every column open when the dialog completes, ordered by column from left to right and within a column by supplied option order, ticked options the filter hides included. Only when no option of any open column is ticked MUST it instead be exactly the completing option's value alone: a tick in one open column is enough for `selected` to hold the ticks alone, and an open column holding none contributes nothing to it. A dialog declaring no multiple column therefore always resolves `selected` as that one value.
 - `value` and `values` MUST keep their meaning when options are ticked: `value` MUST be the completing option's value whether or not it is ticked, and `values` MUST hold only the fields collected along the path to it, so a ticked option's own fields MUST NOT be collected.
 - Every row of a multiple column MUST carry a tick cell at its start, before its label or its first cell, drawn as [Theming](../theming/)'s `marker` variable and as part of the cursor bar on the active row. A header row of a multiple column MUST be offset by the same cell, so each header stays over its field. The tick cell MUST NOT take part in [filtering](#filtering), and a column too narrow for its whole row MUST narrow its label or fields before the tick cell, because a row whose tick cannot be seen cannot be told ticked.
 
@@ -506,6 +506,12 @@ The tick cell is the tick glyph followed by one space: `■` on a ticked option 
 - **GIVEN** a multiple root column whose first option is plain and whose second opens a multiple nested column
 - **WHEN** the user ticks the first root option, opens the second, ticks the nested column's second option, and presses Enter on its first
 - **THEN** `selected` holds the first root option's value and then the nested second option's value
+
+#### Scenario: A tick in one column is enough
+
+- **GIVEN** a single-choice root column whose first option opens a multiple nested column
+- **WHEN** the user opens it, ticks its second option, and presses Enter on its first
+- **THEN** `select` resolves with the nested first option's value as `value` and the nested second option's value alone as `selected`
 
 #### Scenario: Ticks survive backing out
 

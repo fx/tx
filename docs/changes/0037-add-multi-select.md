@@ -47,7 +47,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 3. **Space.** In the select's input handler, before the filter edit: when the top select level is `multiple` and the input is exactly `" "` with neither `ctrl` nor `meta`, toggle the active visible option's supplied index and refresh. A pasted chunk is longer than one character and falls through to `editedText` unchanged.
 4. **The tick cell.** `columns.ts` reserves the tick cell at the start of every row of a multiple column the way it reserves the sub-dialog marker at the end: decided per column before the width is split, drawn as `marker`, and as `cursor` on the active row. The header row is offset by the same two columns. The marker drop rule is unchanged; the tick cell is reserved first.
 5. **The hint.** The select's hint assembly inserts `Space tick` after `↑↓ move` when the top select level is `multiple`.
-6. **The result.** `resolveStack` and `submitField` in `select.ts` compute `selected` from the open select levels, left to right, each level's ticked supplied indices in ascending order, falling back to `[value]`.
+6. **The result.** `resolveStack` and `submitField` in `select.ts` compute `selected` from the open select levels, left to right, each level's ticked supplied indices in ascending order, falling back to `[value]` only when no open level holds a tick.
 7. **Demo.** `demo/scenarios.ts` gains a multi-select scenario so `bun run demo` shows ticking.
 
 ### Decisions

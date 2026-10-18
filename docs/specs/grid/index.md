@@ -311,17 +311,23 @@ A plugin that draws its own interface has rows to show inside it and no stream t
 
 - The capability MUST expose `Grid`, rendered by a host exactly as [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) requires a dialog's component to be: inside a render session the host owns, with the React and Ink `tx` injected into that host, typed as a function of its props returning `unknown`, and the same value on every read of the capability.
 - `Grid` MUST take a `request` — a printing request, whose `stream` it does not read and a host need not supply — and a `width`, meaning the terminal columns the grid may lay out in, as [Dialogs: Embeddable Components](../dialogs/index.md#embeddable-components) defines it. It MUST NOT take keys, so it takes no `height`, `isActive`, `onSubmit`, or `onCancel`.
-- `Grid` MUST draw exactly the lines `print` would write for the same request to a stream reporting `width` columns, every rule of [Cell Values](#cell-values), [Table Layout](#table-layout), and [Flow Layout](#flow-layout) included. `width` MUST be the only width a flow lays out against, and `Grid` MUST NOT read the terminal's width. A table is laid out at its natural width whatever `width` is, under [Table Layout](#table-layout)'s rule against re-flowing; how the host's layout treats a table wider than `width` is the host's.
+- `Grid` MUST hand its host's session exactly the lines `print` would write for the same request to a stream reporting `width` columns, every character of them included — a cell's own trailing characters as much as any other — and every rule of [Cell Values](#cell-values), [Table Layout](#table-layout), and [Flow Layout](#flow-layout) included. `width` MUST be the only width a flow lays out against, and `Grid` MUST NOT read the terminal's width. A table is laid out at its natural width whatever `width` is, under [Table Layout](#table-layout)'s rule against re-flowing; how the host's layout treats a table wider than `width` is the host's.
 - `Grid` MUST resolve every appearance through [Theming](../theming/) for the standard-error stream `tx` injected into the grid's provider — the stream a dialog draws on — because a component has no stream of its own for [Theming: Colour Enablement](../theming/index.md#colour-enablement) to read.
 - `Grid` MUST NOT write to any stream, answer a key, keep state between renders, or animate. It MUST draw the `request` and `width` of the render it is in, so a host changing either sees the change on the next render.
 - A grid with nothing to draw — no rows, no empty message, and no summary — MUST draw nothing and take no rows, as `print` writes nothing for it.
-- [Printing](#printing)'s guarantees about bytes written to a stream bind `print` alone. The bytes that reach the terminal for an embedded grid are its host's session's to write; what `Grid` guarantees is the lines that session is given to draw.
+- [Printing](#printing)'s guarantees about bytes written to a stream bind `print` alone. The bytes that reach the terminal for an embedded grid are its host's session's to write, including whether that session writes the trailing spaces of a line it was given; what `Grid` guarantees is the lines that session is given to draw, character for character.
 
 #### Scenario: An embedded flow matches the printed one
 
 - **GIVEN** a flow request printed to a stream reporting sixty columns, and the same request rendered as `Grid` with a width of sixty in a host session
-- **WHEN** the host's frame is compared with the printed output, hues and trailing whitespace removed from both
+- **WHEN** the host's frame is compared with the printed output, hues and trailing whitespace removed from both, because what a session writes at the end of a line is its own
 - **THEN** their lines are identical
+
+#### Scenario: A cell's own trailing spaces reach the host
+
+- **GIVEN** a table whose last column holds a cell whose text ends in two spaces
+- **WHEN** it is rendered as `Grid` and the text of the element it hands its host is read
+- **THEN** that line's text ends in exactly those two spaces
 
 #### Scenario: A narrower width re-flows the items
 

@@ -54,9 +54,9 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
   - **Why**: a component has no stream of its own, and the dialogs resolve against that stream; an embedded grid beside an embedded select then agrees with it about whether colour is on.
   - **Alternatives considered**: a theme or stream prop from the host, which puts appearance back in the consumer's hands and contradicts [Grid: Grid Capability](../specs/grid/index.md#grid-capability)'s rule that the grid resolves every appearance itself.
 
-- **Decision**: `Grid` does not hold back trailing whitespace the way `printGrid`'s `splitTrailing` does.
-  - **Why**: `splitTrailing` exists so `renderToString` cannot trim a cell's own trailing characters out of printed bytes. An embedded grid's bytes are its host's session's, and trailing spaces are invisible on a terminal; the spec's comparison scenario removes trailing whitespace for that reason.
-  - **Alternatives considered**: appending the held-back text as an extra unstyled `Text`, which the host's renderer would trim anyway.
+- **Decision**: `Grid` passes `gridElement` the whole lines, trailing characters included, and does not use `printGrid`'s `splitTrailing`.
+  - **Why**: `splitTrailing` exists because `printGrid` renders to a string and `renderToString` trims each line's unstyled trailing whitespace; it holds those characters back and appends them to the string afterwards. `Grid` renders to no string, so the element itself carries every character of every line, a cell's own trailing spaces included, as [Grid: Embeddable Grid](../specs/grid/index.md#embeddable-grid) requires. Whether the host's session then writes trailing spaces to the terminal is that session's renderer's business, which the spec leaves to it. The test reads the element's text, not the host's frame, for the trailing-space scenario.
+  - **Alternatives considered**: splitting the lines as `printGrid` does and appending the held-back text as an extra unstyled `Text`, which carries the same characters in more pieces for no observable difference.
 
 - **Decision**: `SelectGrid` reads the dialogs capability when it mounts, not when the grid registers.
   - **Why**: the registry rule every consumer follows — a plugin reading during its own initialization sees only what committed before it — and the same lookup `select` performs.
@@ -74,7 +74,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 - [ ] Add the embeddable `Grid` component
   - [ ] `plugins/grid/contract.ts`: `GridProps` and the `Grid` member, types alone
   - [ ] `plugins/grid/render.ts` and `plugins/grid/index.ts`: the component, laid out against `width` and themed for `context.stderr`, created once at registration
-  - [ ] `test/grid-embedded.test.ts`: a host component rendered through `coreDependencies.ink.render` on captured streams, covering every scenario in [Grid: Embeddable Grid](../specs/grid/index.md#embeddable-grid) — the flow matching the printed one, re-flow on a width change, nothing written to the request's stream — plus an empty grid drawing nothing and sanitized cells
+  - [ ] `test/grid-embedded.test.ts`: a host component rendered through `coreDependencies.ink.render` on captured streams, covering every scenario in [Grid: Embeddable Grid](../specs/grid/index.md#embeddable-grid) — the flow matching the printed one, re-flow on a width change, nothing written to the request's stream, a cell's own trailing spaces reaching the host — plus an empty grid drawing nothing and sanitized cells
   - [ ] `test/plugin-consumer.test.ts`: the consumer fixture types `Grid` through the published contract; `test/plugin-boundary.test.ts` keeps passing
   - [ ] [`docs/manual/plugins.md`](../manual/plugins.md#use-the-bundled-grid-capability): document `Grid`
   - [ ] [Grid](../specs/grid/) spec: mark [Embeddable Grid](../specs/grid/index.md#embeddable-grid) implemented and add a changelog row
