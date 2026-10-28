@@ -34,7 +34,7 @@ jobs:
           # site/.npmrc reads this to authenticate against GitHub Packages,
           # which requires a token even for public packages.
           GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
       - name: Build
         working-directory: site
         run: bun run build
