@@ -27,6 +27,13 @@ import type {
   PluginDefinition,
 } from "../src/plugin.ts";
 import { coreDependencies } from "../src/plugins.ts";
+import {
+  frameRows as readFrameRows,
+  lastFrame as readLastFrame,
+  stripped,
+  TerminalOutput,
+  waitUntil,
+} from "./terminal.ts";
 
 const ESCAPE = String.fromCharCode(27);
 const BACKSPACE = String.fromCharCode(127);
@@ -99,22 +106,7 @@ class TerminalInput extends PassThrough {
   }
 }
 
-class CapturedOutput extends PassThrough {
-  columns = 80;
-  rows = 24;
-  private output = "";
-
-  constructor(readonly isTTY = true) {
-    super();
-    this.on("data", (chunk) => {
-      this.output += chunk.toString();
-    });
-  }
-
-  text(): string {
-    return this.output;
-  }
-}
+class CapturedOutput extends TerminalOutput {}
 
 class AsyncFailingOutput extends CapturedOutput {
   failure: "callback" | "event" | undefined;
@@ -256,14 +248,7 @@ async function until(
   predicate: () => boolean,
   budget = DIALOG_BUDGET,
 ): Promise<void> {
-  const deadline = performance.now() + budget;
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() >= deadline) {
-      throw new Error("timed out waiting for dialog state");
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  }
+  await waitUntil(predicate, budget, "timed out waiting for dialog state");
 }
 
 /** The message every `runSelection` dialog carries, and so the row every one of
@@ -279,49 +264,10 @@ const PANEL = "╔═";
  * matches on what the user reads can ignore them. Built from the escape
  * character rather than written literally, so the source carries no control
  * character. */
-const CONTROL_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[a-zA-Z]`, "g");
-
-/** The text a frame puts on screen, with every styling and cursor sequence
- * removed. */
-function stripped(text: string): string {
-  return text.replace(CONTROL_SEQUENCE, "");
-}
-
-/** Every control sequence except the SGR styling codes: cursor movement,
- * erasure, and mode switches. Ink leaves its last row unterminated and
- * repositions the cursor before rewriting, so the previous frame's last row
- * shares a line of the byte stream with the next frame's first row and this is
- * the boundary between them. */
-const CURSOR_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[A-Za-ln-z]`, "g");
-
-/** Ink rewrites its whole output on every render, and every select frame opens
- * with the request message set into its top border, so the frame the dialog
- * left on screen begins at the start of the row carrying that message's last
- * occurrence. The row is taken whole, because the message now shares it with
- * the border either side of it, and from after the last repositioning ahead of
- * it, because the row the previous frame ended with is still on that line. */
-function lastFrame(stderr: CapturedOutput, anchor = SELECT_MESSAGE): string {
-  const output = stderr.text();
-  const found = output.lastIndexOf(anchor);
-  expect(found).toBeGreaterThanOrEqual(0);
-  const start = output.lastIndexOf("\n", found) + 1;
-  let boundary = 0;
-  for (const match of output.slice(start, found).matchAll(CURSOR_SEQUENCE)) {
-    boundary = (match.index as number) + match[0].length;
-  }
-  return output.slice(start + boundary);
-}
-
-/** The rows of the frame the dialog left on screen, so a test can count them
- * against the terminal's height. */
-function frameRows(
-  stderr: CapturedOutput,
-  anchor = SELECT_MESSAGE,
-): readonly string[] {
-  const rows = stripped(lastFrame(stderr, anchor)).split("\n");
-  while (rows.at(-1) === "") rows.pop();
-  return rows;
-}
+const lastFrame = (output: { text(): string }, anchor = SELECT_MESSAGE) =>
+  readLastFrame(output, anchor);
+const frameRows = (output: { text(): string }, anchor = SELECT_MESSAGE) =>
+  readFrameRows(output, anchor);
 
 /** The sequences the renderer wraps a dimmed run in, which is how a test tells
  * chrome from content and a pulsing indicator from a resting one. */

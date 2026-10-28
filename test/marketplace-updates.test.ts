@@ -6,6 +6,7 @@ import type { UpdateItem } from "@fx/tx/plugin";
 import {
   MarketplaceManager,
   type RunGit,
+  readHigherReleaseTag,
   readMarketplaceSparseCheckoutState,
   runGit,
 } from "../plugins/marketplace/manager.ts";
@@ -1598,6 +1599,31 @@ describe("pinned marketplace updates", () => {
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
+  });
+
+  test("orders large release tags exactly and rejects malformed versions", async () => {
+    const execution = {
+      env: {},
+      runGit: async () => ({
+        stdout: [
+          "9007199254740993.0.0",
+          "v9007199254740994.0.0+build-1",
+          "v9007199254740995.0.0-rc.1",
+          "v09007199254740996.0.0",
+          "vv9007199254740999.0.0",
+        ].join("\n"),
+      }),
+    };
+    expect(
+      await readHigherReleaseTag(
+        "/checkout",
+        "v9007199254740992.0.0",
+        execution,
+      ),
+    ).toBe("v9007199254740994.0.0+build-1");
+    expect(
+      await readHigherReleaseTag("/checkout", "v01.0.0", execution),
+    ).toBeUndefined();
   });
 
   test("reports the highest release above the pin, and no pre-release", async () => {

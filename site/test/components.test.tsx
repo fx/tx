@@ -10,9 +10,24 @@ import {
 import { CommandBlock } from "../src/components/CommandBlock";
 import { ThemeToggle } from "../src/components/ThemeToggle";
 
+const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+  navigator,
+  "clipboard",
+);
+const execCommandDescriptor = Object.getOwnPropertyDescriptor(
+  document,
+  "execCommand",
+);
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  if (clipboardDescriptor)
+    Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+  else Reflect.deleteProperty(navigator, "clipboard");
+  if (execCommandDescriptor)
+    Object.defineProperty(document, "execCommand", execCommandDescriptor);
+  else Reflect.deleteProperty(document, "execCommand");
 });
 
 function clipboard(writeText: (text: string) => Promise<void>) {

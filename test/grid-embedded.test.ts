@@ -18,6 +18,7 @@ import { main } from "../src/cli.ts";
 import type { PluginDefinition } from "../src/plugin.ts";
 import { coreDependencies } from "../src/plugins.ts";
 import { type CapturedContext, captureContext } from "./helpers.ts";
+import { pause, TerminalOutput, waitUntil } from "./terminal.ts";
 
 /**
  * The grid's embeddable components, driven the way a host plugin drives them:
@@ -49,21 +50,9 @@ function recorder(
 /** The host's terminal: what its session writes, captured. Wider than any
  * width a test hands the grid, so every line is laid out against the grid's
  * `width` and never against this. */
-class Screen extends PassThrough {
-  readonly columns = 120;
-  readonly rows = 40;
-  readonly isTTY = true;
-  #written = "";
-
+class Screen extends TerminalOutput {
   constructor() {
-    super();
-    this.on("data", (chunk) => {
-      this.#written += chunk.toString();
-    });
-  }
-
-  text(): string {
-    return this.#written;
+    super(true, 120, 40);
   }
 }
 
@@ -562,23 +551,12 @@ class Keyboard extends PassThrough {
   }
 }
 
-async function pause(milliseconds: number): Promise<void> {
-  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-}
-
 /** Generous, as the function form's own tests are: nothing waited behind here
  * is an animation, and a loaded runner can be slow to draw a first frame. */
 const BUDGET = animationInterval * 20;
 
 async function until(predicate: () => boolean): Promise<void> {
-  const deadline = performance.now() + BUDGET;
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() >= deadline) {
-      throw new Error("timed out waiting for the host session");
-    }
-    await pause(1);
-  }
+  await waitUntil(predicate, BUDGET, "timed out waiting for the host session");
 }
 
 /** The grid capability read from a `tx` composing the dialogs provider a
