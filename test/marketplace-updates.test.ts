@@ -800,6 +800,47 @@ describe("reduced marketplace update application", () => {
     });
   }
 
+  test("uses a complete checkout when probing a symlinked target manifest fails", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-plan-probe-failure-",
+    );
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await rm(join(remote, ".tx"), { recursive: true });
+      await commitFixtureFiles(
+        remote,
+        { "metadata/config.json": manifest, "plugin.ts": entry },
+        "add metadata",
+      );
+      await symlink("metadata", join(remote, ".tx"));
+      fixtureGit(remote, ["add", "--all"]);
+      fixtureGit(remote, ["commit", "-m", "link manifest"]);
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (
+            args.includes("ls-tree") &&
+            args.includes(".tx/config.json") &&
+            !args.includes("tx.marketplace.json")
+          )
+            throw new Error("probe failed");
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("falls back in the same checkout when target-tree planning fails", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-plan-fallback-");
     try {

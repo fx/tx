@@ -1,7 +1,7 @@
 # 0042: Harden Quality and Dependencies
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** —
 
 ## Summary
@@ -31,11 +31,11 @@ The [Architecture](../specs/architecture/index.md) owns the runtime, development
 
 ## Tasks
 
-- [ ] Harden dependencies and complete the quality gates.
+- [x] Harden dependencies and complete the quality gates.
   - [x] Upgrade Bun, compatible dependencies and vulnerable transitive dependencies; align workflows and review guidance.
   - [x] Make the packed consumer test independent of global cache state.
   - [x] Add site pull-request validation, component tests and source coverage.
-  - [ ] Restore root 100% coverage on Bun 1.4.4 and pass `bun run check`.
+  - [x] Restore root 100% coverage on Bun 1.4.4 and pass `bun run check`.
 
 ## Design
 

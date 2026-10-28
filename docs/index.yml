@@ -372,5 +372,5 @@ changes:
     path: changes/0042-harden-quality-and-dependencies.md
     description: Update runtime and dependencies, make packed-consumer tests independent of global cache state, and validate the site and coverage in CI.
     spec: architecture
-    status: in-progress
+    status: complete
     depends_on: []

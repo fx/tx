@@ -57,4 +57,4 @@
 | 0039 | [Take Every Tick and Paint Dialog Rows](changes/0039-take-every-tick-and-paint-dialog-rows.md) | [Dialogs](specs/dialogs/) | complete | 0036, 0037 |
 | 0040 | [Paint Dialog Rows to Their Own Width](changes/0040-paint-dialog-rows-to-their-own-width.md) | [Dialogs](specs/dialogs/) | complete | 0039 |
 | 0041 | [Let a Host Hide the Key Hint Line](changes/0041-let-a-host-hide-the-key-hint-line.md) | [Dialogs](specs/dialogs/) | complete | 0040 |
-| 0042 | [Harden Quality and Dependencies](changes/0042-harden-quality-and-dependencies.md) | [Architecture](specs/architecture/) | in-progress | — |
+| 0042 | [Harden Quality and Dependencies](changes/0042-harden-quality-and-dependencies.md) | [Architecture](specs/architecture/) | complete | — |

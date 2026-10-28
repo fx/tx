@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
 import {
   lstat,
   mkdir,
@@ -12,6 +13,7 @@ import {
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  addMarketplaceSparseDirectories,
   deriveMarketplaceName,
   deriveMarketplaceSshRepository,
   discardStaging,
@@ -20,6 +22,8 @@ import {
   MarketplaceManager,
   normalizeMarketplaceRepository,
   type RunGit,
+  resolveMarketplaceRef,
+  restoreMarketplaceSparseCheckoutState,
   runGit,
 } from "../plugins/marketplace/manager.ts";
 import {
@@ -921,6 +925,193 @@ describe("marketplace preparation", () => {
         "code",
         "ELOOP",
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("marketplace Git recovery", () => {
+  test("refuses a tag pointing to a tree instead of a commit", async () => {
+    const root = await temporaryDirectory("tx-tree-tag-");
+    try {
+      const repository = await createGitRepository(root, "source", {
+        file: "content",
+      });
+      const tree = fixtureGit(repository, ["rev-parse", "HEAD^{tree}"]);
+      fixtureGit(repository, ["tag", "tree-tag", tree]);
+      await expect(
+        resolveMarketplaceRef(repository, "tree-tag", {
+          env: process.env,
+          runGit,
+        }),
+      ).rejects.toThrow("not published");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("restores a formerly full checkout by disabling sparse mode", async () => {
+    const calls: readonly string[][] = [];
+    const execution = {
+      env: {},
+      runGit: async (args: readonly string[]) => {
+        (calls as string[][]).push([...args]);
+        return { stdout: "" };
+      },
+    };
+    await restoreMarketplaceSparseCheckoutState(
+      "/checkout",
+      { enabled: false },
+      execution,
+    );
+    expect(calls.some((args) => args.includes("disable"))).toBe(true);
+  });
+
+  test("retains a sparse Git failure when its remote cannot be read", async () => {
+    const execution = {
+      env: {},
+      runGit: async (args: readonly string[]) => {
+        if (args.includes("sparse-checkout"))
+          throw new Error("sparse operation failed");
+        if (args.includes("remote.origin.url"))
+          throw new Error("remote unavailable");
+        return { stdout: "" };
+      },
+    };
+    await expect(
+      addMarketplaceSparseDirectories("/checkout", { plugins: [] }, execution),
+    ).rejects.toThrow("sparse operation failed");
+  });
+
+  test("retains a pin fetch failure when its remote cannot be read", async () => {
+    const root = await temporaryDirectory("tx-pin-fetch-error-");
+    try {
+      await mkdir(join(root, "tools"));
+      const manager = new MarketplaceManager(root, {
+        runGit: async (args) => {
+          if (args.includes("fetch")) throw new Error("fetch unavailable");
+          if (args.includes("remote.origin.url"))
+            throw new Error("remote unavailable");
+          return { stdout: "" };
+        },
+      });
+      await expect(manager.pin("tools", "v1.0.0")).rejects.toThrow(
+        "fetch unavailable",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("filesystem failures during marketplace operations", () => {
+  test("reports failure to publish a prepared checkout when mv cannot start", async () => {
+    const root = await temporaryDirectory("tx-publish-error-");
+    const savedPath = process.env["PATH"];
+    try {
+      const manager = new MarketplaceManager(join(root, "marketplaces"), {
+        env: process.env,
+        runGit: async (args) => {
+          if (readsSshCommand(args)) unsetSshCommand();
+          return { stdout: "" };
+        },
+        prepare: async () => {
+          process.env["PATH"] = "/nonexistent";
+        },
+      });
+      await expect(
+        manager.add("file:///source", "tools", { full: true }),
+      ).rejects.toThrow();
+      expect(await readdir(join(root, "marketplaces"))).toEqual([]);
+    } finally {
+      if (savedPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = savedPath;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to a full clone after an unexpected sparse manifest read failure", async () => {
+    const root = await temporaryDirectory("tx-sparse-read-error-");
+    try {
+      const source = await createGitRepository(root, "source", {
+        ".tx/config.json": '{"plugins":[]}',
+      });
+      const spy = spyOn(fs, "readFile").mockRejectedValue(
+        new Error("unexpected read failure"),
+      );
+      try {
+        const manager = new MarketplaceManager(join(root, "marketplaces"), {
+          prepare: async () => {},
+        });
+        await expect(
+          manager.add(pathToFileURL(source).href, "tools"),
+        ).resolves.toEqual({
+          name: "tools",
+          source: pathToFileURL(source).href,
+        });
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("retains an unexpected manifest read failure", async () => {
+    const root = await temporaryDirectory("tx-manifest-read-error-");
+    try {
+      await mkdir(join(root, ".tx"));
+      await writeFile(join(root, ".tx/config.json"), "{}");
+      const failure = new Error("I/O interrupted");
+      const spy = spyOn(fs, "readFile").mockRejectedValue(failure);
+      try {
+        await expect(planMarketplaceManifest(root)).rejects.toBe(failure);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("propagates a filesystem failure creating a live reference", async () => {
+    const root = await temporaryDirectory("tx-reference-error-");
+    try {
+      const source = join(root, "source");
+      await mkdir(source);
+      const failure = Object.assign(new Error("permission denied"), {
+        code: "EACCES",
+      });
+      const spy = spyOn(fs, "symlink").mockRejectedValue(failure);
+      try {
+        await expect(
+          new MarketplaceManager(join(root, "marketplaces"), {
+            prepare: async () => {},
+          }).add(source, "tools"),
+        ).rejects.toBe(failure);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("propagates a filesystem failure inspecting a removal target", async () => {
+    const root = await temporaryDirectory("tx-remove-error-");
+    try {
+      const failure = Object.assign(new Error("permission denied"), {
+        code: "EACCES",
+      });
+      const spy = spyOn(fs, "lstat").mockRejectedValue(failure);
+      try {
+        await expect(new MarketplaceManager(root).remove("tools")).rejects.toBe(
+          failure,
+        );
+      } finally {
+        spy.mockRestore();
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
