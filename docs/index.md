@@ -59,3 +59,4 @@
 | 0041 | [Let a Host Hide the Key Hint Line](changes/0041-let-a-host-hide-the-key-hint-line.md) | [Dialogs](specs/dialogs/) | complete | 0040 |
 | 0042 | [Harden Quality and Dependencies](changes/0042-harden-quality-and-dependencies.md) | [Architecture](specs/architecture/) | complete | — |
 | 0043 | [Fix Config Writes and Text Leaves](changes/0043-fix-config-writes-and-text-leaves.md) | [Config](specs/config/) | complete | 0018, 0023 |
+| 0046 | [Adopt Upstream UI Controls](changes/0046-adopt-upstream-ui-controls.md) | [Architecture](specs/architecture/) | in-progress | 0042 |

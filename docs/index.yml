@@ -383,3 +383,11 @@ changes:
     depends_on:
       - "0018"
       - "0023"
+  - id: "0046"
+    name: adopt-upstream-ui-controls
+    path: changes/0046-adopt-upstream-ui-controls.md
+    description: Adopt shared command and theme controls and explicitly scan site and library sources.
+    spec: architecture
+    status: in-progress
+    depends_on:
+      - "0042"
