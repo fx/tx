@@ -5,21 +5,29 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "bun test --preload ./test/setup.ts --coverage"
   },
   "dependencies": {
     "@fx/ui": "0.0.0-8f9d443",
     "lucide-react": "^0.563.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/bun": "1.4.4",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "happy-dom": "^21.0.4",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.0",
-    "vite": "^7.1.0"
+    "vite": "^7.3.7"
+  },
+  "overrides": {
+    "postcss-selector-parser": "^6.1.5"
   }
 }

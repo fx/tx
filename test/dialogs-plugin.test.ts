@@ -45,6 +45,7 @@ class TerminalInput extends PassThrough {
   refs = 0;
   unrefs = 0;
   activeReferences = 0;
+  failRef = false;
   failRawMode = false;
   failRawModeDisable = false;
   failRawModeDisableOnce = false;
@@ -79,6 +80,7 @@ class TerminalInput extends PassThrough {
   }
 
   ref(): this {
+    if (this.failRef) throw new Error("ref failed");
     this.refs++;
     this.activeReferences++;
     this.referenced = true;
@@ -835,6 +837,53 @@ describe("bundled dialogs provider", () => {
       expect(result.stderr.text()).toBe("");
       expect(result.stdin.rawModes).toEqual([]);
     }
+  });
+
+  test("cleans up when the terminal cannot be referenced", async () => {
+    const stdin = new TerminalInput();
+    stdin.failRef = true;
+    const result = await runRejected([{ label: "One", value: 1 }], stdin);
+    expect((result.failure as Error).message).toContain("ref failed");
+    expect(stdin.activeReferences).toBe(0);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  test("reports a renderer that exits before the dialog settles", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let failure: unknown;
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        return { ...renderer, waitUntilExit: async () => {} };
+      },
+    };
+    const exitCode = await main(
+      ["choose"],
+      [
+        themePlugin,
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          try {
+            await dialogs.select({
+              message: "Early exit",
+              options: [{ label: "One", value: 1 }],
+            });
+          } catch (error) {
+            failure = error;
+          }
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    expect(exitCode).toBe(0);
+    expect((failure as Error).message).toContain(
+      "renderer exited before the dialog completed",
+    );
+    expect(stdin.listenerCount("data")).toBe(0);
+    expect(stdin.activeReferences).toBe(0);
   });
 
   test("rejects render and interaction failures without exiting", async () => {

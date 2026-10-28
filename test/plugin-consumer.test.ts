@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -78,13 +86,41 @@ test("the packed package installs a standalone CLI and every published contract"
 
     const consumerRoot = join(temporaryRoot, "consumer");
     await mkdir(consumerRoot);
+    // Resolve dependencies from the frozen install, not Bun's global cache.
+    // Overrides retain the actual packed tx package while making every other
+    // dependency available from the checkout to an offline consumer install.
+    const modules = join(repositoryRoot, "node_modules");
+    const overrides: Record<string, string> = {};
+    for (const entry of await readdir(modules, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      const names = entry.name.startsWith("@")
+        ? (await readdir(join(modules, entry.name))).map(
+            (name) => `${entry.name}/${name}`,
+          )
+        : [entry.name];
+      for (const name of names) {
+        const source = join(modules, name);
+        const local = join(temporaryRoot, "dependencies", name);
+        await cp(source, local, { recursive: true });
+        const manifest = join(local, "package.json");
+        const metadata = JSON.parse(await readFile(manifest, "utf8"));
+        delete metadata.devDependencies;
+        await writeFile(manifest, JSON.stringify(metadata));
+        overrides[name] = `file:${local}`;
+      }
+    }
     await Promise.all([
       writeFile(
         join(consumerRoot, "package.json"),
         JSON.stringify({
           private: true,
           type: "module",
-          dependencies: { "@fx/tx": `file:${packageArchive}` },
+          dependencies: {
+            "@fx/tx": `file:${packageArchive}`,
+            react: overrides["react"],
+            "@types/react": overrides["@types/react"],
+          },
+          overrides,
         }),
       ),
       writeFile(
@@ -340,6 +376,10 @@ export default plugin;
         "--ignore-scripts",
       ],
       consumerRoot,
+      {
+        ...process.env,
+        BUN_INSTALL_CACHE_DIR: join(temporaryRoot, "empty-cache"),
+      },
     );
     await cp(
       join(repositoryRoot, "plugins", "marketplace"),

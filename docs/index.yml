@@ -367,6 +367,13 @@ changes:
     status: complete
     depends_on:
       - "0040"
+  - id: "0042"
+    name: harden-quality-and-dependencies
+    path: changes/0042-harden-quality-and-dependencies.md
+    description: Update runtime and dependencies, make packed-consumer tests independent of global cache state, and validate the site and coverage in CI.
+    spec: architecture
+    status: complete
+    depends_on: []
   - id: "0043"
     name: fix-config-writes-and-text-leaves
     path: changes/0043-fix-config-writes-and-text-leaves.md
