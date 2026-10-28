@@ -383,6 +383,15 @@ changes:
     depends_on:
       - "0018"
       - "0023"
+  - id: "0044"
+    name: consolidate-marketplace-and-terminal-helpers
+    path: changes/0044-consolidate-marketplace-and-terminal-helpers.md
+    description: Reuse marketplace semantic version logic and shared terminal test fixtures.
+    spec: plugin-system
+    status: complete
+    depends_on:
+      - "0042"
+      - "0043"
   - id: "0046"
     name: adopt-upstream-ui-controls
     path: changes/0046-adopt-upstream-ui-controls.md
