@@ -100,7 +100,7 @@ Skipping or weakening any of these rules to land the PR MUST be treated as a bug
 
 ## Open Questions
 
-- [ ] Whether the demo SHOULD gain a scenario hosting an embedded dialog beside a host widget. It would need a host app inside `demo/`, which nothing else there has; the tests already exercise the embedding.
+- [ ] Whether the demo SHOULD gain a scenario hosting an embedded dialog beside a host widget. It would need a host app inside `demo/`, which nothing else there has; the tests already exercise the embedding. **Follow-up:** Maintainers should revisit when a demo host is requested beyond the existing embedded-component tests. A later change must decide any behavior.
 
 ## References
 

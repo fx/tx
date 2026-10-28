@@ -133,9 +133,9 @@ The observation deliberately asks the manager rather than the filesystem. The pa
 
 ## Open Questions
 
-- [ ] Should an item that was gathered as available and then did not move make `tx update` exit non-zero? It differs from an item that was never offered, but failing on a deliberate pin would be worse than reporting it.
-- [ ] Should the participant tell the user *why* a delegated upgrade did not move, beyond passing the manager's own words through? Every reason it could name is a message with no contract behind it.
-- [ ] Should npm's delegation grow an equivalent exemption? npm has no release-age policy today, and the manager record is the place to add one if it ever does.
+- [ ] Should an item that was gathered as available and then did not move make `tx update` exit non-zero? It differs from an item that was never offered, but failing on a deliberate pin would be worse than reporting it. **Follow-up:** Maintainers should revisit when a consumer needs a different exit status for an offered item that did not move. A later change must decide any behavior.
+- [ ] Should the participant tell the user *why* a delegated upgrade did not move, beyond passing the manager's own words through? Every reason it could name is a message with no contract behind it. **Follow-up:** Maintainers should revisit when a reliable cause can be identified for an unmoved delegated upgrade. A later change must decide any behavior.
+- [ ] Should npm's delegation grow an equivalent exemption? npm has no release-age policy today, and the manager record is the place to add one if it ever does. **Follow-up:** Maintainers should revisit when npm introduces a release-age policy. A later change must decide any behavior.
 
 ## References
 

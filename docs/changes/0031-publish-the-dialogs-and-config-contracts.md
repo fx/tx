@@ -117,8 +117,8 @@ The cleanup is the larger half. The sites are found by searching for the declara
 
 ## Open Questions
 
-- [ ] Whether `plugins/dialogs/types.ts` should keep its name once the contract has moved out of it, since what remains is the provider's rendering vocabulary rather than the capability's types. A rename is cosmetic and is deliberately not attempted here.
-- [ ] Whether the marketplace plugin's own `ConfiguredMarketplace` shape and `marketplace` config key belong in a published contract too. They are a consumer's use of the config capability rather than a capability of their own, so nothing here publishes them; a second marketplace-aware plugin would be the thing that changes the answer.
+- [ ] Whether `plugins/dialogs/types.ts` should keep its name once the contract has moved out of it, since what remains is the provider's rendering vocabulary rather than the capability's types. A rename is cosmetic and is deliberately not attempted here. **Follow-up:** Maintainers should revisit when the provider vocabulary warrants a rename. A later change must decide any behavior.
+- [ ] Whether the marketplace plugin's own `ConfiguredMarketplace` shape and `marketplace` config key belong in a published contract too. They are a consumer's use of the config capability rather than a capability of their own, so nothing here publishes them; a second marketplace-aware plugin would be the thing that changes the answer. **Follow-up:** Maintainers should revisit when a second marketplace-aware plugin needs a shared contract. A later change must decide any behavior.
 
 ## References
 

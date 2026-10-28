@@ -16,6 +16,13 @@
 
 | # | Change | Spec | Status | Depends On |
 |---|--------|------|--------|------------|
+| 0045 | [Organize Change History](changes/0045-organize-change-history.md) | [Architecture](specs/architecture/) | complete | — |
+
+<details>
+<summary>Completed history: 0001–0041</summary>
+
+| # | Change | Spec | Status | Depends On |
+|---|--------|------|--------|------------|
 | 0001 | [Bootstrap Core CLI](changes/0001-bootstrap-core-cli.md) | [Architecture](specs/architecture/) | complete | — |
 | 0002 | [Add Plugin Marketplaces](changes/0002-add-plugin-marketplaces.md) | [Plugin System](specs/plugin-system/) | complete | 0001 |
 | 0003 | [Externalize Marketplace Plugin](changes/0003-externalize-marketplace-plugin.md) | [Plugin System](specs/plugin-system/) | complete | 0002 |
@@ -57,3 +64,5 @@
 | 0039 | [Take Every Tick and Paint Dialog Rows](changes/0039-take-every-tick-and-paint-dialog-rows.md) | [Dialogs](specs/dialogs/) | complete | 0036, 0037 |
 | 0040 | [Paint Dialog Rows to Their Own Width](changes/0040-paint-dialog-rows-to-their-own-width.md) | [Dialogs](specs/dialogs/) | complete | 0039 |
 | 0041 | [Let a Host Hide the Key Hint Line](changes/0041-let-a-host-hide-the-key-hint-line.md) | [Dialogs](specs/dialogs/) | complete | 0040 |
+
+</details>

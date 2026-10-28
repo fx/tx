@@ -190,10 +190,10 @@ The second implementation pull request adds selection. Both `MarketplaceUpdater#
 
 ## Open Questions
 
-- [ ] Should the hand-written range grammar be replaced by a dependency on npm's `semver` package if it ever needs more than the fixed grammar this change specifies? Its table-driven test already takes that package's outcomes as the expected ones, so the swap would be mechanical.
-- [ ] Should `TX_IGNORE_COMPATIBILITY` accept a list of marketplace names, so one marketplace can be forced without forcing every other? Nothing needs it yet, and a second accepted shape is a second thing to document.
-- [ ] Should `marketplace list` mark a marketplace the running `tx` refuses? The diagnostic already appears on every invocation, and a fifth column is a formatting decision worth making with real output in front of us.
-- [ ] Should selection follow a `tx update` run that replaces the executable, so one run finishes what now takes two? Tracked in [Updates: Open Questions](../specs/updates/index.md#open-questions).
+- [ ] Should the hand-written range grammar be replaced by a dependency on npm's `semver` package if it ever needs more than the fixed grammar this change specifies? Its table-driven test already takes that package's outcomes as the expected ones, so the swap would be mechanical. **Follow-up:** Maintainers should revisit when the fixed range grammar needs expansion; semver consolidation is separate approved work. A later change must decide any behavior.
+- [ ] Should `TX_IGNORE_COMPATIBILITY` accept a list of marketplace names, so one marketplace can be forced without forcing every other? Nothing needs it yet, and a second accepted shape is a second thing to document. **Follow-up:** Maintainers should revisit when a consumer needs per-marketplace compatibility overrides. A later change must decide any behavior.
+- [ ] Should `marketplace list` mark a marketplace the running `tx` refuses? The diagnostic already appears on every invocation, and a fifth column is a formatting decision worth making with real output in front of us. **Follow-up:** Maintainers should revisit when users need compatibility state in list output. A later change must decide any behavior.
+- [ ] Should selection follow a `tx update` run that replaces the executable, so one run finishes what now takes two? Tracked in [Updates: Open Questions](../specs/updates/index.md#open-questions). **Follow-up:** Maintainers should revisit when a design for reselection after executable replacement is approved. A later change must decide any behavior.
 
 ## References
 

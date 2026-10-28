@@ -87,8 +87,8 @@ No change is required in `src/commands.ts`, `src/plugins.ts`, `src/context.ts`, 
 
 ## Open Questions
 
-- [ ] An opt-in strict mode (for example `TX_STRICT_PLUGINS=1`) that makes any plugin initialization failure non-zero MAY be specified later if a concrete consumer requires it, per the demand-driven rule in [Plugin System: Open Questions](../specs/plugin-system/index.md#open-questions).
-- [ ] A command path that a failed plugin would have owned but that a registered command is a prefix of silently dispatches the prefix command and exits `0`; before this change the escalation masked that case with exit `1`. Whether [Command Resolution](../specs/architecture/index.md#command-resolution) SHOULD prefer an exact match or report a shadowed path is pre-existing longest-prefix behavior, and any change to it belongs to a future change document.
+- [ ] An opt-in strict mode (for example `TX_STRICT_PLUGINS=1`) that makes any plugin initialization failure non-zero MAY be specified later if a concrete consumer requires it, per the demand-driven rule in [Plugin System: Open Questions](../specs/plugin-system/index.md#open-questions). **Follow-up:** Maintainers should revisit when a consumer requests strict failure reporting. A later change must decide any behavior.
+- [ ] A command path that a failed plugin would have owned but that a registered command is a prefix of silently dispatches the prefix command and exits `0`; before this change the escalation masked that case with exit `1`. Whether [Command Resolution](../specs/architecture/index.md#command-resolution) SHOULD prefer an exact match or report a shadowed path is pre-existing longest-prefix behavior, and any change to it belongs to a future change document. **Follow-up:** Maintainers should revisit when a concrete shadowed command path warrants a command-resolution proposal. A later change must decide any behavior.
 
 ## References
 

@@ -139,8 +139,8 @@ Neither check can catch a synchronous builder that schedules work and returns cl
 
 ## Open Questions
 
-- [ ] Should plugin initialization become lazy once the root listing can be cached? Every plugin currently loads on every invocation that reaches dispatch, solely to contribute its namespace and description. Deferring this keeps the change focused, but startup cost grows linearly with installed plugins.
-- [ ] Should the host offer a shared convention for plugins that expose a single action at their namespace root (`tx notes` doing work with no subcommand)? Reachable today without host support; worth revisiting if several plugins hand-roll it.
+- [ ] Should plugin initialization become lazy once the root listing can be cached? Every plugin currently loads on every invocation that reaches dispatch, solely to contribute its namespace and description. Deferring this keeps the change focused, but startup cost grows linearly with installed plugins. **Follow-up:** Maintainers should revisit when startup measurements justify a lazy-loading design. A later change must decide any behavior.
+- [ ] Should the host offer a shared convention for plugins that expose a single action at their namespace root (`tx notes` doing work with no subcommand)? Reachable today without host support; worth revisiting if several plugins hand-roll it. **Follow-up:** Maintainers should revisit when several plugins need the same root-action convention. A later change must decide any behavior.
 
 ## References
 
