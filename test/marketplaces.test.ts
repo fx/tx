@@ -941,6 +941,23 @@ describe("shell-free process execution", () => {
     ).rejects.toThrow("Git command failed");
   });
 
+  test("reports a missing Git executable without inventing stderr", async () => {
+    await expect(
+      runGit(["--version"], { env: { PATH: "/nonexistent" } }),
+    ).rejects.toThrow("Git command failed");
+  });
+
+  test("reports a missing Bun working directory", async () => {
+    const root = await temporaryDirectory("tx-bun-missing-cwd-");
+    try {
+      await expect(
+        runBun(["--version"], { cwd: join(root, "absent"), env: process.env }),
+      ).rejects.toThrow("Bun dependency installation failed");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("runs Bun arguments directly and reports failures", async () => {
     const root = await temporaryDirectory("tx-bun-runner-");
     try {
