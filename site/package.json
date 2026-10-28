@@ -9,7 +9,7 @@
     "test": "bun test --preload ./test/setup.ts --coverage"
   },
   "dependencies": {
-    "@fx/ui": "0.0.0-8f9d443",
+    "@fx/ui": "0.0.0-a481115",
     "lucide-react": "^0.563.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

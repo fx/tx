@@ -5,7 +5,9 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  CommandBlock,
   Separator,
+  ThemeToggle,
 } from "@fx/ui";
 import {
   ArrowUpCircle,
@@ -14,8 +16,6 @@ import {
   Package,
   ShieldCheck,
 } from "lucide-react";
-import { CommandBlock } from "./components/CommandBlock";
-import { ThemeToggle } from "./components/ThemeToggle";
 
 const REPOSITORY = "https://github.com/fx/tx";
 
