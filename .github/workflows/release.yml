@@ -178,7 +178,7 @@ jobs:
         working-directory: site
         env:
           GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Validate, build, and package
         id: package
