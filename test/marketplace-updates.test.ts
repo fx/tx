@@ -6,6 +6,7 @@ import type { UpdateItem } from "@fx/tx/plugin";
 import {
   MarketplaceManager,
   type RunGit,
+  readMarketplaceSparseCheckoutState,
   runGit,
 } from "../plugins/marketplace/manager.ts";
 import { MarketplaceUpdater } from "../plugins/marketplace/updater.ts";
@@ -2074,5 +2075,32 @@ describe("marketplace update failures", () => {
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("sparse checkout configuration validation", () => {
+  test("rejects invalid boolean values before changing the checkout", async () => {
+    const execution = {
+      env: {},
+      runGit: async () => ({ stdout: "core.sparsecheckout\ninvalid\0" }),
+    };
+    await expect(
+      readMarketplaceSparseCheckoutState("checkout", execution),
+    ).rejects.toThrow("invalid sparse-checkout configuration");
+  });
+
+  test("rejects an enabled cone with no directories", async () => {
+    const execution = {
+      env: {},
+      runGit: async (args: readonly string[]) => ({
+        stdout:
+          args.includes("list") && args.includes("sparse-checkout")
+            ? ""
+            : "core.sparsecheckout\ntrue\0core.sparsecheckoutcone\ntrue\0",
+      }),
+    };
+    await expect(
+      readMarketplaceSparseCheckoutState("checkout", execution),
+    ).rejects.toThrow("unexpected empty sparse checkout");
   });
 });
