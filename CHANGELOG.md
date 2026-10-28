@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.1](https://github.com/fx/tx/compare/v2.2.0...v2.2.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ci:** harden dependencies and validate all application code ([#94](https://github.com/fx/tx/issues/94)) ([fbe9ab9](https://github.com/fx/tx/commit/fbe9ab9707d1649c9eb7e81e9dad170dad58d85d))
+* **runtime:** serialize config writes and animate nested input carets ([#95](https://github.com/fx/tx/issues/95)) ([9eb21c4](https://github.com/fx/tx/commit/9eb21c4f3ac4c021aa03e23ba7d141e99bd18961))
+
 ## [2.2.0](https://github.com/fx/tx/compare/v2.1.0...v2.2.0) (2026-10-18)
 
 
