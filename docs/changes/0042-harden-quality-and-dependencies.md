@@ -39,4 +39,4 @@ The [Architecture](../specs/architecture/index.md) owns the runtime, development
 
 ## Design
 
-The consumer fixture installs the actual packed archive with local dependency copies from the frozen install and an empty cache. The site runs its own coverage and TypeScript checks because its browser build has separate dependencies.
+The consumer fixture installs the actual packed archive with local dependency copies from the frozen install and an empty cache. The site uses separate dependencies and coverage and TypeScript checks; the root `bun run check` runs them alongside the root checks, and the required CI job installs both locked dependency sets before invoking it.

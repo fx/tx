@@ -94,12 +94,13 @@ test("toggles the resolved theme", () => {
       <ThemeToggle />
     </ThemeProvider>,
   );
-  const button = screen.getByRole("button", {
-    name: /Switch to (dark|light) theme/,
-  });
-  const initial = button.getAttribute("aria-label");
+  const button = screen.getByRole("button", { name: "Switch to dark theme" });
   fireEvent.click(button);
-  expect(button.getAttribute("aria-label")).not.toBe(initial);
+  expect(button.getAttribute("aria-label")).toBe("Switch to light theme");
+  expect(window.localStorage.getItem("theme")).toBe("dark");
+  fireEvent.click(button);
+  expect(button.getAttribute("aria-label")).toBe("Switch to dark theme");
+  expect(window.localStorage.getItem("theme")).toBe("light");
 });
 
 test("resets the confirmation after the copy timeout", async () => {

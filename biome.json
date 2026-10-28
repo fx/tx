@@ -5,6 +5,7 @@
       "**",
       "!.claude",
       "!.agents",
+      "!.playwright-mcp",
       "!**/dist",
       "!**/coverage",
       "!**/node_modules"
