@@ -538,10 +538,7 @@ export async function runGit(
     });
     return { stdout };
   } catch (error) {
-    const detail =
-      typeof (error as { stderr?: unknown }).stderr === "string"
-        ? (error as { stderr: string }).stderr.trim()
-        : "";
+    const detail = String((error as { stderr?: string }).stderr ?? "").trim();
     throw new Error(`Git command failed${detail ? `: ${detail}` : ""}`);
   }
 }

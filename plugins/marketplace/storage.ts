@@ -574,13 +574,12 @@ export function parseMarketplaceManifestDocument(
   try {
     document = JSON.parse(contents);
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new MarketplaceManifestContentError(
-        `Invalid ${selectedManifestFilename}: ${error.message}`,
-        failureOptions(error),
-      );
-    }
-    throw error;
+    // JSON.parse without a reviver reports malformed input as SyntaxError.
+    const syntaxError = error as SyntaxError;
+    throw new MarketplaceManifestContentError(
+      `Invalid ${selectedManifestFilename}: ${syntaxError.message}`,
+      failureOptions(syntaxError),
+    );
   }
 
   if (!isRecord(document)) {
@@ -844,10 +843,7 @@ export async function runBun(
       env: { ...options.env, BUN_BE_BUN: "1" },
     });
   } catch (error) {
-    const detail =
-      typeof (error as { stderr?: unknown }).stderr === "string"
-        ? (error as { stderr: string }).stderr.trim()
-        : "";
+    const detail = String((error as { stderr?: string }).stderr ?? "").trim();
     throw new Error(
       `Bun dependency installation failed${detail ? `: ${detail}` : ""}`,
     );
