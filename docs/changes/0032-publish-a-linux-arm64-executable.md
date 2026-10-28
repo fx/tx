@@ -118,9 +118,9 @@ Each job gets only the permissions it uses, so the jobs that run release code â€
 
 ## Open Questions
 
-- [ ] Should macOS executables be published? Bun cross-compiles them as well, but an unsigned macOS executable is quarantined by Gatekeeper, so publishing one is really a decision about signing.
-- [ ] Should a musl executable be published for Alpine and other musl distributions? It is one more compile target and one more native smoke test.
-- [ ] Should the npm package serve arm64, through per-architecture packages or a launcher? Nothing installs `tx` from npm on arm64 today.
+- [ ] Should macOS executables be published? Bun cross-compiles them as well, but an unsigned macOS executable is quarantined by Gatekeeper, so publishing one is really a decision about signing. **Follow-up:** Maintainers should revisit when macOS signing and publication are specified. A later change must decide any behavior.
+- [ ] Should a musl executable be published for Alpine and other musl distributions? It is one more compile target and one more native smoke test. **Follow-up:** Maintainers should revisit when a musl consumer and native smoke-test environment are available. A later change must decide any behavior.
+- [ ] Should the npm package serve arm64, through per-architecture packages or a launcher? Nothing installs `tx` from npm on arm64 today. **Follow-up:** Maintainers should revisit when npm arm64 distribution has a consumer and packaging design. A later change must decide any behavior.
 
 ## References
 

@@ -91,8 +91,8 @@ All three verifications were read from the per-step conclusions of real workflow
 
 ## Open Questions
 
-- [ ] Should the release workflow's dispatched CI run assert that it was not a documentation-only skip? It cannot be one today, because `workflow_dispatch` has no base to compare against and always runs in full — but that is an implicit dependency rather than an asserted one.
-- [ ] Should checkout stop fetching full history? `fetch-depth: 0` is what lets the detection step reach the base commit, and on a documentation-only run the checkout becomes the entire job, so its cost is the job's cost. At this repository's size that is negligible, and the alternative — a shallow checkout plus a targeted `git fetch` of the base SHA — adds a network call that can fail and a fallback path to get wrong, for no measurable gain today. Worth revisiting if the history grows enough for the fetch to be felt.
+- [ ] Should the release workflow's dispatched CI run assert that it was not a documentation-only skip? It cannot be one today, because `workflow_dispatch` has no base to compare against and always runs in full — but that is an implicit dependency rather than an asserted one. **Follow-up:** Maintainers should revisit when the release CI dispatch can skip quality checks. A later change must decide any behavior.
+- [ ] Should checkout stop fetching full history? `fetch-depth: 0` is what lets the detection step reach the base commit, and on a documentation-only run the checkout becomes the entire job, so its cost is the job's cost. At this repository's size that is negligible, and the alternative — a shallow checkout plus a targeted `git fetch` of the base SHA — adds a network call that can fail and a fallback path to get wrong, for no measurable gain today. Worth revisiting if the history grows enough for the fetch to be felt. **Follow-up:** Maintainers should revisit when checkout time becomes material. A later change must decide any behavior.
 
 ## References
 

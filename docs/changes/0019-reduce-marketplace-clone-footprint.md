@@ -123,7 +123,7 @@ The update path mirrors this during apply: `fetchCheckoutRemote`'s earlier gathe
 
 ## Open Questions
 
-- [ ] Whether a marketplace author should have a way to declare, inside `.tx/config.json`, that their plugins' module graphs — static relative imports or nonliteral dynamic imports alike — reach outside the manifest-derived directories, so a reduced retrieval is never attempted for that marketplace at all — tracked in [Plugin System: Open Questions](../specs/plugin-system/index.md#open-questions), not resolved by this change.
+- [ ] Whether a marketplace author should have a way to declare, inside `.tx/config.json`, that their plugins' module graphs — static relative imports or nonliteral dynamic imports alike — reach outside the manifest-derived directories, so a reduced retrieval is never attempted for that marketplace at all — tracked in [Plugin System: Open Questions](../specs/plugin-system/index.md#open-questions), not resolved by this change. **Follow-up:** Maintainers should revisit when a marketplace needs to declare module graphs outside the reduced retrieval. A later change must decide any behavior.
 
 ## References
 

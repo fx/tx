@@ -134,9 +134,9 @@ The reference itself is a symbolic link at `<marketplaces>/<name>` pointing at t
 
 ## Open Questions
 
-- [ ] Should `marketplace list` distinguish a reference from a clone explicitly, rather than leaving it implicit in the path shape? Worth revisiting if authors report confusion once the feature is in use.
-- [ ] Should a stale reference be removable through a dedicated prune command rather than by name? Not needed while the recovery diagnostic already names the exact `marketplace remove` invocation.
-- [ ] Should adding a local source warn that dependency installation writes into the author's own tree? The write is the point of a live reference, but it is still `tx` touching a directory the user did not hand over for modification.
+- [ ] Should `marketplace list` distinguish a reference from a clone explicitly, rather than leaving it implicit in the path shape? Worth revisiting if authors report confusion once the feature is in use. **Follow-up:** Maintainers should revisit when authors report confusion about reference listings. A later change must decide any behavior.
+- [ ] Should a stale reference be removable through a dedicated prune command rather than by name? Not needed while the recovery diagnostic already names the exact `marketplace remove` invocation. **Follow-up:** Maintainers should revisit when stale-reference cleanup cannot be handled by the named remove command. A later change must decide any behavior.
+- [ ] Should adding a local source warn that dependency installation writes into the author's own tree? The write is the point of a live reference, but it is still `tx` touching a directory the user did not hand over for modification. **Follow-up:** Maintainers should revisit when authors report surprise about dependency installation in their tree. A later change must decide any behavior.
 
 ## References
 

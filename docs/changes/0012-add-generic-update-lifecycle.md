@@ -151,9 +151,9 @@ An item is in scope when no names were given, or when its name is one of them. A
 
 ## Open Questions
 
-- [ ] Should a participant be able to declare that its items are mutually exclusive, or that one must apply before another? Nothing needs it; composition order covers the only ordering constraint known today.
-- [ ] Should `updaters()` be exposed on `initializePlugins`' result as well, for a future consumer that is not a plugin? No such consumer exists, and adding it would be an untested public surface.
-- [ ] Should the driver print a summary line after a run? A per-item line is enough at the scale of two participants, and a summary is easy to add once a run can be long.
+- [ ] Should a participant be able to declare that its items are mutually exclusive, or that one must apply before another? Nothing needs it; composition order covers the only ordering constraint known today. **Follow-up:** Maintainers should revisit when a participant needs ordering or mutual exclusion beyond composition order. A later change must decide any behavior.
+- [ ] Should `updaters()` be exposed on `initializePlugins`' result as well, for a future consumer that is not a plugin? No such consumer exists, and adding it would be an untested public surface. **Follow-up:** Maintainers should revisit when a non-plugin consumer needs updater access. A later change must decide any behavior.
+- [ ] Should the driver print a summary line after a run? A per-item line is enough at the scale of two participants, and a summary is easy to add once a run can be long. **Follow-up:** Maintainers should revisit when update runs become long enough to justify a summary. A later change must decide any behavior.
 
 ## References
 

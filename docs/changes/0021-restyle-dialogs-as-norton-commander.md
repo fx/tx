@@ -124,8 +124,8 @@ Tests strip escape sequences with the runtime's built-in stripper before matchin
 
 ## Open Questions
 
-- [ ] Whether a reduced-motion preference should disable the three animations — the spec leaves it open; an environment variable read once at dialog start would be the natural shape, and nothing here forecloses it.
-- [ ] Whether the hint line should be omitted below a terminal height at which it costs an option row — the viewport already has a floor of one row; this is a polish question for narrow terminals.
+- [ ] Whether a reduced-motion preference should disable the three animations — the spec leaves it open; an environment variable read once at dialog start would be the natural shape, and nothing here forecloses it. **Follow-up:** Maintainers should revisit when a reduced-motion preference is specified. A later change must decide any behavior.
+- [ ] Whether the hint line should be omitted below a terminal height at which it costs an option row — the viewport already has a floor of one row; this is a polish question for narrow terminals. **Follow-up:** Maintainers should revisit when automatic omission for small terminals is requested; embedded hosts can already hide hints via [0041](./0041-let-a-host-hide-the-key-hint-line.md). A later change must decide any behavior.
 
 ## References
 
