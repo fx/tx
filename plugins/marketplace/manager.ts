@@ -192,23 +192,6 @@ const commitHashPattern = /^[0-9a-f]+$/i;
  * nobody published.
  */
 const revisionSyntaxPattern = /[\0-\x20~^:?*[\\\x7f]|@\{|\.\.|^@$/;
-/**
- * A semantic version, optionally spelled with the `v` release tags carry,
- * implemented with the exclusions the specification makes so a leading zero or
- * an empty pre-release identifier is rejected rather than coerced by the
- * runtime's comparison. The marketplace plugin carries its own copy because a
- * bundled plugin's module graph stays inside that plugin; sharing one would
- * put marketplace-and-release vocabulary into feature-neutral core.
- */
-const numericIdentifier = "0|[1-9]\\d*";
-const prereleaseIdentifier = `${numericIdentifier}|\\d*[A-Za-z-][0-9A-Za-z-]*`;
-const buildIdentifier = "[0-9A-Za-z-]+";
-const versionPattern = new RegExp(
-  `^v?(?:${numericIdentifier})\\.(?:${numericIdentifier})\\.(?:${numericIdentifier})` +
-    `(?:-(?:${prereleaseIdentifier})(?:\\.(?:${prereleaseIdentifier}))*)?` +
-    `(?:\\+${buildIdentifier}(?:\\.${buildIdentifier})*)?$`,
-);
-
 export function normalizeMarketplaceRepository(repository: string): string {
   if (!githubRepositoryPattern.test(repository)) return repository;
   return `https://github.com/${repository}${repository.endsWith(".git") ? "" : ".git"}`;
@@ -538,10 +521,7 @@ export async function runGit(
     });
     return { stdout };
   } catch (error) {
-    const detail =
-      typeof (error as { stderr?: unknown }).stderr === "string"
-        ? (error as { stderr: string }).stderr.trim()
-        : "";
+    const detail = String((error as { stderr?: string }).stderr ?? "").trim();
     throw new Error(`Git command failed${detail ? `: ${detail}` : ""}`);
   }
 }
@@ -1012,57 +992,9 @@ export async function resolveMarketplaceRef(
   throw new MarketplaceRefNotPublishedError(ref);
 }
 
-/** Whether a tag is a version this plugin may order at all. */
-function isSemanticVersion(tag: string): boolean {
-  return versionPattern.test(tag);
-}
-
-/** A validated version's numeric components, and whether it carries a
- * pre-release — read ahead of the build metadata, which may itself contain the
- * `-` that introduces one. */
-function versionParts(version: string): {
-  readonly core: readonly string[];
-  readonly prerelease: boolean;
-} {
-  const [withoutBuild = ""] = version.split("+");
-  const core = withoutBuild.replace(/^v/, "");
-  const separator = core.indexOf("-");
-  return {
-    core: (separator < 0 ? core : core.slice(0, separator)).split("."),
-    prerelease: separator >= 0,
-  };
-}
-
-/**
- * Whether a release version is higher than another version, as semantic
- * versions. The candidate carries no pre-release — every caller excludes one
- * before comparing, because a pre-release is the version its publisher has not
- * offered yet — so identical cores are decided by the other side alone: a
- * pre-release precedes the release it leads to, and two releases with the same
- * core are the same version. That is the whole ordering this plugin needs, and
- * it is written out rather than delegated because the marketplace plugin is
- * type-checked by consumers who have no Bun types.
- *
- * Components are ordered as digits rather than as numbers: the grammar above
- * forbids a leading zero, so the longer run of digits is the larger value and
- * equal-length runs compare lexically. Reading them as numbers would round two
- * different versions above 2^53 into the same one and report neither as higher
- * than the other.
- */
-function isHigherRelease(candidate: string, version: string): boolean {
-  const left = versionParts(candidate);
-  const right = versionParts(version);
-  for (let index = 0; index < left.core.length; index += 1) {
-    const [leading = "0", trailing = "0"] = [
-      left.core[index],
-      right.core[index],
-    ];
-    if (leading === trailing) continue;
-    return leading.length === trailing.length
-      ? leading > trailing
-      : leading.length > trailing.length;
-  }
-  return right.prerelease;
+/** Release tags may have a single leading v. */
+function parseReleaseTag(tag: string): SemanticVersion | undefined {
+  return parseSemanticVersion(tag.startsWith("v") ? tag.slice(1) : tag);
 }
 
 /**
@@ -1081,15 +1013,24 @@ export async function readHigherReleaseTag(
   pin: string,
   execution: GitExecution,
 ): Promise<string | undefined> {
-  if (!isSemanticVersion(pin)) return undefined;
+  const pinned = parseReleaseTag(pin);
+  if (!pinned) return undefined;
 
   const listed = await readCheckout(checkout, ["tag", "--list"], execution);
   let highest: string | undefined;
+  let highestVersion: SemanticVersion | undefined;
   for (const line of listed.split("\n")) {
     const tag = line.trim();
-    if (!isSemanticVersion(tag) || versionParts(tag).prerelease) continue;
-    if (!isHigherRelease(tag, pin)) continue;
-    if (highest === undefined || isHigherRelease(tag, highest)) highest = tag;
+    const version = parseReleaseTag(tag);
+    if (!version || version.prerelease.length > 0) continue;
+    if (compareSemanticVersions(version, pinned) <= 0) continue;
+    if (
+      !highestVersion ||
+      compareSemanticVersions(version, highestVersion) > 0
+    ) {
+      highest = tag;
+      highestVersion = version;
+    }
   }
   return highest;
 }

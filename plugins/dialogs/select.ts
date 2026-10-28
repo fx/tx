@@ -687,7 +687,7 @@ export function createSelectView(
       isActive:
         !settled &&
         (flashing ||
-          (isActive && (filterShown || collectingField || hidden > 0))),
+          (isActive && (filterShown || entryOnScreen || hidden > 0))),
     });
     /** The flash ends on elapsed time reaching its duration, never on a frame
      * number: a tick landing inside the renderer's render throttle is dropped
@@ -1172,16 +1172,16 @@ export function createSelectView(
       return { rows: drawn === 0 ? 0 : drawn + (header ? 1 : 0), header };
     });
     const bandRows = bands.reduce((most, band) => Math.max(most, band.rows), 0);
-    const driven = shown.at(-1);
+    // The driven column is never dropped, so the visible band is nonempty.
+    const driven = shown[shown.length - 1] as (typeof shown)[number];
     /** Everything the driven column has off screen, either side of its window
      * together. It is the largest either count can ever reach, so it is the
      * room both edges hold for one — held whether a count is showing or not,
      * because a title that retruncates as the reader scrolls past the first
      * hidden row is the same restlessness the counts were moved out of the
      * panel to stop. */
-    const hiddenEitherSide = driven
-      ? driven.matched.visible.length - driven.viewport.count
-      : 0;
+    const hiddenEitherSide =
+      driven.matched.visible.length - driven.viewport.count;
     const edgeReserve =
       hiddenEitherSide > 0
         ? displayWidth(` ${indicatorText(hiddenAboveGlyph, hiddenEitherSide)} `)

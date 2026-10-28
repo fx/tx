@@ -77,6 +77,7 @@ The exact structural representation MAY vary, but it MUST preserve the owned con
 - `read` MUST reject when a value is persisted under a defined key but that key's guard rejects it, and MUST NOT affect reading any other key.
 - `write` MUST reject a value that the key's own guard rejects, before persisting anything.
 - `write` MUST persist a value accepted by the key's guard so that a subsequent `read` for that key, in the same process or a later one, resolves with a value equivalent to what was written.
+- A single provider instance MUST serialize its write transactions in invocation order, preserving unrelated properties, and a rejected write MUST NOT prevent later writes from proceeding.
 - A value written and later read back MUST be encoded and decoded as JSON; a consumer's guard is responsible for accepting only values that survive that round trip unchanged.
 
 #### Scenario: Read before any write
@@ -176,3 +177,4 @@ The provider registers during initialization. Consumers read the committed value
 |------|--------|----------|
 | 2026-08-31 | Initial desired config capability, key definition, and persistence behavior | [0018-add-config-store-and-marketplace-installs](../../changes/0018-add-config-store-and-marketplace-installs.md) |
 | 2026-09-06 | Required the config contract to be published at `@fx/tx/config` as a types-only import, replacing the local structural copy every consumer maintained | [0031-publish-the-dialogs-and-config-contracts](../../changes/0031-publish-the-dialogs-and-config-contracts.md) |
+| 2026-10-28 | Specify serialization and failure recovery for writes through one provider instance | [0043-fix-config-writes-and-text-leaves](../../changes/0043-fix-config-writes-and-text-leaves.md) |

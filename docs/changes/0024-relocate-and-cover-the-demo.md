@@ -120,7 +120,7 @@ The split is what makes 100% coverage reachable honestly. The catalogue is asser
 
 ## Open Questions
 
-- [ ] Whether `test/coverage.test.ts` should walk the repository for first-party executable source rather than carrying a hand-maintained list of roots — the hand-maintained list is exactly what let the demo slip, and adding `demo` to it fixes this instance without fixing the class. **Follow-up:** Maintainers should revisit when coverage-root discovery is designed; adding site coverage alone does not establish discovery. A later change must decide any behavior.
+- [ ] Whether `test/coverage.test.ts` should walk the repository for first-party executable source rather than carrying a hand-maintained list of roots — the hand-maintained list is exactly what let the demo slip, and adding `demo` to it fixes this instance without fixing the class. **Follow-up:** Maintainers should revisit when coverage-root discovery is designed; [0042](./0042-harden-quality-and-dependencies.md) adds site coverage but does not establish discovery. A later change must decide any behavior.
 
 ## References
 

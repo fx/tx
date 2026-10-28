@@ -6,8 +6,11 @@ import type { UpdateItem } from "@fx/tx/plugin";
 import {
   MarketplaceManager,
   type RunGit,
+  readHigherReleaseTag,
+  readMarketplaceSparseCheckoutState,
   runGit,
 } from "../plugins/marketplace/manager.ts";
+import { MarketplaceManifestRepositoryPathError } from "../plugins/marketplace/storage.ts";
 import { MarketplaceUpdater } from "../plugins/marketplace/updater.ts";
 import {
   commitFixtureFiles,
@@ -798,6 +801,47 @@ describe("reduced marketplace update application", () => {
     });
   }
 
+  test("uses a complete checkout when probing a symlinked target manifest fails", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-plan-probe-failure-",
+    );
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await rm(join(remote, ".tx"), { recursive: true });
+      await commitFixtureFiles(
+        remote,
+        { "metadata/config.json": manifest, "plugin.ts": entry },
+        "add metadata",
+      );
+      await symlink("metadata", join(remote, ".tx"));
+      fixtureGit(remote, ["add", "--all"]);
+      fixtureGit(remote, ["commit", "-m", "link manifest"]);
+      fixtureGit(remote, ["tag", "v2.0.0"]);
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (
+            args.includes("ls-tree") &&
+            args.includes(".tx/config.json") &&
+            !args.includes("tx.marketplace.json")
+          )
+            throw new Error("probe failed");
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   test("falls back in the same checkout when target-tree planning fails", async () => {
     const temporaryRoot = await temporaryDirectory("tx-update-plan-fallback-");
     try {
@@ -830,6 +874,164 @@ describe("reduced marketplace update application", () => {
         fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
       ).toBe("false");
       expect(calls.some((args) => args[0] === "clone")).toBe(false);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to a complete checkout when collision detection fails", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-collision-fallback-",
+    );
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (args.includes("--others"))
+            throw new Error("cannot list untracked files");
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("continues in a full checkout when extending the sparse cone fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-add-fallback-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (args.includes("sparse-checkout") && args.includes("add"))
+            throw new Error("cone add failed");
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("retries preparation in a full tree when a target path probe fails", async () => {
+    const temporaryRoot = await temporaryDirectory("tx-update-probe-fallback-");
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      let attempts = 0;
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (args.includes("ls-tree") && args.includes("missing-entry"))
+            throw new Error("probe unavailable");
+          return runGit(args, options);
+        },
+        prepare: async () => {
+          if (++attempts === 1)
+            throw new MarketplaceManifestRepositoryPathError("missing entry", [
+              "missing-entry",
+            ]);
+        },
+      });
+      expect(
+        await participant.apply(gathered(await participant.gather())),
+      ).toEqual({ applied: true, version: "v2.0.0" });
+      expect(attempts).toBe(2);
+      expect(
+        fixtureGit(checkout, ["config", "--bool", "core.sparseCheckout"]),
+      ).toBe("false");
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports failed sparse fallback and restores the original cone", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-fallback-failure-",
+    );
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote);
+      const before = headOf(checkout);
+      const cones = sparseDirectories(checkout);
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (args.includes("sparse-checkout") && args.includes("add"))
+            throw new Error("cone add failed");
+          if (args.includes("sparse-checkout") && args.includes("disable"))
+            throw new Error("full fallback failed");
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      await expect(
+        participant.apply(gathered(await participant.gather())),
+      ).rejects.toThrow(
+        "cone add failed. Falling back to the complete tree failed too: full fallback failed",
+      );
+      expect(headOf(checkout)).toBe(before);
+      expect(sparseDirectories(checkout)).toEqual(cones);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("reports sparse restoration failure after a refused move", async () => {
+    const temporaryRoot = await temporaryDirectory(
+      "tx-update-refused-restore-",
+    );
+    try {
+      const { remote, root, checkout } =
+        await installSparseClone(temporaryRoot);
+      await publishSecondVersion(remote, {
+        ".tx/config.json": manifest,
+        "plugin.ts": entry,
+        "new/added.txt": "target",
+      });
+      await mkdir(join(checkout, "new"), { recursive: true });
+      await writeFile(join(checkout, "new/added.txt"), "mine");
+      const before = headOf(checkout);
+      const participant = new MarketplaceUpdater(root, {
+        env: process.env,
+        runGit: async (args, options) => {
+          if (args.includes("sparse-checkout") && args.includes("set"))
+            throw new Error("cone restore failed");
+          return runGit(args, options);
+        },
+        prepare: async () => {},
+      });
+      await expect(
+        participant.apply(gathered(await participant.gather())),
+      ).rejects.toThrow(
+        "Restoring the sparse checkout failed too: cone restore failed",
+      );
+      expect(headOf(checkout)).toBe(before);
+      expect(await readFile(join(checkout, "new/added.txt"), "utf8")).toBe(
+        "mine",
+      );
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -1397,6 +1599,31 @@ describe("pinned marketplace updates", () => {
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
+  });
+
+  test("orders large release tags exactly and rejects malformed versions", async () => {
+    const execution = {
+      env: {},
+      runGit: async () => ({
+        stdout: [
+          "9007199254740993.0.0",
+          "v9007199254740994.0.0+build-1",
+          "v9007199254740995.0.0-rc.1",
+          "v09007199254740996.0.0",
+          "vv9007199254740999.0.0",
+        ].join("\n"),
+      }),
+    };
+    expect(
+      await readHigherReleaseTag(
+        "/checkout",
+        "v9007199254740992.0.0",
+        execution,
+      ),
+    ).toBe("v9007199254740994.0.0+build-1");
+    expect(
+      await readHigherReleaseTag("/checkout", "v01.0.0", execution),
+    ).toBeUndefined();
   });
 
   test("reports the highest release above the pin, and no pre-release", async () => {
@@ -2074,5 +2301,32 @@ describe("marketplace update failures", () => {
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("sparse checkout configuration validation", () => {
+  test("rejects invalid boolean values before changing the checkout", async () => {
+    const execution = {
+      env: {},
+      runGit: async () => ({ stdout: "core.sparsecheckout\ninvalid\0" }),
+    };
+    await expect(
+      readMarketplaceSparseCheckoutState("checkout", execution),
+    ).rejects.toThrow("invalid sparse-checkout configuration");
+  });
+
+  test("rejects an enabled cone with no directories", async () => {
+    const execution = {
+      env: {},
+      runGit: async (args: readonly string[]) => ({
+        stdout:
+          args.includes("list") && args.includes("sparse-checkout")
+            ? ""
+            : "core.sparsecheckout\ntrue\0core.sparsecheckoutcone\ntrue\0",
+      }),
+    };
+    await expect(
+      readMarketplaceSparseCheckoutState("checkout", execution),
+    ).rejects.toThrow("unexpected empty sparse checkout");
   });
 });

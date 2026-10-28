@@ -28,6 +28,7 @@ const definition: PluginDefinition = Object.freeze({
     return ({ env, register }) => {
       const guards = new Map<string, ConfigValidator<unknown>>();
       const storage = createConfigStorage(resolveConfigPath({ env }));
+      let writes: Promise<void> = Promise.resolve();
 
       function guardFor(key: string): ConfigValidator<unknown> {
         const guard = guards.get(key);
@@ -63,14 +64,18 @@ const definition: PluginDefinition = Object.freeze({
               `Value for config key ${JSON.stringify(key)} is invalid`,
             );
           }
-          const document = await storage.read();
-          Object.defineProperty(document, key, {
-            configurable: true,
-            enumerable: true,
-            value,
-            writable: true,
+          const transaction = writes.then(async () => {
+            const document = await storage.read();
+            Object.defineProperty(document, key, {
+              configurable: true,
+              enumerable: true,
+              value,
+              writable: true,
+            });
+            await storage.write(document);
           });
-          await storage.write(document);
+          writes = transaction.catch(() => {});
+          await transaction;
         },
       };
 

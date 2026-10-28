@@ -27,6 +27,13 @@ import type {
   PluginDefinition,
 } from "../src/plugin.ts";
 import { coreDependencies } from "../src/plugins.ts";
+import {
+  frameRows as readFrameRows,
+  lastFrame as readLastFrame,
+  stripped,
+  TerminalOutput,
+  waitUntil,
+} from "./terminal.ts";
 
 const ESCAPE = String.fromCharCode(27);
 const BACKSPACE = String.fromCharCode(127);
@@ -45,6 +52,7 @@ class TerminalInput extends PassThrough {
   refs = 0;
   unrefs = 0;
   activeReferences = 0;
+  failRef = false;
   failRawMode = false;
   failRawModeDisable = false;
   failRawModeDisableOnce = false;
@@ -79,6 +87,7 @@ class TerminalInput extends PassThrough {
   }
 
   ref(): this {
+    if (this.failRef) throw new Error("ref failed");
     this.refs++;
     this.activeReferences++;
     this.referenced = true;
@@ -97,22 +106,7 @@ class TerminalInput extends PassThrough {
   }
 }
 
-class CapturedOutput extends PassThrough {
-  columns = 80;
-  rows = 24;
-  private output = "";
-
-  constructor(readonly isTTY = true) {
-    super();
-    this.on("data", (chunk) => {
-      this.output += chunk.toString();
-    });
-  }
-
-  text(): string {
-    return this.output;
-  }
-}
+class CapturedOutput extends TerminalOutput {}
 
 class AsyncFailingOutput extends CapturedOutput {
   failure: "callback" | "event" | undefined;
@@ -254,14 +248,7 @@ async function until(
   predicate: () => boolean,
   budget = DIALOG_BUDGET,
 ): Promise<void> {
-  const deadline = performance.now() + budget;
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() >= deadline) {
-      throw new Error("timed out waiting for dialog state");
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  }
+  await waitUntil(predicate, budget, "timed out waiting for dialog state");
 }
 
 /** The message every `runSelection` dialog carries, and so the row every one of
@@ -277,49 +264,10 @@ const PANEL = "╔═";
  * matches on what the user reads can ignore them. Built from the escape
  * character rather than written literally, so the source carries no control
  * character. */
-const CONTROL_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[a-zA-Z]`, "g");
-
-/** The text a frame puts on screen, with every styling and cursor sequence
- * removed. */
-function stripped(text: string): string {
-  return text.replace(CONTROL_SEQUENCE, "");
-}
-
-/** Every control sequence except the SGR styling codes: cursor movement,
- * erasure, and mode switches. Ink leaves its last row unterminated and
- * repositions the cursor before rewriting, so the previous frame's last row
- * shares a line of the byte stream with the next frame's first row and this is
- * the boundary between them. */
-const CURSOR_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[A-Za-ln-z]`, "g");
-
-/** Ink rewrites its whole output on every render, and every select frame opens
- * with the request message set into its top border, so the frame the dialog
- * left on screen begins at the start of the row carrying that message's last
- * occurrence. The row is taken whole, because the message now shares it with
- * the border either side of it, and from after the last repositioning ahead of
- * it, because the row the previous frame ended with is still on that line. */
-function lastFrame(stderr: CapturedOutput, anchor = SELECT_MESSAGE): string {
-  const output = stderr.text();
-  const found = output.lastIndexOf(anchor);
-  expect(found).toBeGreaterThanOrEqual(0);
-  const start = output.lastIndexOf("\n", found) + 1;
-  let boundary = 0;
-  for (const match of output.slice(start, found).matchAll(CURSOR_SEQUENCE)) {
-    boundary = (match.index as number) + match[0].length;
-  }
-  return output.slice(start + boundary);
-}
-
-/** The rows of the frame the dialog left on screen, so a test can count them
- * against the terminal's height. */
-function frameRows(
-  stderr: CapturedOutput,
-  anchor = SELECT_MESSAGE,
-): readonly string[] {
-  const rows = stripped(lastFrame(stderr, anchor)).split("\n");
-  while (rows.at(-1) === "") rows.pop();
-  return rows;
-}
+const lastFrame = (output: { text(): string }, anchor = SELECT_MESSAGE) =>
+  readLastFrame(output, anchor);
+const frameRows = (output: { text(): string }, anchor = SELECT_MESSAGE) =>
+  readFrameRows(output, anchor);
 
 /** The sequences the renderer wraps a dimmed run in, which is how a test tells
  * chrome from content and a pulsing indicator from a resting one. */
@@ -835,6 +783,53 @@ describe("bundled dialogs provider", () => {
       expect(result.stderr.text()).toBe("");
       expect(result.stdin.rawModes).toEqual([]);
     }
+  });
+
+  test("cleans up when the terminal cannot be referenced", async () => {
+    const stdin = new TerminalInput();
+    stdin.failRef = true;
+    const result = await runRejected([{ label: "One", value: 1 }], stdin);
+    expect((result.failure as Error).message).toContain("ref failed");
+    expect(stdin.activeReferences).toBe(0);
+    expect(stdin.listenerCount("data")).toBe(0);
+  });
+
+  test("reports a renderer that exits before the dialog settles", async () => {
+    const stdin = new TerminalInput();
+    const stderr = new CapturedOutput();
+    let failure: unknown;
+    const ink: CoreDependencies["ink"] = {
+      ...coreDependencies.ink,
+      render(...args: Parameters<CoreDependencies["ink"]["render"]>) {
+        const renderer = coreDependencies.ink.render(...args);
+        return { ...renderer, waitUntilExit: async () => {} };
+      },
+    };
+    const exitCode = await main(
+      ["choose"],
+      [
+        themePlugin,
+        dialogsPlugin,
+        consumer(async (dialogs) => {
+          try {
+            await dialogs.select({
+              message: "Early exit",
+              options: [{ label: "One", value: 1 }],
+            });
+          } catch (error) {
+            failure = error;
+          }
+        }),
+      ],
+      context(stdin, stderr),
+      { ...coreDependencies, ink },
+    );
+    expect(exitCode).toBe(0);
+    expect((failure as Error).message).toContain(
+      "renderer exited before the dialog completed",
+    );
+    expect(stdin.listenerCount("data")).toBe(0);
+    expect(stdin.activeReferences).toBe(0);
   });
 
   test("rejects render and interaction failures without exiting", async () => {
@@ -4940,6 +4935,55 @@ describe("dialog animations", () => {
     expect(phases).toEqual(["shown", "hidden", "shown"]);
     expect(result.value).toBe("alpha");
   });
+
+  test("blinks a text leaf caret when its parent has no other animation", async () => {
+    const phases: boolean[] = [];
+    let transitionFailure: unknown;
+    const probe = trackTimers();
+    try {
+      const result = await runSelection(
+        [
+          {
+            label: "Open",
+            value: "open",
+            dialog: { type: "text", name: "leaf", message: "Leaf" },
+          },
+        ],
+        [
+          async (stderr) => {
+            await until(() => stderr.text().includes("Open"));
+          },
+          RIGHT,
+          async (stderr) => {
+            try {
+              await until(() => stderr.text().includes("Leaf"));
+              const caret = () => stripped(lastFrame(stderr)).includes(CARET);
+              await until(caret, PHASE_BUDGET);
+              phases.push(true);
+              await until(() => !caret(), PHASE_BUDGET);
+              phases.push(false);
+              await until(caret, PHASE_BUDGET);
+              phases.push(true);
+            } catch (error) {
+              // Finish the dialog before asserting, even if a phase stalls.
+              transitionFailure = error;
+            }
+          },
+          ESCAPE,
+          async (stderr) => {
+            await until(() => !stripped(lastFrame(stderr)).includes("Leaf"));
+          },
+          ESCAPE,
+        ],
+      );
+      expect(result.value).toBeUndefined();
+      expect(probe.live()).toBe(0);
+      expect(transitionFailure).toBeUndefined();
+      expect(phases).toEqual([true, false, true]);
+    } finally {
+      probe.restore();
+    }
+  }, 10000);
 
   test("shows a keystroke and its caret on the render after it, mid-blink", async () => {
     let typed = "";

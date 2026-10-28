@@ -26,6 +26,14 @@ import type {
   PluginDefinition,
 } from "../src/plugin.ts";
 import { coreDependencies } from "../src/plugins.ts";
+import {
+  pause,
+  frameRows as readFrameRows,
+  lastFrame as readLastFrame,
+  stripped,
+  TerminalOutput,
+  waitUntil,
+} from "./terminal.ts";
 
 /**
  * Multi-select, driven through `select` on captured terminal streams and
@@ -68,69 +76,19 @@ class TerminalInput extends PassThrough {
   }
 }
 
-class TerminalOutput extends PassThrough {
-  readonly isTTY = true;
-  columns = 80;
-  rows = 24;
-  #output = "";
-
-  constructor() {
-    super();
-    this.on("data", (chunk) => {
-      this.#output += chunk.toString();
-    });
-  }
-
-  text(): string {
-    return this.#output;
-  }
-}
-
-function pause(milliseconds: number): Promise<void> {
-  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-}
-
 /** Generous, because nothing it waits behind is an animation. */
 const BUDGET = animationInterval * 20;
 
 async function until(predicate: () => boolean): Promise<void> {
-  const deadline = performance.now() + BUDGET;
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() >= deadline) {
-      throw new Error("timed out waiting for dialog state");
-    }
-    await pause(1);
-  }
+  await waitUntil(predicate, BUDGET, "timed out waiting for dialog state");
 }
 
-const CONTROL_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[a-zA-Z]`, "g");
-const CURSOR_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[A-Za-ln-z]`, "g");
 const STYLING_SEQUENCE = new RegExp(`${ESCAPE}\\[([\\d;]*)m`, "g");
 
-function stripped(text: string): string {
-  return text.replace(CONTROL_SEQUENCE, "");
-}
-
-/** The frame on screen, from the start of the row carrying the last
- * occurrence of `anchor`: Ink rewrites its whole output on every render. */
-function lastFrame(output: TerminalOutput, anchor = PANEL): string {
-  const text = output.text();
-  const found = text.lastIndexOf(anchor);
-  expect(found).toBeGreaterThanOrEqual(0);
-  const start = text.lastIndexOf("\n", found) + 1;
-  let boundary = 0;
-  for (const match of text.slice(start, found).matchAll(CURSOR_SEQUENCE)) {
-    boundary = (match.index as number) + match[0].length;
-  }
-  return text.slice(start + boundary);
-}
-
-function frameRows(output: TerminalOutput, anchor = PANEL): readonly string[] {
-  const rows = stripped(lastFrame(output, anchor)).split("\n");
-  while (rows.at(-1) === "") rows.pop();
-  return rows;
-}
+const lastFrame = (output: { text(): string }, anchor = PANEL) =>
+  readLastFrame(output, anchor);
+const frameRows = (output: { text(): string }, anchor = PANEL) =>
+  readFrameRows(output, anchor);
 
 /** Whether `frame` has been written yet and contains `needle`. */
 function shows(output: TerminalOutput, needle: string, anchor = PANEL) {
