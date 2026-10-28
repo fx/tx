@@ -20,7 +20,6 @@
 | 0043 | [Fix Config Writes and Text Leaves](changes/0043-fix-config-writes-and-text-leaves.md) | [Config](specs/config/) | complete | 0018, 0023 |
 | 0044 | [Consolidate Marketplace and Terminal Helpers](changes/0044-consolidate-marketplace-and-terminal-helpers.md) | [Plugin System](specs/plugin-system/) | complete | 0042, 0043 |
 | 0045 | [Organize Change History](changes/0045-organize-change-history.md) | [Architecture](specs/architecture/) | complete | — |
-
 | 0046 | [Adopt Upstream UI Controls](changes/0046-adopt-upstream-ui-controls.md) | [Architecture](specs/architecture/) | complete | 0042 |
 
 <details>
