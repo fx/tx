@@ -367,3 +367,12 @@ changes:
     status: complete
     depends_on:
       - "0040"
+  - id: "0043"
+    name: fix-config-writes-and-text-leaves
+    path: changes/0043-fix-config-writes-and-text-leaves.md
+    description: Serialize same-instance config writes and restore text leaf caret animation.
+    spec: config
+    status: complete
+    depends_on:
+      - "0018"
+      - "0023"

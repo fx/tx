@@ -4941,6 +4941,50 @@ describe("dialog animations", () => {
     expect(result.value).toBe("alpha");
   });
 
+  test("blinks a text leaf caret when its parent has no other animation", async () => {
+    const phases: boolean[] = [];
+    const probe = trackTimers();
+    try {
+      const result = await runSelection(
+        [
+          {
+            label: "Open",
+            value: "open",
+            dialog: { type: "text", name: "leaf", message: "Leaf" },
+          },
+        ],
+        [
+          async (stderr) => {
+            await until(() => stderr.text().includes("Open"));
+          },
+          RIGHT,
+          async (stderr) => {
+            await until(() => stderr.text().includes("Leaf"));
+            phases.push(stripped(lastFrame(stderr)).includes(CARET));
+            await new Promise<void>((resolve) =>
+              setTimeout(resolve, animationInterval + 100),
+            );
+            phases.push(stripped(lastFrame(stderr)).includes(CARET));
+            await new Promise<void>((resolve) =>
+              setTimeout(resolve, animationInterval + 100),
+            );
+            phases.push(stripped(lastFrame(stderr)).includes(CARET));
+          },
+          ESCAPE,
+          async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+          },
+          ESCAPE,
+        ],
+      );
+      expect(result.value).toBeUndefined();
+      expect(phases).toEqual([true, false, true]);
+      expect(probe.live()).toBe(0);
+    } finally {
+      probe.restore();
+    }
+  });
+
   test("shows a keystroke and its caret on the render after it, mid-blink", async () => {
     let typed = "";
     const result = await runEntry({ message: "Branch" }, [

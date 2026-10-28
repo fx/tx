@@ -687,7 +687,7 @@ export function createSelectView(
       isActive:
         !settled &&
         (flashing ||
-          (isActive && (filterShown || collectingField || hidden > 0))),
+          (isActive && (filterShown || entryOnScreen || hidden > 0))),
     });
     /** The flash ends on elapsed time reaching its duration, never on a frame
      * number: a tick landing inside the renderer's render throttle is dropped
