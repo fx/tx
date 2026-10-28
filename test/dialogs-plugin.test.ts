@@ -4943,6 +4943,7 @@ describe("dialog animations", () => {
 
   test("blinks a text leaf caret when its parent has no other animation", async () => {
     const phases: boolean[] = [];
+    let transitionFailure: unknown;
     const probe = trackTimers();
     try {
       const result = await runSelection(
@@ -4959,31 +4960,35 @@ describe("dialog animations", () => {
           },
           RIGHT,
           async (stderr) => {
-            await until(() => stderr.text().includes("Leaf"));
-            phases.push(stripped(lastFrame(stderr)).includes(CARET));
-            await new Promise<void>((resolve) =>
-              setTimeout(resolve, animationInterval + 100),
-            );
-            phases.push(stripped(lastFrame(stderr)).includes(CARET));
-            await new Promise<void>((resolve) =>
-              setTimeout(resolve, animationInterval + 100),
-            );
-            phases.push(stripped(lastFrame(stderr)).includes(CARET));
+            try {
+              await until(() => stderr.text().includes("Leaf"));
+              const caret = () => stripped(lastFrame(stderr)).includes(CARET);
+              await until(caret, PHASE_BUDGET);
+              phases.push(true);
+              await until(() => !caret(), PHASE_BUDGET);
+              phases.push(false);
+              await until(caret, PHASE_BUDGET);
+              phases.push(true);
+            } catch (error) {
+              // Finish the dialog before asserting, even if a phase stalls.
+              transitionFailure = error;
+            }
           },
           ESCAPE,
-          async () => {
-            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+          async (stderr) => {
+            await until(() => !stripped(lastFrame(stderr)).includes("Leaf"));
           },
           ESCAPE,
         ],
       );
       expect(result.value).toBeUndefined();
-      expect(phases).toEqual([true, false, true]);
       expect(probe.live()).toBe(0);
+      expect(transitionFailure).toBeUndefined();
+      expect(phases).toEqual([true, false, true]);
     } finally {
       probe.restore();
     }
-  });
+  }, 10000);
 
   test("shows a keystroke and its caret on the render after it, mid-blink", async () => {
     let typed = "";
