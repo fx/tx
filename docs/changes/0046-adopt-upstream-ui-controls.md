@@ -5,7 +5,7 @@
 Use the shared UI library's command and theme controls on the landing site.
 
 **Spec:** [Architecture](../specs/architecture/)
-**Status:** in-progress
+**Status:** complete
 **Depends On:** 0042
 
 ## Motivation
@@ -19,7 +19,7 @@ Replace the local controls with the published `@fx/ui` APIs and scan the site so
 ## Tasks
 
 - [x] Integrate the upstream controls and explicit Tailwind sources; verify against a local package build.
-- [ ] Pin the published preview and complete unified and browser verification.
+- [x] Pin the published preview and complete unified and browser verification.
 
 ## References
 

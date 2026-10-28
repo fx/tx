@@ -404,6 +404,6 @@ changes:
     path: changes/0046-adopt-upstream-ui-controls.md
     description: Adopt shared command and theme controls and explicitly scan site and library sources.
     spec: architecture
-    status: in-progress
+    status: complete
     depends_on:
       - "0042"
