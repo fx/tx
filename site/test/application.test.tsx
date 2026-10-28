@@ -1,8 +1,15 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { ThemeProvider } from "@fx/ui";
 import { act, cleanup, render, screen } from "@testing-library/react";
+import * as ReactDOM from "react-dom/client";
 import { App } from "../src/App";
 import config from "../vite.config";
+
+afterEach(() => {
+  cleanup();
+  document.body.innerHTML = "";
+  window.localStorage.clear();
+});
 
 test("renders the application and its installation instructions", () => {
   render(
@@ -12,7 +19,6 @@ test("renders the application and its installation instructions", () => {
   );
   expect(screen.getByText("Extensible command-line toolbox.")).toBeDefined();
   expect(screen.getByText("mise use -g github:fx/tx")).toBeDefined();
-  cleanup();
 });
 
 test("keeps development server access restricted to tailnet hosts", () => {
@@ -21,12 +27,28 @@ test("keeps development server access restricted to tailnet hosts", () => {
 
 test("mounts the application into the document root", async () => {
   document.body.innerHTML = '<div id="root"></div>';
-  await act(async () => {
-    await import("../src/main");
-  });
-  expect(
-    await screen.findByText("Extensible command-line toolbox."),
-  ).toBeDefined();
+  const originalCreateRoot = ReactDOM.createRoot;
+  let mounted: ReturnType<typeof originalCreateRoot> | undefined;
+  const createRoot = spyOn(ReactDOM, "createRoot").mockImplementation(
+    (container, options) => {
+      mounted = originalCreateRoot(container, options);
+      return mounted;
+    },
+  );
+  try {
+    await act(async () => {
+      await import("../src/main");
+    });
+    expect(
+      await screen.findByText("Extensible command-line toolbox."),
+    ).toBeDefined();
+  } finally {
+    try {
+      await act(() => mounted?.unmount());
+    } finally {
+      createRoot.mockRestore();
+    }
+  }
 });
 
 test("loads every site source module for coverage", async () => {
