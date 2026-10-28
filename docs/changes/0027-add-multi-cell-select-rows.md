@@ -114,8 +114,8 @@ The `chrome` variable is also the second dependency. [Change 0026](./0026-add-th
 
 ## Open Questions
 
-- [ ] Whether a header should be allowed on a column of label options, rendering as a single-field header, rather than rejected — rejecting is stricter and easier to relax later, which is why the spec rejects it.
-- [ ] Whether the marker that says an option opens a sub-dialog should sit on the right edge of the whole column, as it does today, or on the right edge of the last field — they differ once the column is stretched to fill the panel.
+- [ ] Whether a header should be allowed on a column of label options, rendering as a single-field header, rather than rejected — rejecting is stricter and easier to relax later, which is why the spec rejects it. **Follow-up:** Maintainers should revisit when a consumer needs single-field headers for label options. A later change must decide any behavior.
+- [ ] Whether the marker that says an option opens a sub-dialog should sit on the right edge of the whole column, as it does today, or on the right edge of the last field — they differ once the column is stretched to fill the panel. **Follow-up:** Maintainers should revisit when a consumer supplies evidence for marker placement in stretched columns. A later change must decide any behavior.
 
 ## References
 

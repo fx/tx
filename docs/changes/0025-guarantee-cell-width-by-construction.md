@@ -85,7 +85,7 @@ The affordability threshold is the marker's reserved width plus one column of te
 
 ## Open Questions
 
-- [ ] Whether the same by-construction rule should be asserted for the `no match` row, which goes through `cell()` with `marked` false and is therefore already safe — asserting it would document the intent rather than catch a defect.
+- [ ] Whether the same by-construction rule should be asserted for the `no match` row, which goes through `cell()` with `marked` false and is therefore already safe — asserting it would document the intent rather than catch a defect. **Follow-up:** Maintainers should revisit when a separate invariant test would catch a demonstrated regression. A later change must decide any behavior.
 
 ## References
 

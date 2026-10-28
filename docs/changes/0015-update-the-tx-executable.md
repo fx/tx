@@ -159,10 +159,10 @@ Every failure path removes the staged file, through a helper that swallows a ref
 
 ## Open Questions
 
-- [ ] Should the participant recognize package managers beyond the two documented installation paths? Each one added is a detection rule and a delegation command that only its own users can verify.
-- [ ] Should a delegated upgrade re-resolve the executable afterwards to report the installed version, rather than reporting what the manager said? It is one more subprocess, and the manager's own output is what the user would have seen had they run it themselves.
-- [ ] Should the release lookup fall back to listing releases when the latest one is a draft or a pre-release? The project publishes neither today.
-- [ ] Should `tx update` report the release notes, or a link to them, after updating the executable? The release payload already carries them.
+- [ ] Should the participant recognize package managers beyond the two documented installation paths? Each one added is a detection rule and a delegation command that only its own users can verify. **Follow-up:** Maintainers should revisit when a concrete installation path needs another package manager. A later change must decide any behavior.
+- [x] Should a delegated upgrade re-resolve the executable afterwards to report the installed version, rather than reporting what the manager said? It is one more subprocess, and the manager's own output is what the user would have seen had they run it themselves. **Resolved:** delegated upgrades re-observe the installed versions; see [0022](./0022-exempt-and-verify-the-tx-self-update.md) and [Updates: Executable Updates](../specs/updates/index.md#executable-updates).
+- [ ] Should the release lookup fall back to listing releases when the latest one is a draft or a pre-release? The project publishes neither today. **Follow-up:** Maintainers should revisit when the project publishes drafts or prereleases requiring fallback. A later change must decide any behavior.
+- [ ] Should `tx update` report the release notes, or a link to them, after updating the executable? The release payload already carries them. **Follow-up:** Maintainers should revisit when users need release notes in update output. A later change must decide any behavior.
 
 ## References
 

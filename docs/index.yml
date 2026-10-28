@@ -392,6 +392,13 @@ changes:
     depends_on:
       - "0042"
       - "0043"
+  - id: "0045"
+    name: organize-change-history
+    path: changes/0045-organize-change-history.md
+    description: Group completed change navigation and triage historical open questions against current evidence.
+    spec: architecture
+    status: complete
+    depends_on: []
   - id: "0046"
     name: adopt-upstream-ui-controls
     path: changes/0046-adopt-upstream-ui-controls.md

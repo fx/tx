@@ -172,9 +172,9 @@ The update participant changes in one place: resolving the target. Unpinned, the
 
 ## Open Questions
 
-- [ ] Should `marketplace list` mark which marketplaces are pinned, beyond showing the version they hold? A column of mostly-empty values against a marker in the version label is a formatting decision worth making with real output in front of us.
-- [ ] Should a pin be settable at add time for a source that also needs `--name`, in one command? It already is; the question is whether the two interact in a way the manual has to spell out.
-- [ ] Should a marketplace be able to opt into pre-release tags being reported? They are excluded outright today, which is right for a user tracking releases and wrong for one testing a marketplace's next version — and an opt-in needs somewhere to live that is not a pin.
+- [ ] Should `marketplace list` mark which marketplaces are pinned, beyond showing the version they hold? A column of mostly-empty values against a marker in the version label is a formatting decision worth making with real output in front of us. **Follow-up:** Maintainers should revisit when users need a pin indicator in list output. A later change must decide any behavior.
+- [ ] Should a pin be settable at add time for a source that also needs `--name`, in one command? It already is; the question is whether the two interact in a way the manual has to spell out. **Follow-up:** Maintainers should revisit when the manual needs an explicit combined --name and pin example. A later change must decide any behavior.
+- [ ] Should a marketplace be able to opt into pre-release tags being reported? They are excluded outright today, which is right for a user tracking releases and wrong for one testing a marketplace's next version — and an opt-in needs somewhere to live that is not a pin. **Follow-up:** Maintainers should revisit when a consumer needs prerelease reporting and an opt-in can be designed. A later change must decide any behavior.
 
 ## References
 

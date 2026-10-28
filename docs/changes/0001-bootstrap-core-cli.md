@@ -89,7 +89,7 @@ The root help renderer traverses the same registry rather than maintaining a sec
 
 ## Open Questions
 
-- [ ] Which platforms should the first release workflow build after the local executable is proven?
+- [x] Which platforms should the first release workflow build after the local executable is proven? **Resolved:** The first release published Linux x64 ([0004](./0004-automate-versioning-and-publishing.md)); Linux arm64 was added later. See [Architecture: Runtime and Distribution](../specs/architecture/index.md#runtime-and-distribution) and [0032](./0032-publish-a-linux-arm64-executable.md).
 
 ## References
 

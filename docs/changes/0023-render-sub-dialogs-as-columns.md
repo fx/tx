@@ -161,8 +161,8 @@ The select view keeps its stack of levels and stops treating the stack as a stac
 
 ## Open Questions
 
-- [ ] Only the driven column reports overflow, so a column behind it whose list runs past the band shows no count at all: the reader sees a list that stops without being told it was cut. The counts are set into the frame's two edges, which have room for one column's pair and no obvious place for a second, so reporting for every column needs somewhere to put the numbers before it needs a rule.
-- [ ] A filter cleared back to empty hides again rather than staying on screen for the column it was used in, so the edge it occupied is handed back to the title mid-keystroke. Whether that is right depends on whether a reader who has emptied the filter has finished with it; it is the same question [Dialogs](../specs/dialogs/index.md#open-questions) already records, and real lists from a bundled consumer would answer it.
+- [ ] Only the driven column reports overflow, so a column behind it whose list runs past the band shows no count at all: the reader sees a list that stops without being told it was cut. The counts are set into the frame's two edges, which have room for one column's pair and no obvious place for a second, so reporting for every column needs somewhere to put the numbers before it needs a rule. **Follow-up:** Maintainers should revisit when a presentation for overflow counts in inactive columns is designed. A later change must decide any behavior.
+- [ ] A filter cleared back to empty hides again rather than staying on screen for the column it was used in, so the edge it occupied is handed back to the title mid-keystroke. Whether that is right depends on whether a reader who has emptied the filter has finished with it; it is the same question [Dialogs](../specs/dialogs/index.md#open-questions) already records, and real lists from a bundled consumer would answer it. **Follow-up:** Maintainers should revisit when a bundled consumer supplies evidence about clearing filters. A later change must decide any behavior.
 
 ## References
 
