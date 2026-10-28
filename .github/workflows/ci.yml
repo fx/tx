@@ -9,13 +9,12 @@ name: CI
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    outputs:
-      documentation_only: ${{ steps.scope.outputs.documentation_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,27 +56,11 @@ jobs:
           bun-version: 1.4.4
       - run: bun ci
         if: steps.scope.outputs.documentation_only != 'true'
-      - run: bun run check
+      - name: Install site dependencies
         if: steps.scope.outputs.documentation_only != 'true'
-
-  site:
-    name: Site
-    needs: ci
-    if: needs.ci.outputs.documentation_only != 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-      - name: Install
         working-directory: site
         env:
           GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: bun install --frozen-lockfile
-      - name: Test and build
-        working-directory: site
-        run: bun run test && bun run build
+      - run: bun run check
+        if: steps.scope.outputs.documentation_only != 'true'

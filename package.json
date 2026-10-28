@@ -67,7 +67,7 @@
     "test": "bun test ./test",
     "build": "bun build.ts",
     "demo": "bun demo/index.ts",
-    "check": "bun run lint && bun run typecheck && bun run test && bun run build"
+    "check": "bun run lint && bun run typecheck && bun run test && bun run build && bun run --cwd site test && bun run --cwd site build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.3",
