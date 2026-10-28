@@ -14,6 +14,14 @@ import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CoreDependencies, PluginDefinition } from "../src/plugin.ts";
 import { coreDependencies } from "../src/plugins.ts";
+import {
+  frameRows,
+  lastFrame,
+  pause,
+  stripped,
+  TerminalOutput,
+  waitUntil,
+} from "./terminal.ts";
 
 /**
  * The embedded dialogs, driven the way a host plugin drives them: a plugin
@@ -57,21 +65,9 @@ class HostInput extends PassThrough {
 }
 
 /** The host's own terminal: what its render session draws on. */
-class HostOutput extends PassThrough {
-  readonly isTTY = true;
-  columns = 120;
-  rows = 40;
-  #output = "";
-
+class HostOutput extends TerminalOutput {
   constructor() {
-    super();
-    this.on("data", (chunk) => {
-      this.#output += chunk.toString();
-    });
-  }
-
-  text(): string {
-    return this.#output;
+    super(true, 120, 40);
   }
 }
 
@@ -256,51 +252,12 @@ function controlled<S>(
   };
 }
 
-async function pause(milliseconds: number): Promise<void> {
-  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-}
-
 /** Generous for the same reason the function form's own tests are: none of
  * what this waits behind is an animation. */
 const BUDGET = animationInterval * 20;
 
 async function until(predicate: () => boolean): Promise<void> {
-  const deadline = performance.now() + BUDGET;
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() >= deadline) {
-      throw new Error("timed out waiting for the host session");
-    }
-    await pause(1);
-  }
-}
-
-const CONTROL_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[a-zA-Z]`, "g");
-const CURSOR_SEQUENCE = new RegExp(`${ESCAPE}\\[[\\d;?]*[A-Za-ln-z]`, "g");
-
-function stripped(text: string): string {
-  return text.replace(CONTROL_SEQUENCE, "");
-}
-
-/** The frame the session left on screen, from the start of the row carrying
- * `anchor`'s last occurrence: Ink rewrites its whole output on every render,
- * and every frame these tests read opens with that row. */
-function lastFrame(output: HostOutput, anchor: string): string {
-  const text = output.text();
-  const found = text.lastIndexOf(anchor);
-  expect(found).toBeGreaterThanOrEqual(0);
-  const start = text.lastIndexOf("\n", found) + 1;
-  let boundary = 0;
-  for (const match of text.slice(start, found).matchAll(CURSOR_SEQUENCE)) {
-    boundary = (match.index as number) + match[0].length;
-  }
-  return text.slice(start + boundary);
-}
-
-function frameRows(output: HostOutput, anchor: string): readonly string[] {
-  const rows = stripped(lastFrame(output, anchor)).split("\n");
-  while (rows.at(-1) === "") rows.pop();
-  return rows;
+  await waitUntil(predicate, BUDGET, "timed out waiting for the host session");
 }
 
 /** The text of every inverted run in `frame`: the cursor bars. */

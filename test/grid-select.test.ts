@@ -13,6 +13,7 @@ import {
 import themePlugin from "../plugins/theme/index.ts";
 import { main } from "../src/cli.ts";
 import type { CommandContext, PluginDefinition } from "../src/plugin.ts";
+import { TerminalOutput, waitUntil } from "./terminal.ts";
 
 /**
  * The capability is typed by the contract the package publishes at the key it
@@ -70,24 +71,6 @@ class TerminalInput extends PassThrough {
 
 /** A terminal's output side, of a fixed size, keeping everything written to it
  * so a test can read what was on screen. */
-class TerminalOutput extends PassThrough {
-  readonly isTTY: boolean;
-  readonly columns = 80;
-  readonly rows = 24;
-  #written = "";
-
-  constructor(isTTY = true) {
-    super();
-    this.isTTY = isTTY;
-    this.on("data", (chunk) => {
-      this.#written += chunk.toString();
-    });
-  }
-
-  text(): string {
-    return this.#written;
-  }
-}
 
 function commandContext(
   stdin: TerminalInput,
@@ -114,14 +97,11 @@ function commandContext(
 const DIALOG_BUDGET = animationInterval * 20;
 
 async function until(predicate: () => boolean): Promise<void> {
-  const deadline = performance.now() + DIALOG_BUDGET;
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() >= deadline) {
-      throw new Error("timed out waiting for the interactive grid");
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  }
+  await waitUntil(
+    predicate,
+    DIALOG_BUDGET,
+    "timed out waiting for the interactive grid",
+  );
 }
 
 /** Every control sequence the renderer writes around a frame, so a test that
