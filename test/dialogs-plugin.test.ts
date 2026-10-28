@@ -4990,6 +4990,55 @@ describe("dialog animations", () => {
     expect(result.value).toBe("alpha");
   });
 
+  test("blinks a text leaf caret when its parent has no other animation", async () => {
+    const phases: boolean[] = [];
+    let transitionFailure: unknown;
+    const probe = trackTimers();
+    try {
+      const result = await runSelection(
+        [
+          {
+            label: "Open",
+            value: "open",
+            dialog: { type: "text", name: "leaf", message: "Leaf" },
+          },
+        ],
+        [
+          async (stderr) => {
+            await until(() => stderr.text().includes("Open"));
+          },
+          RIGHT,
+          async (stderr) => {
+            try {
+              await until(() => stderr.text().includes("Leaf"));
+              const caret = () => stripped(lastFrame(stderr)).includes(CARET);
+              await until(caret, PHASE_BUDGET);
+              phases.push(true);
+              await until(() => !caret(), PHASE_BUDGET);
+              phases.push(false);
+              await until(caret, PHASE_BUDGET);
+              phases.push(true);
+            } catch (error) {
+              // Finish the dialog before asserting, even if a phase stalls.
+              transitionFailure = error;
+            }
+          },
+          ESCAPE,
+          async (stderr) => {
+            await until(() => !stripped(lastFrame(stderr)).includes("Leaf"));
+          },
+          ESCAPE,
+        ],
+      );
+      expect(result.value).toBeUndefined();
+      expect(probe.live()).toBe(0);
+      expect(transitionFailure).toBeUndefined();
+      expect(phases).toEqual([true, false, true]);
+    } finally {
+      probe.restore();
+    }
+  }, 10000);
+
   test("shows a keystroke and its caret on the render after it, mid-blink", async () => {
     let typed = "";
     const result = await runEntry({ message: "Branch" }, [

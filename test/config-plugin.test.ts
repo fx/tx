@@ -286,6 +286,35 @@ describe("bundled config provider", () => {
     expect(await readdir(join(dataHome, "tx"))).toEqual(["config.json"]);
   });
 
+  test("serializes concurrent writes and recovers from failures", async () => {
+    await seedDocument(dataHome, '{"foreign":{"kept":true}}');
+    const config = await obtainConfig(dataHome);
+    config.define("a", isNumber);
+    config.define("b", isNumber);
+    await Promise.all([
+      config.write("a", 1),
+      config.write("b", 2),
+      config.write("a", 3),
+    ]);
+    expect(JSON.parse(await readFile(documentPath(dataHome), "utf8"))).toEqual({
+      foreign: { kept: true },
+      a: 3,
+      b: 2,
+    });
+    const invalid = config.write("a", "invalid");
+    const following = config.write("b", 4);
+    await expect(invalid).rejects.toThrow("is invalid");
+    await following;
+    await writeFile(documentPath(dataHome), "{broken");
+    await expect(config.write("a", 5)).rejects.toThrow();
+    await seedDocument(dataHome, '{"foreign":true}');
+    await config.write("a", 6);
+    expect(JSON.parse(await readFile(documentPath(dataHome), "utf8"))).toEqual({
+      foreign: true,
+      a: 6,
+    });
+  });
+
   test("leaves a complete JSON document after concurrent writers race", async () => {
     const writers = await Promise.all(
       Array.from({ length: 24 }, async () => {
